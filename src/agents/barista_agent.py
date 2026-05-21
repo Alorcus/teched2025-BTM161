@@ -164,14 +164,14 @@ def start_preparation(order_id: str) -> str:
     if not order:
         return tool_response("error", f"Order {order_id} not found", order_id)
     
-    # Allow preparation if inventory is confirmed OR if we're retrying
+    # Allow preparation if inventory is confirmed OR if we're retrying after a failure
     is_retry = ORDER_STATUS_CACHE.get(order_id, {}).get("attempt_count", 0) > 0
     is_inventory_confirmed = order.status == OrderStatus.INVENTORY_CONFIRMED
-    is_in_preparation = order.status == OrderStatus.IN_PREPARATION
-    
-    if not is_inventory_confirmed and not (is_in_preparation and is_retry):
+    is_retryable = order.status in (OrderStatus.IN_PREPARATION, OrderStatus.PREPARATION_ERROR)
+
+    if not is_inventory_confirmed and not (is_retryable and is_retry):
         return tool_response(
-            "error", 
+            "error",
             f"Cannot prepare order {order_id}. Current status: {order.status}",
             order_id
         )
@@ -266,8 +266,10 @@ def start_preparation(order_id: str) -> str:
                     
             except Exception as e:
                 logger.error(f"Status check error: {e}")
-    
-    # Timeout
+
+    # Timeout — mark as failed so retries are possible
+    order.status = OrderStatus.PREPARATION_ERROR
+    save_order(order)
     return tool_response(
         "error",
         "Brewing timed out. Please try again.",
@@ -312,7 +314,7 @@ DEFAULT_PROMPT = """You are a barista agent responsible for coffee preparation.
 
 WORKFLOW:
 1. Call start_preparation(order_id) - This starts brewing AND automatically waits for completion
-   - It will take about 15 seconds (the coffee needs time to brew)
+   - It will take a few seconds (the coffee needs time to brew)
    - You will see "Brewing started..." then the tool will wait
    - It returns either "ready" or "failed"
 
@@ -324,12 +326,13 @@ WORKFLOW:
    - Call start_preparation(order_id) again (the attempt count will auto-increment)
 
 4. If customer wants customer service:
-   - Call transfer_to_customer_service(order_id)
+   - Call transfer_to_customer_service(context_summary, expectation)
+   - context_summary: summarize what happened (e.g. "Brewing failed twice for order X")
+   - expectation: what should customer service do (e.g. "Help the customer with alternatives")
 
 IMPORTANT NOTES:
 - The start_preparation tool handles all the waiting and checking automatically
 - You don't need to call any other status checking tools
-- The customer will only see your initial "Brewing started" message and then the final result
 - Be honest about failures and give customers clear choices
 - Don't call start_preparation without asking the customer if he wants to try
 

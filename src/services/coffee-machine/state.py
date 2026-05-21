@@ -12,7 +12,7 @@ logger = logging.getLogger("coffee_shop.coffee_machine.state")
 # ----------------------------
 # Config
 # ----------------------------
-SEED = int(os.environ.get("COFFEE_MACHINE_SEED", "42"))
+SEED = int(os.environ.get("COFFEE_MACHINE_SEED", "100"))
 FAILURE_RATE = 0.2  # 20% failure rate
 
 rng = random.Random(SEED)
