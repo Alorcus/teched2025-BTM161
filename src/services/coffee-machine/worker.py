@@ -1,5 +1,8 @@
 import time
+import logging
 from state import jobs, get_job
+
+logger = logging.getLogger("coffee_shop.coffee_machine.worker")
 
 POLL_INTERVAL = 1.0
 
@@ -11,11 +14,12 @@ def run_worker():
     """
 
     while True:
-        # iterate over a copy to avoid mutation issues
         for job_id in list(jobs.keys()):
+            if jobs[job_id].get("logged_finished"):
+                continue
             try:
-                get_job(job_id)  # triggers OCEL transitions
+                get_job(job_id)
             except Exception as e:
-                print(f"[worker] error processing {job_id}: {e}")
+                logger.error("Error processing job %s: %s", job_id[:8], e)
 
         time.sleep(POLL_INTERVAL)

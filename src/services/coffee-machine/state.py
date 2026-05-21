@@ -2,14 +2,17 @@ import time
 import uuid
 import random
 import os
+import logging
 from collections import defaultdict
 
 from logger import log_event
 
+logger = logging.getLogger("coffee_shop.coffee_machine.state")
+
 # ----------------------------
 # Config
 # ----------------------------
-SEED = int(time.time() * 1000) % 1000000  # Based on current time
+SEED = int(os.environ.get("COFFEE_MACHINE_SEED", "42"))
 FAILURE_RATE = 0.2  # 20% failure rate
 
 rng = random.Random(SEED)
@@ -41,6 +44,7 @@ def emit_event(job, activity: str, duration: float = None):
     log_event(**event)
 
     job_events[job["job_id"]].append(event)
+    logger.debug("Event emitted: %s for job %s (case %s)", activity, job["job_id"][:8], job["correlation_id"])
 
     return event
 
@@ -55,7 +59,7 @@ def create_job(drink: str, correlation_id: str):
     random_val = rng.random()
     will_fail = random_val < FAILURE_RATE
 
-    print(f"[DEBUG] Job {job_id[:8]}: random={random_val:.4f}, will_fail={will_fail}, FAILURE_RATE={FAILURE_RATE}")
+    logger.debug("Job %s: random=%.4f, will_fail=%s, FAILURE_RATE=%s", job_id[:8], random_val, will_fail, FAILURE_RATE)
 
     job = {
         "job_id": job_id,
@@ -77,6 +81,7 @@ def create_job(drink: str, correlation_id: str):
 
     # OCEL lifecycle start
     emit_event(job, "user_prompt")
+    logger.info("Job created: %s (drink=%s, duration=%.1fs)", job_id[:8], drink, duration)
 
     return job
 
@@ -88,8 +93,7 @@ def compute_status(job):
     now = time.time()
     start = job["created_at"]
     duration = job["duration"]
-    elapsed = now - start  # Calculate elapsed time
-    
+
     if now < start + duration:
         return "brewing"
 
@@ -129,6 +133,7 @@ def get_job(job_id: str):
 
         job["finished_at"] = job["created_at"] + job["duration"]
         job["logged_finished"] = True
+        logger.info("Job %s finished: %s", job_id[:8], status)
 
     return result
 
