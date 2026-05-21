@@ -16,7 +16,7 @@ from langchain_core.tools import tool
 from src.llm import bind_tools_sequential
 
 from .shared_components import (
-    OrderIdSchema, 
+    OrderIdSchema,
     OrderStatus,
     transfer_to_agent,
 )
@@ -44,14 +44,16 @@ def is_machine_running() -> bool:
     except:
         return False
 
+
 def check_port_in_use(port: int) -> bool:
     """Check if a port is already in use."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         try:
-            s.bind(('127.0.0.1', port))
+            s.bind(("127.0.0.1", port))
             return False
         except socket.error:
             return True
+
 
 def start_coffee_machine() -> bool:
     """Start the coffee machine uvicorn server as a subprocess."""
@@ -64,21 +66,30 @@ def start_coffee_machine() -> bool:
 
         # Check if port is in use but machine not responding (stuck process)
         if check_port_in_use(COFFEE_MACHINE_PORT):
-            logger.warning(f"Port {COFFEE_MACHINE_PORT} is in use but machine not responding")
+            logger.warning(
+                f"Port {COFFEE_MACHINE_PORT} is in use but machine not responding"
+            )
             return False
 
         try:
             COFFEE_MACHINE_PROCESS = subprocess.Popen(
                 [
-                    "poetry", "run", "uvicorn", "main:app",
+                    "poetry",
+                    "run",
+                    "uvicorn",
+                    "main:app",
                     "--reload",
-                    "--port", str(COFFEE_MACHINE_PORT),
-                    "--host", "127.0.0.1"
+                    "--port",
+                    str(COFFEE_MACHINE_PORT),
+                    "--host",
+                    "127.0.0.1",
                 ],
                 cwd=str(COFFEE_MACHINE_PATH),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if hasattr(subprocess, 'CREATE_NEW_PROCESS_GROUP') else 0
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
+                if hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP")
+                else 0,
             )
 
             for _ in range(10):
@@ -91,6 +102,7 @@ def start_coffee_machine() -> bool:
         except Exception as e:
             logger.error(f"Failed to start coffee machine: {e}")
             return False
+
 
 def stop_coffee_machine():
     """Stop the coffee machine subprocess (optional, for cleanup)."""
@@ -148,39 +160,40 @@ def start_preparation(order_id: str) -> str:
     """Start coffee preparation and automatically wait for completion."""
 
     if not is_machine_running():
-        
         # Try to start the coffee machine
         if not start_coffee_machine():
             return tool_response(
                 "error",
                 "❌ Coffee machine is not available. Please try again in a moment or contact customer service.",
-                order_id
+                order_id,
             )
-        
+
         # Extra wait for the machine to fully initialize
         time.sleep(2)
-    
+
     order = load_order(order_id)
     if not order:
         return tool_response("error", f"Order {order_id} not found", order_id)
-    
+
     # Allow preparation if inventory is confirmed OR if we're retrying after a failure
     is_retry = ORDER_STATUS_CACHE.get(order_id, {}).get("attempt_count", 0) > 0
     is_inventory_confirmed = order.status == OrderStatus.INVENTORY_CONFIRMED
-    is_retryable = order.status in (OrderStatus.IN_PREPARATION, OrderStatus.PREPARATION_ERROR)
+    is_retryable = order.status in (
+        OrderStatus.IN_PREPARATION,
+        OrderStatus.PREPARATION_ERROR,
+    )
 
     if not is_inventory_confirmed and not (is_retryable and is_retry):
         return tool_response(
             "error",
             f"Cannot prepare order {order_id}. Current status: {order.status}",
-            order_id
+            order_id,
         )
-    
+
     # Start brewing — use the first item's name as the drink type
     drink_name = order.items[0].name if order.items else "coffee"
     response = safe_post(
-        f"{COFFEE_MACHINE_URL}/brew",
-        {"drink": drink_name, "correlation_id": order_id}
+        f"{COFFEE_MACHINE_URL}/brew", {"drink": drink_name, "correlation_id": order_id}
     )
 
     if response is None:
@@ -200,40 +213,40 @@ def start_preparation(order_id: str) -> str:
 
     order.status = OrderStatus.IN_PREPARATION
     save_order(order)
-    
+
     # Increment attempt count
     attempt_count = ORDER_STATUS_CACHE.get(order_id, {}).get("attempt_count", 0) + 1
-    
+
     ORDER_JOB_MAP[order_id] = job_id
     ORDER_STATUS_CACHE[order_id] = {
         "job_id": job_id,
         "status": "brewing",
         "started_at": time.time(),
-        "attempt_count": attempt_count
+        "attempt_count": attempt_count,
     }
 
     # Get ETA
     eta_seconds = data.get("eta_seconds", 15)
-    
+
     # Send initial response (this will be shown to customer)
     initial_message = f"☕ Brewing started! This will take about {eta_seconds:.0f} seconds. I'll let you know when it's ready."
-    
+
     # POLLING LOOP - wait for completion
     max_wait = eta_seconds + 5  # Wait a bit longer than ETA
     poll_interval = 2  # Check every 2 seconds
     waited = 0
-    
+
     while waited < max_wait:
         time.sleep(poll_interval)
         waited += poll_interval
-        
+
         # Check status
         status_response = safe_get(f"{COFFEE_MACHINE_URL}/jobs/{job_id}")
         if status_response and status_response.status_code == 200:
             try:
                 job = status_response.json()
                 status = job.get("status", "unknown")
-                
+
                 if status == "ready":
                     # Success!
                     order.status = OrderStatus.COMPLETED
@@ -242,14 +255,14 @@ def start_preparation(order_id: str) -> str:
                         del ORDER_JOB_MAP[order_id]
                     if order_id in ORDER_STATUS_CACHE:
                         del ORDER_STATUS_CACHE[order_id]
-                    
+
                     return tool_response(
-                        "ready", 
+                        "ready",
                         f"✅ Your coffee is ready! ☕",
                         order_id,
-                        {"attempt": attempt_count}
+                        {"attempt": attempt_count},
                     )
-                
+
                 elif status == "failed":
                     # Failed
                     order.status = OrderStatus.PREPARATION_ERROR
@@ -261,20 +274,16 @@ def start_preparation(order_id: str) -> str:
                         "failed",
                         f"❌ Brewing failed on attempt #{attempt_count}.",
                         order_id,
-                        {"attempt": attempt_count}
+                        {"attempt": attempt_count},
                     )
-                    
+
             except Exception as e:
                 logger.error(f"Status check error: {e}")
 
     # Timeout — mark as failed so retries are possible
     order.status = OrderStatus.PREPARATION_ERROR
     save_order(order)
-    return tool_response(
-        "error",
-        "Brewing timed out. Please try again.",
-        order_id
-    )
+    return tool_response("error", "Brewing timed out. Please try again.", order_id)
 
 
 @tool(args_schema=OrderIdSchema)
@@ -288,7 +297,7 @@ def estimate_prep_time(order_id: str) -> str:
     base_time = 2
     time_per_item = 1.5
     estimated_time = base_time + max(0, total_items - 1) * time_per_item
-    
+
     if order_id in ORDER_STATUS_CACHE:
         started_at = ORDER_STATUS_CACHE[order_id].get("started_at")
         if started_at:
@@ -299,14 +308,14 @@ def estimate_prep_time(order_id: str) -> str:
                     "info",
                     f"⏱️ About {remaining:.0f} seconds remaining.",
                     order_id,
-                    {"remaining_seconds": remaining}
+                    {"remaining_seconds": remaining},
                 )
-    
+
     return tool_response(
         "info",
         f"⏱️ Estimated time: {estimated_time:.1f} minutes",
         order_id,
-        {"estimated_minutes": estimated_time}
+        {"estimated_minutes": estimated_time},
     )
 
 
@@ -326,7 +335,7 @@ WORKFLOW:
    - Call start_preparation(order_id) again (the attempt count will auto-increment)
 
 4. If customer wants customer service:
-   - Call transfer_to_agent(context_summary, expectation)
+   - Call transfer_to_agent(customer_service_agent,context_summary, expectation)
    - context_summary: summarize what happened (e.g. "Brewing failed twice for order X")
    - expectation: what should customer service do (e.g. "Help the customer with alternatives")
 
@@ -345,7 +354,7 @@ DEFAULT_TOOL_NAMES = [t.name for t in DEFAULT_TOOLS]
 
 def create_barista_agent(chat_llm, prompt=None):
     """Create and return the barista agent."""
-    
+
     if not prompt:
         prompt = DEFAULT_PROMPT
 

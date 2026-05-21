@@ -127,7 +127,7 @@ Orders and inventory are persisted in a local SQLite database (`coffee_shop.db`)
 **Tools**:
 - `process_order()` - Parse customer orders
 - `calculate_total()` - Calculate pricing with discount capabilities
-- Handoff tools to inventory and customer service agents
+- `transfer_to_agent` - Handoff tool different agents
 
 **Responsibilities**:
 - Welcome customers and take orders
@@ -141,7 +141,7 @@ Orders and inventory are persisted in a local SQLite database (`coffee_shop.db`)
 - `check_inventory()` - Verify item availability for orders
 - `update_stock()` - Decrease inventory after confirmed orders
 - `get_alternatives()` - Find substitute items for out-of-stock products
-- Handoff tools to barista and customer service agents
+- `transfer_to_agent` - Handoff tool different agents
 
 **Responsibilities**:
 - Check item availability against current stock
@@ -153,10 +153,9 @@ Orders and inventory are persisted in a local SQLite database (`coffee_shop.db`)
 ### ☕ Barista Agent
 **Role**: Handles order preparation and quality
 **Tools**:
-- `prepare_order()` - Simulate order preparation with realistic error handling
-- `remake_order_item()` - Handle preparation errors and remakes
+- `start_preparation()` - Start coffee preparation
 - `estimate_prep_time()` - Provide accurate timing estimates
-- Handoff tool to customer service for issues
+- `transfer_to_agent` - Handoff tool different agents
 
 **Responsibilities**:
 - Prepare drinks and food items
@@ -184,7 +183,7 @@ Orders and inventory are persisted in a local SQLite database (`coffee_shop.db`)
 **Tools**:
 - `offer_refund()` - Process refunds when necessary
 - `offer_partial_refund()` - Process a partial refund when necessary
-- Handoff tools to all other agents
+- `transfer_to_agent` - Handoff tool different agents
 
 **Responsibilities**:
 - Handle customer complaints with empathy
