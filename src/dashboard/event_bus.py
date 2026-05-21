@@ -8,6 +8,7 @@ class EventType(Enum):
     CONVERSATION_START = auto()
     CONVERSATION_END = auto()
     CUSTOMER_MESSAGE = auto()
+    USER_VISIBLE = auto()
     AGENT_THINKING = auto()
     AGENT_MESSAGE = auto()
     TOOL_CALL = auto()

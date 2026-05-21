@@ -88,3 +88,12 @@ Squash branches before merging into `main` so each merged change is a single com
 - No automated tests exist
 - In-memory checkpointing only (no persistence across sessions)
 - The 20% barista error rate is intentional — it creates process variants for mining analysis
+
+## Running Tests
+
+### E2E test (`tests/test_simulation_e2e.py`)
+
+The E2E simulation test invokes the full multi-agent flow with real LLM calls. When `LLM_PROVIDER=anthropic` and the LLM is served via a **local proxy** (e.g., Hyperspace AI at `localhost:6655`), the test subprocess must be able to reach localhost. In Claude Code, this means the Bash tool call **must** use `dangerouslyDisableSandbox: true` — the default sandbox blocks localhost network access, causing connection failures or SOCKS proxy errors (`socksio` not installed).
+
+This does NOT apply when using Ollama or a remote LLM endpoint — only when the Anthropic base_url points to localhost.
+

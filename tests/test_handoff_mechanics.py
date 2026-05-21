@@ -11,17 +11,16 @@ from langgraph.types import Command
 from langchain_core.messages import AIMessage, ToolMessage, HumanMessage
 
 from src.agents.shared_components import (
-    transfer_to_inventory, transfer_to_barista,
-    transfer_to_customer_service, transfer_to_order_agent,
+    transfer_to_agent, 
     _resolve_from_agent,
 )
 
 
 TOOLS_AND_TARGETS = [
-    (transfer_to_inventory, "inventory_agent"),
-    (transfer_to_barista, "barista_agent"),
-    (transfer_to_customer_service, "customer_service_agent"),
-    (transfer_to_order_agent, "order_agent"),
+    (transfer_to_agent, "inventory_agent"),
+    (transfer_to_agent, "barista_agent"),
+    (transfer_to_agent, "customer_service_agent"),
+    (transfer_to_agent, "order_agent"),
 ]
 
 

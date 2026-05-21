@@ -9,8 +9,7 @@ from langgraph.types import Command
 from langchain_core.messages import AIMessage
 
 from src.agents.shared_components import (
-    transfer_to_inventory, transfer_to_barista,
-    transfer_to_customer_service, transfer_to_order_agent,
+    transfer_to_agent, 
 )
 
 
@@ -18,10 +17,7 @@ class TestHandoffToolInjection(unittest.TestCase):
     """Verify InjectedState and InjectedToolCallId are properly injected at runtime."""
 
     ALL_TOOLS = [
-        transfer_to_inventory,
-        transfer_to_barista,
-        transfer_to_customer_service,
-        transfer_to_order_agent,
+        transfer_to_agent,
     ]
 
     def test_state_args_detected(self):
@@ -42,9 +38,9 @@ class TestHandoffToolInjection(unittest.TestCase):
 
     def test_handoff_executes_through_tool_node(self):
         """Handoff tools must execute without TypeError when called via ToolNode."""
-        tn = ToolNode([transfer_to_inventory])
+        tn = ToolNode([transfer_to_agent])
         tool_call = {
-            "name": "transfer_to_inventory",
+            "name": "transfer_to_agent",
             "args": {
                 "context_summary": "Customer ordered 1 espresso, ORD0001 created.",
                 "expectation": "Check espresso stock availability.",
@@ -73,16 +69,16 @@ class TestHandoffToolInjection(unittest.TestCase):
         forwarded_msgs = cmd.update["messages"]
         self.assertEqual(len(forwarded_msgs), 1)
         tool_msg = forwarded_msgs[0]
-        self.assertEqual(tool_msg.name, "transfer_to_inventory")
+        self.assertEqual(tool_msg.name, "transfer_to_agent")
         self.assertIn("Successfully transferred", tool_msg.content)
 
     def test_all_handoff_tools_execute(self):
         """All four handoff tools must execute without error."""
         tools_and_targets = [
-            (transfer_to_inventory, "inventory_agent"),
-            (transfer_to_barista, "barista_agent"),
-            (transfer_to_customer_service, "customer_service_agent"),
-            (transfer_to_order_agent, "order_agent"),
+            (transfer_to_agent, "inventory_agent"),
+            (transfer_to_agent, "barista_agent"),
+            (transfer_to_agent, "customer_service_agent"),
+            (transfer_to_agent, "order_agent"),
         ]
         for tool, expected_target in tools_and_targets:
             with self.subTest(tool=tool.name):
@@ -170,7 +166,7 @@ class TestContextIsolationHook(unittest.TestCase):
             "messages": [
                 HumanMessage(content="I want a latte"),
                 AIMessage(content="Processing your order..."),
-                ToolMessage(content="Transferred", name="transfer_to_inventory", tool_call_id="tc1"),
+                ToolMessage(content="Transferred", name="transfer_to_agent", tool_call_id="tc1"),
                 AIMessage(content="Checking stock..."),
             ],
             "handoff_context": {
@@ -185,65 +181,6 @@ class TestContextIsolationHook(unittest.TestCase):
         self.assertEqual(len(msgs), 2)
         self.assertIn("[Handoff from order_agent]", msgs[0].content)
         self.assertEqual(msgs[1].content, "Checking stock...")
-
-
-class TestSimulationEndToEnd(unittest.TestCase):
-    """Integration test: run a full simulation and verify order completes."""
-
-    def test_scenario_0_order_reaches_terminal_status(self):
-        """Scenario 0 must produce an order that reaches completed or preparation_error."""
-        from src.coffee_shop import CoffeeShop
-        from src.agents.order_store import engine
-        from src.agents.shared_components import Order, OrderStatus
-        from sqlmodel import Session, select
-
-        shop = CoffeeShop()
-        shop.open_shop()
-
-        trace_ids = shop.run_conversation(scenario_index=0)
-
-        self.assertTrue(len(trace_ids) > 0, "No traces generated")
-
-        with Session(engine) as session:
-            order = session.exec(select(Order).order_by(Order.id.desc())).first()
-            self.assertIsNotNone(order, "No order found in database")
-            terminal_statuses = {
-                OrderStatus.COMPLETED,
-                OrderStatus.PREPARATION_ERROR,
-                OrderStatus.REFUNDED,
-            }
-            self.assertIn(
-                order.status, terminal_statuses,
-                f"Order {order.order_id_str} stuck at '{order.status.value}' — "
-                f"expected one of {[s.value for s in terminal_statuses]}",
-            )
-
-    def test_scenario_0_inventory_updated(self):
-        """Scenario 0 must trigger at least one inventory stock update."""
-        from src.coffee_shop import CoffeeShop
-        from src.agents.order_store import engine
-        from src.agents.shared_components import Order, OrderStatus
-        from sqlmodel import Session, select
-
-        shop = CoffeeShop()
-        shop.open_shop()
-
-        shop.run_conversation(scenario_index=0)
-
-        with Session(engine) as session:
-            order = session.exec(select(Order).order_by(Order.id.desc())).first()
-            self.assertIsNotNone(order)
-            # If order reached barista or beyond, inventory was confirmed
-            past_inventory = {
-                OrderStatus.INVENTORY_CONFIRMED,
-                OrderStatus.IN_PREPARATION,
-                OrderStatus.COMPLETED,
-                OrderStatus.PREPARATION_ERROR,
-            }
-            self.assertIn(
-                order.status, past_inventory,
-                f"Order never reached inventory confirmation — stuck at '{order.status.value}'",
-            )
 
 
 if __name__ == "__main__":
