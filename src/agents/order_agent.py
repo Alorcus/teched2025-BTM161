@@ -9,7 +9,7 @@ logger = logging.getLogger("coffee_shop.order_agent")
 
 from .shared_components import (
     MENU, Order, OrderItem, Size, ALLOWED_EXTRAS,
-    transfer_to_inventory, transfer_to_customer_service,
+    transfer_to_agent,
 )
 from ..llm import bind_tools_sequential
 from .order_store import save_order, load_order, get_order
@@ -139,7 +139,7 @@ You can transfer to:
 
 Be warm, conversational, and guide the customer through their order naturally."""
 
-DEFAULT_TOOLS = [process_order, calculate_total, get_order, transfer_to_inventory, transfer_to_customer_service]
+DEFAULT_TOOLS = [process_order, calculate_total, get_order, transfer_to_agent]
 DEFAULT_TOOL_NAMES = [t.name for t in DEFAULT_TOOLS]
 
 

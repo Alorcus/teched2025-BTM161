@@ -160,121 +160,152 @@ class OrderIdSchema(BaseModel):
 # Handoff Tools — each requires explicit context summary and expectation
 # ---------------------------------------------------------------------------
 
-@tool
-def transfer_to_inventory(
+@tool 
+def transfer_to_agent(
+    target_agent: Annotated[str, "The agent to transfer to (e.g. 'inventory_agent')"],
     context_summary: Annotated[str, "Summary of what you know so far that is relevant for the next agent"],
     expectation: Annotated[str, "What you expect the next agent to accomplish"],
     state: Annotated[Any, InjectedState],
     tool_call_id: Annotated[str, InjectedToolCallId],
 ) -> Command:
-    """Transfer to inventory agent to check item availability."""
+    """Generic transfer tool that can be used to transfer to any agent."""
     from_agent = _resolve_from_agent(state)
-    logger.debug("handoff %s -> inventory_agent | summary=%s", from_agent, str(context_summary)[:80])
+    logger.debug("handoff %s -> %s | summary=%s", from_agent, target_agent, str(context_summary)[:80])
     tool_message = ToolMessage(
-        content=f"Successfully transferred to inventory_agent. Context: {context_summary}",
-        name="transfer_to_inventory",
+        content=f"Successfully transferred to {target_agent}. Context: {context_summary}",
+        name=f"transfer_to_{target_agent}",
         tool_call_id=tool_call_id,
     )
     return Command(
-        goto="inventory_agent",
+        goto=target_agent,
         graph=Command.PARENT,
         update={
             "messages": [tool_message],
-            "active_agent": "inventory_agent",
+            "active_agent": target_agent,
             "handoff_context": {
                 "from_agent": from_agent,
                 "context_summary": context_summary,
                 "expectation": expectation,
             },
         },
-    )
+
+)
+
+# @tool
+# def transfer_to_inventory(
+#     context_summary: Annotated[str, "Summary of what you know so far that is relevant for the next agent"],
+#     expectation: Annotated[str, "What you expect the next agent to accomplish"],
+#     state: Annotated[Any, InjectedState],
+#     tool_call_id: Annotated[str, InjectedToolCallId],
+# ) -> Command:
+#     """Transfer to inventory agent to check item availability."""
+#     from_agent = _resolve_from_agent(state)
+#     logger.debug("handoff %s -> inventory_agent | summary=%s", from_agent, str(context_summary)[:80])
+#     tool_message = ToolMessage(
+#         content=f"Successfully transferred to inventory_agent. Context: {context_summary}",
+#         name="transfer_to_inventory",
+#         tool_call_id=tool_call_id,
+#     )
+#     return Command(
+#         goto="inventory_agent",
+#         graph=Command.PARENT,
+#         update={
+#             "messages": [tool_message],
+#             "active_agent": "inventory_agent",
+#             "handoff_context": {
+#                 "from_agent": from_agent,
+#                 "context_summary": context_summary,
+#                 "expectation": expectation,
+#             },
+#         },
+#     )
 
 
-@tool
-def transfer_to_barista(
-    context_summary: Annotated[str, "Summary of what you know so far that is relevant for the next agent"],
-    expectation: Annotated[str, "What you expect the next agent to accomplish"],
-    state: Annotated[Any, InjectedState],
-    tool_call_id: Annotated[str, InjectedToolCallId],
-) -> Command:
-    """Transfer to barista agent to prepare the order."""
-    from_agent = _resolve_from_agent(state)
-    logger.debug("handoff %s -> barista_agent | summary=%s", from_agent, str(context_summary)[:80])
-    tool_message = ToolMessage(
-        content=f"Successfully transferred to barista_agent. Context: {context_summary}",
-        name="transfer_to_barista",
-        tool_call_id=tool_call_id,
-    )
-    return Command(
-        goto="barista_agent",
-        graph=Command.PARENT,
-        update={
-            "messages": [tool_message],
-            "active_agent": "barista_agent",
-            "handoff_context": {
-                "from_agent": from_agent,
-                "context_summary": context_summary,
-                "expectation": expectation,
-            },
-        },
-    )
+# @tool
+# def transfer_to_barista(
+#     context_summary: Annotated[str, "Summary of what you know so far that is relevant for the next agent"],
+#     expectation: Annotated[str, "What you expect the next agent to accomplish"],
+#     state: Annotated[Any, InjectedState],
+#     tool_call_id: Annotated[str, InjectedToolCallId],
+# ) -> Command:
+#     """Transfer to barista agent to prepare the order."""
+#     from_agent = _resolve_from_agent(state)
+#     logger.debug("handoff %s -> barista_agent | summary=%s", from_agent, str(context_summary)[:80])
+#     tool_message = ToolMessage(
+#         content=f"Successfully transferred to barista_agent. Context: {context_summary}",
+#         name="transfer_to_barista",
+#         tool_call_id=tool_call_id,
+#     )
+#     return Command(
+#         goto="barista_agent",
+#         graph=Command.PARENT,
+#         update={
+#             "messages": [tool_message],
+#             "active_agent": "barista_agent",
+#             "handoff_context": {
+#                 "from_agent": from_agent,
+#                 "context_summary": context_summary,
+#                 "expectation": expectation,
+#             },
+#         },
+#     )
 
 
-@tool
-def transfer_to_customer_service(
-    context_summary: Annotated[str, "Summary of what you know so far that is relevant for the next agent"],
-    expectation: Annotated[str, "What you expect the next agent to accomplish"],
-    state: Annotated[Any, InjectedState],
-    tool_call_id: Annotated[str, InjectedToolCallId],
-) -> Command:
-    """Transfer to customer service agent for issues, complaints, or order modifications."""
-    from_agent = _resolve_from_agent(state)
-    logger.debug("handoff %s -> customer_service_agent | summary=%s", from_agent, str(context_summary)[:80])
-    tool_message = ToolMessage(
-        content=f"Successfully transferred to customer_service_agent. Context: {context_summary}",
-        name="transfer_to_customer_service",
-        tool_call_id=tool_call_id,
-    )
-    return Command(
-        goto="customer_service_agent",
-        graph=Command.PARENT,
-        update={
-            "messages": [tool_message],
-            "active_agent": "customer_service_agent",
-            "handoff_context": {
-                "from_agent": from_agent,
-                "context_summary": context_summary,
-                "expectation": expectation,
-            },
-        },
-    )
+# @tool
+# def transfer_to_customer_service(
+#     context_summary: Annotated[str, "Summary of what you know so far that is relevant for the next agent"],
+#     expectation: Annotated[str, "What you expect the next agent to accomplish"],
+#     state: Annotated[Any, InjectedState],
+#     tool_call_id: Annotated[str, InjectedToolCallId],
+# ) -> Command:
+#     """Transfer to customer service agent for issues, complaints, or order modifications."""
+#     from_agent = _resolve_from_agent(state)
+#     logger.debug("handoff %s -> customer_service_agent | summary=%s", from_agent, str(context_summary)[:80])
+#     tool_message = ToolMessage(
+#         content=f"Successfully transferred to customer_service_agent. Context: {context_summary}",
+#         name="transfer_to_customer_service",
+#         tool_call_id=tool_call_id,
+#     )
+#     return Command(
+#         goto="customer_service_agent",
+#         graph=Command.PARENT,
+#         update={
+#             "messages": [tool_message],
+#             "active_agent": "customer_service_agent",
+#             "handoff_context": {
+#                 "from_agent": from_agent,
+#                 "context_summary": context_summary,
+#                 "expectation": expectation,
+#             },
+#         },
+#     )
 
 
-@tool
-def transfer_to_order_agent(
-    context_summary: Annotated[str, "Summary of what you know so far that is relevant for the next agent"],
-    expectation: Annotated[str, "What you expect the next agent to accomplish"],
-    state: Annotated[Any, InjectedState],
-    tool_call_id: Annotated[str, InjectedToolCallId],
-) -> Command:
-    """Transfer back to order agent for new or modified orders."""
-    from_agent = _resolve_from_agent(state)
-    logger.debug("handoff %s -> order_agent | summary=%s", from_agent, str(context_summary)[:80])
-    tool_message = ToolMessage(
-        content=f"Successfully transferred to order_agent. Context: {context_summary}",
-        name="transfer_to_order_agent",
-        tool_call_id=tool_call_id,
-    )
-    return Command(
-        goto="order_agent",
-        graph=Command.PARENT,
-        update={
-            "messages": [tool_message],
-            "active_agent": "order_agent",
-            "handoff_context": {
-                "from_agent": from_agent,
-                "context_summary": context_summary,
-                "expectation": expectation,
-            },
-        },
-    )
+# @tool
+# def transfer_to_order_agent(
+#     context_summary: Annotated[str, "Summary of what you know so far that is relevant for the next agent"],
+#     expectation: Annotated[str, "What you expect the next agent to accomplish"],
+#     state: Annotated[Any, InjectedState],
+#     tool_call_id: Annotated[str, InjectedToolCallId],
+# ) -> Command:
+#     """Transfer back to order agent for new or modified orders."""
+#     from_agent = _resolve_from_agent(state)
+#     logger.debug("handoff %s -> order_agent | summary=%s", from_agent, str(context_summary)[:80])
+#     tool_message = ToolMessage(
+#         content=f"Successfully transferred to order_agent. Context: {context_summary}",
+#         name="transfer_to_order_agent",
+#         tool_call_id=tool_call_id,
+#     )
+#     return Command(
+#         goto="order_agent",
+#         graph=Command.PARENT,
+#         update={
+#             "messages": [tool_message],
+#             "active_agent": "order_agent",
+#             "handoff_context": {
+#                 "from_agent": from_agent,
+#                 "context_summary": context_summary,
+#                 "expectation": expectation,
+#             },
+#         },
+#     )

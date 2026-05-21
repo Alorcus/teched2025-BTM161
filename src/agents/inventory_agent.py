@@ -7,7 +7,7 @@ logger = logging.getLogger("coffee_shop.inventory_agent")
 
 from .shared_components import (
     OrderIdSchema, OrderStatus,
-    transfer_to_barista, transfer_to_customer_service,
+    transfer_to_agent,
 )
 from ..llm import bind_tools_sequential
 from .order_store import (
@@ -115,8 +115,7 @@ You can transfer to:
 - Barista agent: when all items are confirmed available and stock is updated
 - Customer service agent: when items are unavailable and need resolution"""
 
-DEFAULT_TOOLS = [check_inventory, update_stock, get_alternatives, get_order,
-                 transfer_to_barista, transfer_to_customer_service]
+DEFAULT_TOOLS = [check_inventory, update_stock, get_alternatives, get_order, transfer_to_agent]
 DEFAULT_TOOL_NAMES = [t.name for t in DEFAULT_TOOLS]
 
 

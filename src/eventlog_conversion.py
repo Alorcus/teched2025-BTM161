@@ -20,15 +20,11 @@ EVENT_ATTRIBUTES = {
     "update_stock": ["ocel_time", "duration"],
     "get_order": ["ocel_time", "duration"],
     "remake_order_item": ["ocel_time", "duration"],
-    "transfer_to_customer_service": ["ocel_time", "duration"],
+    "transfer_to_agent": ["ocel_time", "duration"],
     "offer_refund": ["ocel_time", "duration"],
     "offer_partial_refund": ["ocel_time", "duration"],
     "get_alternatives": ["ocel_time", "duration"],
     "calculate_total": ["ocel_time", "duration"],
-
-    "transfer_to_order_agent": ["ocel_time", "duration"],
-    "transfer_to_barista": ["ocel_time", "duration"],
-    "transfer_to_inventory": ["ocel_time", "duration"],
 
     # handovers
     "order_agent_handover_inventory_agent": ["ocel_time", "model", "duration", "input_tokens", "response_tokens"],

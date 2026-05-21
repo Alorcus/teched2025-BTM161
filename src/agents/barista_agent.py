@@ -11,7 +11,7 @@ from src.llm import bind_tools_sequential
 
 from .shared_components import (
     OrderIdSchema, OrderStatus,
-    transfer_to_customer_service,
+    transfer_to_agent,
 )
 from .order_store import load_order, save_order, get_order
 from .context_isolation import create_context_isolation_hook
@@ -117,7 +117,7 @@ You can transfer to:
 
 Take pride in your craft. If something goes wrong, be honest about it."""
 
-DEFAULT_TOOLS = [prepare_order, remake_order_item, estimate_prep_time, get_order, transfer_to_customer_service]
+DEFAULT_TOOLS = [prepare_order, remake_order_item, estimate_prep_time, get_order, transfer_to_agent]
 DEFAULT_TOOL_NAMES = [t.name for t in DEFAULT_TOOLS]
 
 
