@@ -1,11 +1,34 @@
 from enum import Enum
-from typing import List, Optional
+from typing import List, Optional, Annotated, Any, TypedDict
 from datetime import datetime, timezone
+import logging
 
-from langgraph_swarm import create_handoff_tool
+from langgraph.types import Command
+from langgraph.prebuilt import InjectedState
+from langgraph_swarm import SwarmState
+from langchain_core.tools import tool, InjectedToolCallId
+from langchain_core.messages import ToolMessage
 from pydantic import BaseModel, Field
 from sqlalchemy import Enum as SAEnum
 from sqlmodel import SQLModel, Field as SQLField, Relationship, Column, JSON
+
+logger = logging.getLogger("coffee_shop.handoff")
+
+
+def _resolve_from_agent(state: dict) -> str:
+    """Determine which agent is calling this tool.
+
+    Checks active_agent first (available when ToolNode gets parent state),
+    then falls back to the .name attribute on the last AIMessage.
+    """
+    active = state.get("active_agent")
+    if active and active != "unknown":
+        return active
+    for msg in reversed(state.get("messages", [])):
+        name = getattr(msg, "name", None)
+        if name and name.endswith("_agent"):
+            return name
+    return "unknown"
 
 
 # ---------------------------------------------------------------------------
@@ -84,6 +107,7 @@ class Order(SQLModel, table=True):
     )
     total: float = 0.0
     created_at: datetime = SQLField(default_factory=lambda: datetime.now(timezone.utc))
+    last_modified: datetime = SQLField(default_factory=lambda: datetime.now(timezone.utc))
 
     items: List[OrderItem] = Relationship(
         back_populates="order",
@@ -111,6 +135,20 @@ MENU = {
 
 
 # ---------------------------------------------------------------------------
+# Extended Swarm State with handoff context
+# ---------------------------------------------------------------------------
+
+class HandoffContext(TypedDict, total=False):
+    from_agent: str
+    context_summary: str
+    expectation: str
+
+
+class CoffeeShopState(SwarmState):
+    handoff_context: Optional[HandoffContext]
+
+
+# ---------------------------------------------------------------------------
 # Pydantic schema for tools that operate on an existing order by ID
 # ---------------------------------------------------------------------------
 
@@ -119,25 +157,124 @@ class OrderIdSchema(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Handoff Tools
+# Handoff Tools — each requires explicit context summary and expectation
 # ---------------------------------------------------------------------------
 
-transfer_to_inventory = create_handoff_tool(
-    agent_name="inventory_agent",
-    description="Transfer to inventory agent to check item availability."
-)
+@tool
+def transfer_to_inventory(
+    context_summary: Annotated[str, "Summary of what you know so far that is relevant for the next agent"],
+    expectation: Annotated[str, "What you expect the next agent to accomplish"],
+    state: Annotated[Any, InjectedState],
+    tool_call_id: Annotated[str, InjectedToolCallId],
+) -> Command:
+    """Transfer to inventory agent to check item availability."""
+    from_agent = _resolve_from_agent(state)
+    logger.debug("handoff %s -> inventory_agent | summary=%s", from_agent, str(context_summary)[:80])
+    tool_message = ToolMessage(
+        content=f"Successfully transferred to inventory_agent. Context: {context_summary}",
+        name="transfer_to_inventory",
+        tool_call_id=tool_call_id,
+    )
+    return Command(
+        goto="inventory_agent",
+        graph=Command.PARENT,
+        update={
+            "messages": [tool_message],
+            "active_agent": "inventory_agent",
+            "handoff_context": {
+                "from_agent": from_agent,
+                "context_summary": context_summary,
+                "expectation": expectation,
+            },
+        },
+    )
 
-transfer_to_barista = create_handoff_tool(
-    agent_name="barista_agent",
-    description="Transfer to barista agent to prepare the order."
-)
 
-transfer_to_customer_service = create_handoff_tool(
-    agent_name="customer_service_agent",
-    description="Transfer to customer service agent for issues, complaints, or order modifications."
-)
+@tool
+def transfer_to_barista(
+    context_summary: Annotated[str, "Summary of what you know so far that is relevant for the next agent"],
+    expectation: Annotated[str, "What you expect the next agent to accomplish"],
+    state: Annotated[Any, InjectedState],
+    tool_call_id: Annotated[str, InjectedToolCallId],
+) -> Command:
+    """Transfer to barista agent to prepare the order."""
+    from_agent = _resolve_from_agent(state)
+    logger.debug("handoff %s -> barista_agent | summary=%s", from_agent, str(context_summary)[:80])
+    tool_message = ToolMessage(
+        content=f"Successfully transferred to barista_agent. Context: {context_summary}",
+        name="transfer_to_barista",
+        tool_call_id=tool_call_id,
+    )
+    return Command(
+        goto="barista_agent",
+        graph=Command.PARENT,
+        update={
+            "messages": [tool_message],
+            "active_agent": "barista_agent",
+            "handoff_context": {
+                "from_agent": from_agent,
+                "context_summary": context_summary,
+                "expectation": expectation,
+            },
+        },
+    )
 
-transfer_to_order_agent = create_handoff_tool(
-    agent_name="order_agent",
-    description="Transfer back to order agent for new or modified orders."
-)
+
+@tool
+def transfer_to_customer_service(
+    context_summary: Annotated[str, "Summary of what you know so far that is relevant for the next agent"],
+    expectation: Annotated[str, "What you expect the next agent to accomplish"],
+    state: Annotated[Any, InjectedState],
+    tool_call_id: Annotated[str, InjectedToolCallId],
+) -> Command:
+    """Transfer to customer service agent for issues, complaints, or order modifications."""
+    from_agent = _resolve_from_agent(state)
+    logger.debug("handoff %s -> customer_service_agent | summary=%s", from_agent, str(context_summary)[:80])
+    tool_message = ToolMessage(
+        content=f"Successfully transferred to customer_service_agent. Context: {context_summary}",
+        name="transfer_to_customer_service",
+        tool_call_id=tool_call_id,
+    )
+    return Command(
+        goto="customer_service_agent",
+        graph=Command.PARENT,
+        update={
+            "messages": [tool_message],
+            "active_agent": "customer_service_agent",
+            "handoff_context": {
+                "from_agent": from_agent,
+                "context_summary": context_summary,
+                "expectation": expectation,
+            },
+        },
+    )
+
+
+@tool
+def transfer_to_order_agent(
+    context_summary: Annotated[str, "Summary of what you know so far that is relevant for the next agent"],
+    expectation: Annotated[str, "What you expect the next agent to accomplish"],
+    state: Annotated[Any, InjectedState],
+    tool_call_id: Annotated[str, InjectedToolCallId],
+) -> Command:
+    """Transfer back to order agent for new or modified orders."""
+    from_agent = _resolve_from_agent(state)
+    logger.debug("handoff %s -> order_agent | summary=%s", from_agent, str(context_summary)[:80])
+    tool_message = ToolMessage(
+        content=f"Successfully transferred to order_agent. Context: {context_summary}",
+        name="transfer_to_order_agent",
+        tool_call_id=tool_call_id,
+    )
+    return Command(
+        goto="order_agent",
+        graph=Command.PARENT,
+        update={
+            "messages": [tool_message],
+            "active_agent": "order_agent",
+            "handoff_context": {
+                "from_agent": from_agent,
+                "context_summary": context_summary,
+                "expectation": expectation,
+            },
+        },
+    )

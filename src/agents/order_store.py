@@ -68,6 +68,9 @@ def save_order(order: Order) -> None:
     """Persist an Order (insert or update)."""
     # may want to check for allowed status transitions here in the future
     is_new = order.id is None
+    if not is_new:
+        from datetime import datetime, timezone
+        order.last_modified = datetime.now(timezone.utc)
     with _write_lock:
         with Session(engine) as session:
             if not is_new:

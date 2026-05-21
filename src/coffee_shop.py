@@ -5,13 +5,15 @@ import json
 import html
 from collections import defaultdict
 
-from langgraph_swarm import create_swarm
+from langgraph.graph import StateGraph
+from langgraph_swarm import add_active_agent_router
 from langgraph.checkpoint.memory import InMemorySaver
 import ipywidgets as widgets
 from IPython.display import display, clear_output, HTML
 
 from src.llm import normalize_content, chat_llm
 from src.styles import ENHANCED_CSS
+from src.agents.shared_components import CoffeeShopState
 
 # Configure the parent logger for the entire coffee_shop namespace.
 # Child loggers (e.g. coffee_shop.handoff) inherit this level and handler.
@@ -101,16 +103,20 @@ class CoffeeShop():
         barista_agent = create_barista_agent(chat_llm, self.agent_definitions.get('barista_agent', None))
         customer_service_agent = create_customer_service_agent(chat_llm, self.agent_definitions.get('customer_service_agent', None))
 
-        # CREATE COFFEE SHOP SWARM
-        # https://github.com/langchain-ai/langgraph-swarm-py
+        # CREATE COFFEE SHOP MULTI-AGENT GRAPH
+        # Custom StateGraph replacing create_swarm() for context isolation
 
         checkpointer = InMemorySaver()
 
-        workflow = create_swarm(
-            agents=[order_agent, inventory_agent, barista_agent, customer_service_agent],
-            default_active_agent="order_agent",
-        )
-        self.app = workflow.compile(checkpointer=checkpointer)
+        agent_names = ["order_agent", "inventory_agent", "barista_agent", "customer_service_agent"]
+        builder = StateGraph(CoffeeShopState)
+        add_active_agent_router(builder, route_to=agent_names, default_active_agent="order_agent")
+        builder.add_node("order_agent", order_agent, destinations=("inventory_agent", "customer_service_agent"))
+        builder.add_node("inventory_agent", inventory_agent, destinations=("barista_agent", "customer_service_agent"))
+        builder.add_node("barista_agent", barista_agent, destinations=("customer_service_agent",))
+        builder.add_node("customer_service_agent", customer_service_agent, destinations=("order_agent", "inventory_agent", "barista_agent"))
+
+        self.app = builder.compile(checkpointer=checkpointer)
 
 
     def _get_config(self, thread_id):
@@ -252,7 +258,7 @@ class CoffeeShop():
                     if isinstance(node_updates, tuple):
                         continue
                     messages_key = next(
-                        (k for k in node_updates.keys() if "messages" in k), None
+                        (k for k in node_updates.keys() if k == "messages"), None
                     )
                     if messages_key is not None:
                         message = node_updates[messages_key][-1]
@@ -263,7 +269,7 @@ class CoffeeShop():
                             agent_name = getattr(message, 'name', 'unknown')
                             content = getattr(message, 'content', str(message))
 
-                            if agent_name in ('order_agent', 'barista_agent', 'customer_service_agent') and content:
+                            if agent_name in ('order_agent', 'inventory_agent', 'barista_agent', 'customer_service_agent') and content:
                                 self._last_agent_message = normalize_content(content)
 
                             yield (agent_name, content)
@@ -283,7 +289,7 @@ class CoffeeShop():
         self._last_agent_message = None
 
         stream = self.app.stream(
-            {"messages": [{"role": "user", "content": message}]},
+            {"messages": [{"role": "user", "content": message}], "handoff_context": None},
             config,
             subgraphs=True,
         )
@@ -369,7 +375,8 @@ class CoffeeShop():
                                 "role": "user",
                                 "content": prompt,
                             }
-                        ]
+                        ],
+                        "handoff_context": None,
                     },
                     config,
                     subgraphs=True,

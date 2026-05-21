@@ -18,13 +18,12 @@ dependencies = [
     "sqlmodel (>=0.0.24,<0.1.0)",
     "ipykernel (>=6.30,<7.0)",
     "polars (>=1.40.1,<2.0.0)",
-    "openai (>=2.33.0,<3.0.0)",
-    "fastapi (>=0.136.1,<0.137.0)",
-    "uvicorn (>=0.46.0,<0.47.0)"
+    "panel (>=1.4.0,<2.0.0)"
 ]
 
 [project.scripts]
 simulate = "src.simulate:main"
+dashboard = "src.dashboard.app:main"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]

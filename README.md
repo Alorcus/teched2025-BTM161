@@ -87,6 +87,35 @@ poetry run simulate --traces 10 --scenario all --export-logs
 | 2 | Complain about a cold cappuccino and seek resolution |
 | 3 | Ask for a recommendation and order based on suggestion |
 
+## Agent Observatory Dashboard
+
+A real-time observability dashboard built with [Panel](https://panel.holoviz.org/) that shows all agents simultaneously in a grid layout. Each agent panel displays its system prompt, available tools, current status, handoff context, message history (context-isolated), and tool call log — all updating live as a conversation streams through the system.
+
+### Launch
+
+```bash
+# Start the dashboard (opens browser at http://localhost:5006)
+poetry run dashboard
+
+# Or via Panel CLI
+panel serve src/dashboard/app.py --show --port 5006
+```
+
+### Features
+
+- **2x2 grid layout** showing all 4 agents at once (scales to 3x3 for up to 9)
+- **Live status badges**: idle / thinking / executing tool / handed off
+- **Handoff context display**: see what each agent received from the previous agent
+- **Tool call log**: arguments and results for every tool invocation
+- **Context-isolated messages**: the same filtered view each agent's LLM actually sees
+- **Sidebar controls**: scenario selector, run button, and global conversation log
+
+### How It Works
+
+The dashboard runs the same `CoffeeShop` multi-agent graph used by the notebooks and CLI. A background thread drives the conversation (using the simulated Customer Agent), while the Panel UI polls for events every 100ms. Stream events from LangGraph are parsed into typed dashboard events (agent messages, tool calls, handoffs, etc.) and dispatched to the corresponding agent panel.
+
+---
+
 ## Observing the Database
 
 Orders and inventory are persisted in a local SQLite database (`coffee_shop.db`). To inspect the database while the agents are running, install the [SQLite Viewer](https://marketplace.visualstudio.com/items?itemName=qwtel.sqlite-viewer) extension in VS Code. Once installed, simply open `coffee_shop.db` from the file explorer and the extension will display the tables in a browsable grid view. You can refresh the view at any time to see the latest orders and stock levels as they are updated by the agents during a simulation.
@@ -162,6 +191,20 @@ Orders and inventory are persisted in a local SQLite database (`coffee_shop.db`)
 - Offer appropriate compensation (remakes, refunds, discounts)
 - Suggest alternatives with customer service touch
 - Coordinate with other agents for resolution
+
+## Running the Tests
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+Individual test modules can be run directly, e.g.:
+
+```bash
+python -m unittest tests/test_tools_order.py -v
+```
+
+Use the Python interpreter from the Poetry virtual environment (`poetry env activate` first, or prefix with `poetry run python`).
 
 ---
 ## Contributing

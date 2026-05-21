@@ -20,6 +20,7 @@ from .shared_components import (
     transfer_to_customer_service,
 )
 from .order_store import load_order, save_order, get_order
+from .context_isolation import create_context_isolation_hook
 
 
 COFFEE_MACHINE_URL = "http://127.0.0.1:8001"
@@ -301,14 +302,7 @@ def estimate_prep_time(order_id: str) -> str:
     )
 
 
-# ----------------------------
-# AGENT CREATION
-# ----------------------------
-def create_barista_agent(chat_llm, prompt=None):
-    """Create and return the barista agent."""
-    
-    if not prompt:
-        prompt = """You are a barista agent responsible for coffee preparation.
+DEFAULT_PROMPT = """You are a barista agent responsible for coffee preparation.
 
 WORKFLOW:
 1. Call start_preparation(order_id) - This starts brewing AND automatically waits for completion
@@ -336,12 +330,17 @@ IMPORTANT NOTES:
 Remember: Coffee takes time to brew. Be patient and keep the customer informed!
 """
 
-    tools = [
-        start_preparation,
-        estimate_prep_time,
-        get_order,
-        transfer_to_customer_service,
-    ]
+DEFAULT_TOOLS = [start_preparation, estimate_prep_time, get_order, transfer_to_customer_service]
+DEFAULT_TOOL_NAMES = [t.name for t in DEFAULT_TOOLS]
+
+
+def create_barista_agent(chat_llm, prompt=None):
+    """Create and return the barista agent."""
+    
+    if not prompt:
+        prompt = DEFAULT_PROMPT
+
+    tools = list(DEFAULT_TOOLS)
 
     llm_with_tools = bind_tools_sequential(chat_llm, tools)
 
@@ -350,4 +349,5 @@ Remember: Coffee takes time to brew. Be patient and keep the customer informed!
         name="barista_agent",
         tools=tools,
         prompt=prompt,
+        pre_model_hook=create_context_isolation_hook("barista_agent"),
     )
