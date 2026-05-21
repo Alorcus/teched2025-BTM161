@@ -66,5 +66,22 @@ class TestEventBusThreadSafety(unittest.TestCase):
         self.assertEqual(len(drained), num_threads * events_per_thread)
 
 
+class TestUserVisibleEventType(unittest.TestCase):
+    """USER_VISIBLE event type publishes and drains correctly."""
+
+    def test_user_visible_round_trip(self):
+        bus = EventBus()
+        bus.publish(DashboardEvent(
+            event_type=EventType.USER_VISIBLE,
+            agent_name="order_agent",
+            content="I'd like a latte please",
+        ))
+        drained = bus.drain()
+        self.assertEqual(len(drained), 1)
+        self.assertEqual(drained[0].event_type, EventType.USER_VISIBLE)
+        self.assertEqual(drained[0].agent_name, "order_agent")
+        self.assertEqual(drained[0].content, "I'd like a latte please")
+
+
 if __name__ == "__main__":
     unittest.main()

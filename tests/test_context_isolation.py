@@ -133,5 +133,96 @@ class TestNonDictHandoffContextHandledSafely(unittest.TestCase):
         self.assertEqual(len(result["llm_input_messages"]), 1)
 
 
+class TestOrphanedToolMessagesAreStripped(unittest.TestCase):
+    """Test 45: ToolMessages without matching tool_use in AIMessage are removed.
+
+    This reproduces the real failure: the parent graph state contains a
+    ToolMessage(name='transfer_to_inventory') but the AIMessage with the
+    corresponding tool_use was not propagated from the subgraph. The hook
+    must strip orphaned ToolMessages to avoid Anthropic API errors.
+    """
+
+    def test_orphaned_tool_message_stripped_from_entry_agent(self):
+        hook = create_context_isolation_hook("order_agent")
+        messages = [
+            HumanMessage(content="Ring it up"),
+            # This ToolMessage has no preceding AIMessage with matching tool_use
+            ToolMessage(content="Transferred", name="transfer_to_inventory", tool_call_id="tc-orphan"),
+        ]
+        state = {"messages": messages, "handoff_context": None}
+        result = hook(state)
+        # The orphaned ToolMessage should be removed
+        self.assertEqual(len(result["llm_input_messages"]), 1)
+        self.assertEqual(result["llm_input_messages"][0].content, "Ring it up")
+
+    def test_valid_tool_message_kept(self):
+        hook = create_context_isolation_hook("inventory_agent")
+        messages = [
+            ToolMessage(content="Transferred", name="transfer_to_inventory", tool_call_id="tc-boundary"),
+            AIMessage(content="", name="inventory_agent", tool_calls=[{"id": "tc-check", "name": "check_inventory", "args": {}}]),
+            ToolMessage(content="All available", tool_call_id="tc-check"),
+        ]
+        state = {"messages": messages, "handoff_context": None}
+        result = hook(state)
+        # After boundary: AIMessage + ToolMessage (both valid, tool_use matches)
+        own = result["llm_input_messages"]
+        self.assertEqual(len(own), 2)
+        self.assertIsInstance(own[0], AIMessage)
+        self.assertIsInstance(own[1], ToolMessage)
+
+    def test_mixed_orphaned_and_valid(self):
+        hook = create_context_isolation_hook("order_agent")
+        messages = [
+            HumanMessage(content="Go ahead"),
+            AIMessage(content="", name="order_agent", tool_calls=[{"id": "tc-proc", "name": "process_order", "args": {}}]),
+            ToolMessage(content="Order created", tool_call_id="tc-proc"),
+            # Orphaned: no AIMessage has tool_use with id="tc-ghost"
+            ToolMessage(content="Ghost result", tool_call_id="tc-ghost"),
+        ]
+        state = {"messages": messages, "handoff_context": None}
+        result = hook(state)
+        own = result["llm_input_messages"]
+        # Should keep Human, AI, valid Tool; strip orphaned Tool
+        self.assertEqual(len(own), 3)
+        self.assertEqual(own[2].content, "Order created")
+
+
+class TestEmptyMessagesAfterBoundaryNeverFalsy(unittest.TestCase):
+    """Test 46: When no messages exist after boundary, hook returns a non-empty
+    llm_input_messages to prevent LangGraph from falling back to raw state."""
+
+    def test_no_messages_after_boundary_returns_synthetic(self):
+        hook = create_context_isolation_hook("inventory_agent")
+        messages = [
+            HumanMessage(content="Order something"),
+            ToolMessage(content="Transferred", name="transfer_to_inventory", tool_call_id="tc1"),
+        ]
+        state = {"messages": messages, "handoff_context": None}
+        result = hook(state)
+        # Must be non-empty (truthy) to avoid LangGraph fallback
+        self.assertTrue(len(result["llm_input_messages"]) > 0)
+        # Should be a HumanMessage with activation prompt
+        self.assertIsInstance(result["llm_input_messages"][0], HumanMessage)
+
+    def test_with_handoff_context_prepends_briefing(self):
+        hook = create_context_isolation_hook("inventory_agent")
+        messages = [
+            HumanMessage(content="Order something"),
+            ToolMessage(content="Transferred", name="transfer_to_inventory", tool_call_id="tc1"),
+        ]
+        state = {
+            "messages": messages,
+            "handoff_context": {
+                "from_agent": "order_agent",
+                "context_summary": "Order ORD0001 placed",
+                "expectation": "Check inventory",
+            },
+        }
+        result = hook(state)
+        # Should have briefing even with 0 own messages
+        self.assertTrue(len(result["llm_input_messages"]) >= 1)
+        self.assertIn("[Handoff from order_agent]", result["llm_input_messages"][0].content)
+
+
 if __name__ == "__main__":
     unittest.main()

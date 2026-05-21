@@ -246,5 +246,136 @@ class TestMessagesKeyExactMatch(unittest.TestCase):
         self.assertNotIn("should be ignored", contents)
 
 
+class TestUserVisibleEmittedToOrderAgent(unittest.TestCase):
+    """USER_VISIBLE is emitted targeting order_agent for initial customer message."""
+
+    def test_initial_message_targets_order_agent(self):
+        shop = _make_mock_shop()
+
+        msg = AIMessage(content="Welcome!", name="order_agent", id="msg-w")
+
+        def stream_reply(*a, **kw):
+            yield (("order_agent:abc",), {"agent": {"messages": [msg]}})
+
+        shop.app.stream.side_effect = stream_reply
+        shop.customer_agent.get_initial_message.return_value = "I want a latte"
+        shop.customer_agent.respond_to.return_value = None
+
+        bus = EventBus()
+        runner = ConversationRunner(shop, bus)
+        runner.start(scenario_index=0)
+        runner._thread.join(timeout=5)
+
+        events = bus.drain()
+        user_visible = [e for e in events if e.event_type == EventType.USER_VISIBLE]
+        self.assertEqual(len(user_visible), 1)
+        self.assertEqual(user_visible[0].agent_name, "order_agent")
+        self.assertEqual(user_visible[0].content, "I want a latte")
+
+
+class TestUserVisibleFollowsHandoff(unittest.TestCase):
+    """After a handoff, USER_VISIBLE targets the new agent."""
+
+    def test_targets_new_agent_after_handoff(self):
+        shop = _make_mock_shop()
+
+        call_count = [0]
+
+        def stream_with_handoff(*a, **kw):
+            nonlocal call_count
+            call_count[0] += 1
+            if call_count[0] == 1:
+                # First turn: order_agent replies then hands off to barista
+                msg = AIMessage(content="Let me brew that", name="order_agent", id="msg-1")
+                yield (("order_agent:abc",), {"agent": {
+                    "messages": [msg],
+                    "active_agent": "barista_agent",
+                    "handoff_context": {
+                        "from_agent": "order_agent",
+                        "context_summary": "Customer wants a latte",
+                        "expectation": "Brew the latte",
+                    },
+                }})
+            else:
+                # Second turn: barista replies
+                msg = AIMessage(content="Coffee is ready!", name="barista_agent", id="msg-2")
+                yield (("barista_agent:def",), {"agent": {"messages": [msg]}})
+
+        shop.app.stream.side_effect = stream_with_handoff
+        shop.customer_agent.get_initial_message.return_value = "I want a latte"
+
+        respond_calls = [0]
+
+        def mock_respond(reply):
+            respond_calls[0] += 1
+            if respond_calls[0] == 1:
+                return "Thanks, sounds good"
+            return None
+
+        shop.customer_agent.respond_to.side_effect = mock_respond
+
+        bus = EventBus()
+        runner = ConversationRunner(shop, bus)
+        runner.start(scenario_index=0)
+        runner._thread.join(timeout=5)
+
+        events = bus.drain()
+        user_visible = [e for e in events if e.event_type == EventType.USER_VISIBLE]
+        self.assertEqual(len(user_visible), 2)
+        self.assertEqual(user_visible[0].agent_name, "order_agent")
+        self.assertEqual(user_visible[0].content, "I want a latte")
+        self.assertEqual(user_visible[1].agent_name, "barista_agent")
+        self.assertEqual(user_visible[1].content, "Thanks, sounds good")
+
+
+class TestActiveAgentResetsOnNewConversation(unittest.TestCase):
+    """_active_agent resets to order_agent at the start of each conversation."""
+
+    def test_resets_on_new_run(self):
+        shop = _make_mock_shop()
+
+        call_count = [0]
+
+        def stream_handoff(*a, **kw):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                # Handoff to barista on first conversation
+                msg = AIMessage(content="Handing off", name="order_agent", id=f"msg-h{call_count[0]}")
+                yield (("order_agent:abc",), {"agent": {
+                    "messages": [msg],
+                    "active_agent": "barista_agent",
+                    "handoff_context": {
+                        "from_agent": "order_agent",
+                        "context_summary": "ctx",
+                        "expectation": "brew",
+                    },
+                }})
+            else:
+                # Simple reply
+                msg = AIMessage(content="Hello!", name="order_agent", id=f"msg-s{call_count[0]}")
+                yield (("order_agent:abc",), {"agent": {"messages": [msg]}})
+
+        shop.app.stream.side_effect = stream_handoff
+        shop.customer_agent.get_initial_message.return_value = "hi"
+        shop.customer_agent.respond_to.return_value = None
+
+        bus = EventBus()
+        runner = ConversationRunner(shop, bus)
+
+        # First run — triggers handoff
+        runner.start(scenario_index=0)
+        runner._thread.join(timeout=5)
+        bus.drain()
+
+        # Second run — should reset active agent
+        runner.start(scenario_index=0)
+        runner._thread.join(timeout=5)
+
+        events = bus.drain()
+        user_visible = [e for e in events if e.event_type == EventType.USER_VISIBLE]
+        self.assertTrue(len(user_visible) >= 1)
+        self.assertEqual(user_visible[0].agent_name, "order_agent")
+
+
 if __name__ == "__main__":
     unittest.main()

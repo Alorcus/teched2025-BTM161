@@ -171,6 +171,8 @@ class AgentPanel(param.Parameterized):
             ts = msg.get("ts", "")
             if role == "ai":
                 prefix = f'<span style="color:{self.color};font-weight:bold;">AI:</span>'
+            elif role == "user":
+                prefix = '<span style="color:#2E7D32;font-weight:bold;">User:</span>'
             elif role == "tool":
                 prefix = '<span style="color:#666;font-weight:bold;">Tool:</span>'
             elif role == "handoff":

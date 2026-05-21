@@ -173,6 +173,10 @@ def _dispatch_event(
              f'<span style="color:#424242"><b>Customer</b></span>: '
              f'{_truncate(event.content)}')
 
+    elif event.event_type == EventType.USER_VISIBLE:
+        if panel:
+            panel.add_message("user", event.content)
+
     elif event.event_type == EventType.CONVERSATION_START:
         _log(log_entries, conversation_log,
              f'<span style="color:#4CAF50"><b>START</b></span> {_truncate(event.content)}')

@@ -21,6 +21,7 @@ class ConversationRunner:
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
         self.is_running = False
+        self._active_agent = "order_agent"
 
     def start(self, scenario_index=None):
         with self._lock:
@@ -49,6 +50,7 @@ class ConversationRunner:
     def _run_conversation(self, scenario_index):
         reset_inventory()
         self.shop.customer_agent.reset(scenario_index)
+        self._active_agent = "order_agent"
         thread_id = str(uuid.uuid4())
 
         scenario_label = (
@@ -68,6 +70,11 @@ class ConversationRunner:
             agent_name="customer",
             content=message,
         ))
+        self.event_bus.publish(DashboardEvent(
+            event_type=EventType.USER_VISIBLE,
+            agent_name=self._active_agent,
+            content=message,
+        ))
 
         turns = 0
         while message:
@@ -85,6 +92,11 @@ class ConversationRunner:
                 self.event_bus.publish(DashboardEvent(
                     event_type=EventType.CUSTOMER_MESSAGE,
                     agent_name="customer",
+                    content=message,
+                ))
+                self.event_bus.publish(DashboardEvent(
+                    event_type=EventType.USER_VISIBLE,
+                    agent_name=self._active_agent,
                     content=message,
                 ))
 
@@ -142,12 +154,15 @@ class ConversationRunner:
 
                         if "handoff_context" in node_data and node_data["handoff_context"]:
                             hc = node_data["handoff_context"]
+                            target = node_data.get("active_agent")
                             self.event_bus.publish(DashboardEvent(
                                 event_type=EventType.HANDOFF,
                                 agent_name=hc.get("from_agent", resolved_agent),
                                 handoff_context=hc,
-                                target_agent=node_data.get("active_agent"),
+                                target_agent=target,
                             ))
+                            if target:
+                                self._active_agent = target
 
                         msgs_key = next(
                             (k for k in node_data if k == "messages"), None
