@@ -1,8 +1,11 @@
 import requests
 import json
+import subprocess
+import socket
 import time
 from typing import Dict, Optional
 import logging
+from pathlib import Path
 
 logger = logging.getLogger("coffee_shop.barista_agent")
 
@@ -21,10 +24,81 @@ from .order_store import load_order, save_order, get_order
 
 COFFEE_MACHINE_URL = "http://127.0.0.1:8001"
 REQUEST_TIMEOUT = 5
+COFFEE_MACHINE_PATH = Path(__file__).parent.parent / "services" / "coffee-machine"
+COFFEE_MACHINE_PORT = 8001
+COFFEE_MACHINE_PROCESS = None
 
 # Persistent state for machine jobs
 ORDER_JOB_MAP: Dict[str, str] = {}
 ORDER_STATUS_CACHE: Dict[str, dict] = {}
+
+
+def is_machine_running() -> bool:
+    """Check if coffee machine is responsive."""
+    try:
+        response = safe_get(f"{COFFEE_MACHINE_URL}/docs")  # FastAPI docs endpoint
+        return response is not None and response.status_code < 500
+    except:
+        return False
+
+def check_port_in_use(port: int) -> bool:
+    """Check if a port is already in use."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.bind(('127.0.0.1', port))
+            return False
+        except socket.error:
+            return True
+
+def start_coffee_machine() -> bool:
+    """Start the coffee machine uvicorn server as a subprocess."""
+    global COFFEE_MACHINE_PROCESS
+    
+    # Check if already running
+    if is_machine_running():
+        return True
+    
+    # Check if port is in use but machine not responding (stuck process)
+    if check_port_in_use(COFFEE_MACHINE_PORT):
+        logger.warning(f"Port {COFFEE_MACHINE_PORT} is in use but machine not responding")
+        # Could kill existing process here, but for safety, we'll just return False
+        return False
+    
+    try:
+        COFFEE_MACHINE_PROCESS = subprocess.Popen(
+            [
+                "poetry", "run", "uvicorn", "main:app", 
+                "--reload", 
+                "--port", str(COFFEE_MACHINE_PORT),
+                "--host", "127.0.0.1"
+            ],
+            cwd=str(COFFEE_MACHINE_PATH),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if hasattr(subprocess, 'CREATE_NEW_PROCESS_GROUP') else 0
+        )
+        
+        for i in range(10):  # Try for 10 seconds
+            time.sleep(1)
+            if is_machine_running():
+                return True
+            if i % 2 == 0:  # Print progress every 2 seconds
+                return False
+        
+    except Exception as e:
+        logger.error(f"Failed to start coffee machine: {e}")
+        return False
+
+def stop_coffee_machine():
+    """Stop the coffee machine subprocess (optional, for cleanup)."""
+    global COFFEE_MACHINE_PROCESS
+    if COFFEE_MACHINE_PROCESS:
+        COFFEE_MACHINE_PROCESS.terminate()
+        try:
+            COFFEE_MACHINE_PROCESS.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            COFFEE_MACHINE_PROCESS.kill()
+        COFFEE_MACHINE_PROCESS = None
 
 
 # ----------------------------
@@ -68,6 +142,19 @@ def tool_response(status, message, order_id: str, extra=None):
 @tool(args_schema=OrderIdSchema)
 def start_preparation(order_id: str) -> str:
     """Start coffee preparation and automatically wait for completion."""
+
+    if not is_machine_running():
+        
+        # Try to start the coffee machine
+        if not start_coffee_machine():
+            return tool_response(
+                "error",
+                "❌ Coffee machine is not available. Please try again in a moment or contact customer service.",
+                order_id
+            )
+        
+        # Extra wait for the machine to fully initialize
+        time.sleep(2)
     
     order = load_order(order_id)
     if not order:

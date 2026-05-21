@@ -9,8 +9,8 @@ from logger import log_event
 # ----------------------------
 # Config
 # ----------------------------
-SEED = int(os.getenv("COFFEE_MACHINE_SEED", "42"))
-FAILURE_RATE = float(os.getenv("COFFEE_MACHINE_FAILURE_RATE", "0.5"))
+SEED = int(time.time() * 1000) % 1000000  # Based on current time
+FAILURE_RATE = 0.2  # 20% failure rate
 
 rng = random.Random(SEED)
 
@@ -52,9 +52,10 @@ def create_job(drink: str, correlation_id: str):
     job_id = str(uuid.uuid4())
 
     duration = rng.uniform(10, 15)
-    will_fail = rng.random() < FAILURE_RATE
+    random_val = rng.random()
+    will_fail = random_val < FAILURE_RATE
 
-    print(f"[DEBUG] Job {job_id[:8]}: random={rng.random():.4f}, will_fail={will_fail}, FAILURE_RATE={FAILURE_RATE}")
+    print(f"[DEBUG] Job {job_id[:8]}: random={random_val:.4f}, will_fail={will_fail}, FAILURE_RATE={FAILURE_RATE}")
 
     job = {
         "job_id": job_id,
