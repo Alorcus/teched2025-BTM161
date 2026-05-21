@@ -55,7 +55,7 @@ def emit_event(job, activity: str, duration: float = None):
 def create_job(drink: str, correlation_id: str):
     job_id = str(uuid.uuid4())
 
-    duration = rng.uniform(10, 15)
+    duration = rng.uniform(1, 3)
     random_val = rng.random()
     will_fail = random_val < FAILURE_RATE
 
