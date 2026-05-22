@@ -158,6 +158,7 @@ def tool_response(status, message, order_id: str, extra=None):
 @tool(args_schema=OrderIdSchema)
 def start_preparation(order_id: str) -> str:
     """Start coffee preparation and automatically wait for completion."""
+    logger.debug("start_preparation called for %s", order_id)
 
     if not is_machine_running():
         # Try to start the coffee machine
@@ -223,24 +224,53 @@ def start_preparation(order_id: str) -> str:
         "status": "brewing",
         "started_at": time.time(),
         "attempt_count": attempt_count,
+        "eta_seconds": data.get("eta_seconds", 15),
     }
 
-    # Get ETA
-    eta_seconds = data.get("eta_seconds", 15)
+    eta_seconds = ORDER_STATUS_CACHE[order_id]["eta_seconds"]
 
-    # Send initial response (this will be shown to customer)
-    initial_message = f"☕ Brewing started! This will take about {eta_seconds:.0f} seconds. I'll let you know when it's ready."
+    return tool_response(
+        "brewing",
+        f"☕ Brewing started! This will take about {eta_seconds:.0f} seconds. Call end_preparation when ready to check.",
+        order_id,
+        {"attempt": attempt_count, "eta_seconds": eta_seconds},
+    )
 
-    # POLLING LOOP - wait for completion
-    max_wait = eta_seconds + 5  # Wait a bit longer than ETA
-    poll_interval = 2  # Check every 2 seconds
+
+@tool(args_schema=OrderIdSchema)
+def end_preparation(order_id: str) -> str:
+    """Wait for coffee preparation to complete and return the final result."""
+    logger.debug("end_preparation called for %s", order_id)
+
+    cache = ORDER_STATUS_CACHE.get(order_id)
+    if not cache or cache.get("status") != "brewing":
+        return tool_response(
+            "error",
+            f"No active brewing found for order {order_id}. Call start_preparation first.",
+            order_id,
+        )
+
+    job_id = cache.get("job_id")
+    if not job_id:
+        return tool_response("error", "No job_id found for this order.", order_id)
+
+    order = load_order(order_id)
+    if not order:
+        return tool_response("error", f"Order {order_id} not found", order_id)
+
+    attempt_count = cache.get("attempt_count", 1)
+    started_at = cache.get("started_at", time.time())
+    elapsed = time.time() - started_at
+
+    eta_seconds = cache.get("eta_seconds", 15)
+    max_wait = max(eta_seconds + 5 - elapsed, 5)
+    poll_interval = 2
     waited = 0
 
     while waited < max_wait:
         time.sleep(poll_interval)
         waited += poll_interval
 
-        # Check status
         status_response = safe_get(f"{COFFEE_MACHINE_URL}/jobs/{job_id}")
         if status_response and status_response.status_code == 200:
             try:
@@ -248,7 +278,6 @@ def start_preparation(order_id: str) -> str:
                 status = job.get("status", "unknown")
 
                 if status == "ready":
-                    # Success!
                     order.status = OrderStatus.COMPLETED
                     save_order(order)
                     if order_id in ORDER_JOB_MAP:
@@ -264,7 +293,6 @@ def start_preparation(order_id: str) -> str:
                     )
 
                 elif status == "failed":
-                    # Failed
                     order.status = OrderStatus.PREPARATION_ERROR
                     save_order(order)
                     if order_id in ORDER_JOB_MAP:
@@ -280,7 +308,6 @@ def start_preparation(order_id: str) -> str:
             except Exception as e:
                 logger.error(f"Status check error: {e}")
 
-    # Timeout — mark as failed so retries are possible
     order.status = OrderStatus.PREPARATION_ERROR
     save_order(order)
     return tool_response("error", "Brewing timed out. Please try again.", order_id)
@@ -289,6 +316,7 @@ def start_preparation(order_id: str) -> str:
 @tool(args_schema=OrderIdSchema)
 def estimate_prep_time(order_id: str) -> str:
     """Estimate preparation time for an order."""
+    logger.debug("estimate_prep_time called for %s", order_id)
     order = load_order(order_id)
     if not order:
         return tool_response("error", f"Order not found", order_id)
@@ -322,33 +350,32 @@ def estimate_prep_time(order_id: str) -> str:
 DEFAULT_PROMPT = """You are a barista agent responsible for coffee preparation.
 
 WORKFLOW:
-1. Call start_preparation(order_id) - This starts brewing AND automatically waits for completion
-   - It will take a few seconds (the coffee needs time to brew)
-   - You will see "Brewing started..." then the tool will wait
+1. Call start_preparation(order_id) - This starts brewing and returns immediately with the ETA
+2. Call end_preparation(order_id) - This waits for the brew to finish and returns the result
    - It returns either "ready" or "failed"
 
-2. Based on the result:
+3. Based on the result:
    - If "ready" → Tell the customer: "✅ Your coffee is ready!"
    - If "failed" → Ask the customer: "❌ Brewing failed on attempt #{attempt}. Would you like me to try again or transfer you to customer service?"
 
-3. If customer wants to retry:
+4. If customer wants to retry:
    - Call start_preparation(order_id) again (the attempt count will auto-increment)
+   - Then call end_preparation(order_id) to wait for the result
 
-4. If customer wants customer service:
+5. If customer wants customer service:
    - Call transfer_to_agent(customer_service_agent,context_summary, expectation)
    - context_summary: summarize what happened (e.g. "Brewing failed twice for order X")
    - expectation: what should customer service do (e.g. "Help the customer with alternatives")
 
 IMPORTANT NOTES:
-- The start_preparation tool handles all the waiting and checking automatically
-- You don't need to call any other status checking tools
+- Always call end_preparation after start_preparation to get the final result
 - Be honest about failures and give customers clear choices
 - Don't call start_preparation without asking the customer if he wants to try
 
 Remember: Coffee takes time to brew. Be patient and keep the customer informed!
 """
 
-DEFAULT_TOOLS = [start_preparation, estimate_prep_time, get_order, transfer_to_agent]
+DEFAULT_TOOLS = [start_preparation, end_preparation, estimate_prep_time, get_order, transfer_to_agent]
 DEFAULT_TOOL_NAMES = [t.name for t in DEFAULT_TOOLS]
 
 

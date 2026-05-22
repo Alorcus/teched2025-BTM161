@@ -22,6 +22,7 @@ from .context_isolation import create_context_isolation_hook
 @tool(args_schema=OrderIdSchema)
 def check_inventory(order_id: str) -> str:
     """Check if all items in the order are available in inventory."""
+    logger.debug("check_inventory called for %s", order_id)
     order = load_order(order_id)
     if order is None:
         return f"Error: Order '{order_id}' not found."
@@ -55,6 +56,7 @@ def check_inventory(order_id: str) -> str:
 @tool(args_schema=OrderIdSchema)
 def update_stock(order_id: str) -> str:
     """Update inventory after order confirmation."""
+    logger.debug("update_stock called for %s", order_id)
     order = load_order(order_id)
     if order is None:
         return f"Error: Order '{order_id}' not found."
@@ -86,6 +88,7 @@ def update_stock(order_id: str) -> str:
 @tool
 def get_alternatives(item_name: str) -> str:
     """Get alternative items for out-of-stock products."""
+    logger.debug("get_alternatives called for %s", item_name)
     item = get_inventory_item(item_name.lower())
     if item is None:
         return f"Error: Item '{item_name}' not found in menu."

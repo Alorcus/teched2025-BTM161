@@ -25,6 +25,7 @@ class PartialRefundSchema(BaseModel):
 @tool(args_schema=OrderIdSchema)
 def offer_refund(order_id: str) -> str:
     """Process a full refund for an order."""
+    logger.debug("offer_refund called for %s", order_id)
     order = load_order(order_id)
     if order is None:
         return f"Error: Order '{order_id}' not found."
@@ -45,6 +46,7 @@ def offer_refund(order_id: str) -> str:
 @tool(args_schema=PartialRefundSchema)
 def offer_partial_refund(order_id: str, refund_percent: int = 50) -> str:
     """Process a partial refund for an order."""
+    logger.debug("offer_partial_refund called for %s, refund=%d%%", order_id, refund_percent)
     order = load_order(order_id)
     if order is None:
         return f"Error: Order '{order_id}' not found."

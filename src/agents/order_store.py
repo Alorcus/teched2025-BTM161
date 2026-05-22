@@ -251,6 +251,7 @@ class GetOrderSchema(BaseModel):
 @tool(args_schema=GetOrderSchema)
 def get_order(order_id: str) -> str:
     """Look up the current state of an order by its ID."""
+    logger.debug("get_order called for %s", order_id)
     order = load_order(order_id)
     if order is None:
         return f"Error: Order '{order_id}' not found."

@@ -36,6 +36,7 @@ class CalculateTotalInputSchema(BaseModel):
 def process_order(order: list[CustomerOrderItemSchema], customer) -> str:
     """Process a customer order.
     Returns the created order details."""
+    logger.debug("process_order called for customer=%s, items=%d", customer, len(order))
 
     try:
         ordered_items = []
@@ -99,6 +100,7 @@ def process_order(order: list[CustomerOrderItemSchema], customer) -> str:
 @tool(args_schema=CalculateTotalInputSchema)
 def calculate_total(order_id: str, discount_percent: int = 0) -> str:
     """Updates the order's total with optional discount."""
+    logger.debug("calculate_total called for %s, discount=%d%%", order_id, discount_percent)
     order = load_order(order_id)
     if order is None:
         return f"Error: Order '{order_id}' not found."

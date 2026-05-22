@@ -13,6 +13,7 @@ EVENT_ATTRIBUTES = {
     "user_prompt": ["ocel_time"],
     # tools
     "start_preparation": ["ocel_time", "duration"],
+    "end_preparation": ["ocel_time", "duration"],
     "estimate_prep_time": ["ocel_time", "duration"],
     "process_order": ["ocel_time", "duration"],
     "check_inventory": ["ocel_time", "duration"],
