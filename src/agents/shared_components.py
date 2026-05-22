@@ -124,13 +124,13 @@ class Order(SQLModel, table=True):
 # ---------------------------------------------------------------------------
 
 MENU = {
-    "espresso": MenuItem(name="espresso", price=2.50, stock=20, category="coffee"),
-    "latte": MenuItem(name="latte", price=4.00, stock=15, category="coffee"),
-    "cappuccino": MenuItem(name="cappuccino", price=3.75, stock=18, category="coffee"),
-    "americano": MenuItem(name="americano", price=3.00, stock=22, category="coffee"),
-    "croissant": MenuItem(name="croissant", price=2.75, stock=8, category="pastry"),
-    "muffin": MenuItem(name="muffin", price=3.25, stock=12, category="pastry"),
-    "sandwich": MenuItem(name="sandwich", price=6.50, stock=5, category="food"),
+    "espresso": MenuItem(name="espresso", price=2.50, stock=3, category="coffee"),
+    "latte": MenuItem(name="latte", price=4.00, stock=2, category="coffee"),
+    "cappuccino": MenuItem(name="cappuccino", price=3.75, stock=3, category="coffee"),
+    "americano": MenuItem(name="americano", price=3.00, stock=4, category="coffee"),
+    "croissant": MenuItem(name="croissant", price=2.75, stock=2, category="pastry"),
+    "muffin": MenuItem(name="muffin", price=3.25, stock=3, category="pastry"),
+    "sandwich": MenuItem(name="sandwich", price=6.50, stock=1, category="food"),
 }
 
 

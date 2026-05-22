@@ -34,12 +34,10 @@ class AgentPanel(param.Parameterized):
         self._header_pane = pn.pane.HTML("", sizing_mode="stretch_width")
         self._handoff_pane = pn.pane.HTML("", sizing_mode="stretch_width")
         self._messages_pane = pn.pane.HTML("", sizing_mode="stretch_width")
-        self._tool_calls_pane = pn.pane.HTML("", sizing_mode="stretch_width")
 
         self._render_header()
         self._render_handoff()
         self._render_messages()
-        self._render_tool_calls()
 
     def panel(self):
         tools_html = " ".join(
@@ -67,11 +65,9 @@ class AgentPanel(param.Parameterized):
 
         return pn.Column(
             self._header_pane,
-            prompt_card,
             tools_section,
             self._handoff_pane,
             self._messages_pane,
-            self._tool_calls_pane,
             sizing_mode="stretch_both",
             styles={
                 "border": f"2px solid {self.color}",
@@ -91,20 +87,26 @@ class AgentPanel(param.Parameterized):
 
     def add_tool_call(self, name: str, args: dict | None):
         ts = time.strftime("%H:%M:%S")
-        tcs = list(self.tool_calls)
-        tcs.append({"name": name, "args": args, "result": None, "ts": ts})
-        self.tool_calls = tcs
-        self._render_tool_calls()
+        args_str = ""
+        if args:
+            try:
+                args_str = json.dumps(args, ensure_ascii=False)
+                if len(args_str) > 100:
+                    args_str = args_str[:100] + "..."
+            except (TypeError, ValueError):
+                args_str = "..."
+        msgs = list(self.messages)
+        msgs.append({"role": "tool_call", "content": f"{name}({args_str})", "ts": ts, "tool_name": name})
+        self.messages = msgs
+        self._render_messages()
 
     def set_tool_result(self, name: str, result: str):
-        if self.tool_calls:
-            updated = list(self.tool_calls)
-            for i in range(len(updated) - 1, -1, -1):
-                if updated[i]["name"] == name and updated[i]["result"] is None:
-                    updated[i] = {**updated[i], "result": result}
-                    break
-            self.tool_calls = updated
-            self._render_tool_calls()
+        ts = time.strftime("%H:%M:%S")
+        result_short = result[:150] if len(result) > 150 else result
+        msgs = list(self.messages)
+        msgs.append({"role": "tool_result", "content": f"{name} → {result_short}", "ts": ts, "tool_name": name})
+        self.messages = msgs
+        self._render_messages()
 
     def set_status(self, status: str):
         self.status = status
@@ -122,7 +124,6 @@ class AgentPanel(param.Parameterized):
         self._render_header()
         self._render_handoff()
         self._render_messages()
-        self._render_tool_calls()
 
     def _render_header(self):
         status_colors = {
@@ -175,6 +176,10 @@ class AgentPanel(param.Parameterized):
                 prefix = '<span style="color:#2E7D32;font-weight:bold;">User:</span>'
             elif role == "tool":
                 prefix = '<span style="color:#666;font-weight:bold;">Tool:</span>'
+            elif role == "tool_call":
+                prefix = '<span style="color:#2196F3;font-weight:bold;">⚙️</span>'
+            elif role == "tool_result":
+                prefix = '<span style="color:#666;">→</span>'
             elif role == "handoff":
                 prefix = '<span style="color:#9C27B0;font-weight:bold;">Handoff:</span>'
             else:
@@ -186,55 +191,3 @@ class AgentPanel(param.Parameterized):
             )
         html_parts.append("</div>")
         self._messages_pane.object = "\n".join(html_parts)
-
-    def _render_tool_calls(self):
-        if not self.tool_calls:
-            self._tool_calls_pane.object = ""
-            return
-
-        html_parts = [
-            '<div style="font-size:11px;margin-top:8px;">'
-            '<strong style="font-size:12px;">Tool Calls:</strong>'
-        ]
-        for i, tc in enumerate(self.tool_calls[-10:], 1):
-            name = html_mod.escape(tc["name"])
-            ts = tc.get("ts", "")
-            args_full = ""
-            args_display = ""
-            if tc["args"]:
-                try:
-                    args_full = json.dumps(tc["args"], ensure_ascii=False)
-                    if len(args_full) > 100:
-                        args_display = html_mod.escape(args_full[:100]) + "..."
-                    else:
-                        args_display = html_mod.escape(args_full)
-                except (TypeError, ValueError):
-                    args_full = "..."
-                    args_display = "..."
-
-            args_title = html_mod.escape(args_full)
-
-            result_badge = ""
-            if tc["result"] is not None:
-                result_full = str(tc["result"])
-                result_short = html_mod.escape(result_full[:80])
-                result_title = html_mod.escape(result_full)
-                if len(result_full) > 80:
-                    result_short += "..."
-                result_badge = (
-                    f'<div style="color:#666;margin-left:16px;" title="{result_title}">'
-                    f'→ {result_short}</div>'
-                )
-            else:
-                result_badge = (
-                    '<div style="color:#FFC107;margin-left:16px;">⏳ pending</div>'
-                )
-
-            html_parts.append(
-                f'<div style="padding:3px 0;" title="{args_title}">'
-                f'<span style="color:#999;font-size:10px;margin-right:4px;">{ts}</span>'
-                f'<code>{name}</code>({args_display})'
-                f'{result_badge}</div>'
-            )
-        html_parts.append("</div>")
-        self._tool_calls_pane.object = "\n".join(html_parts)

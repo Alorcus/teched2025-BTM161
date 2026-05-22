@@ -1,11 +1,12 @@
 import html as html_mod
+import json
 import logging
 import time
 
 import panel as pn
 
 from src.coffee_shop import CoffeeShop
-from src.agents import CUSTOMER_SCENARIOS
+from src.agents import CUSTOMER_SCENARIOS, build_default_prompt
 from src.agents.order_agent import DEFAULT_PROMPT as ORDER_PROMPT, DEFAULT_TOOL_NAMES as ORDER_TOOLS
 from src.agents.inventory_agent import DEFAULT_PROMPT as INVENTORY_PROMPT, DEFAULT_TOOL_NAMES as INVENTORY_TOOLS
 from src.agents.barista_agent import DEFAULT_PROMPT as BARISTA_PROMPT, DEFAULT_TOOL_NAMES as BARISTA_TOOLS
@@ -13,6 +14,8 @@ from src.agents.customer_service_agent import DEFAULT_PROMPT as CS_PROMPT, DEFAU
 from .event_bus import EventBus, EventType
 from .agent_panel import AgentPanel
 from .conversation_runner import ConversationRunner
+from .stock_panel import StockPanel
+from .coffee_machine_panel import CoffeeMachinePanel
 
 logger = logging.getLogger("coffee_shop.dashboard")
 
@@ -31,6 +34,8 @@ def create_dashboard():
     shop.open_shop()
     event_bus = EventBus()
     runner = ConversationRunner(shop, event_bus)
+    stock_panel = StockPanel()
+    coffee_machine_panel = CoffeeMachinePanel()
 
     agent_panels: dict[str, AgentPanel] = {}
     for agent_name, config in shop.agent_config.items():
@@ -49,13 +54,32 @@ def create_dashboard():
     for (agent_name, panel_obj), (r, c) in zip(agent_panels.items(), positions):
         grid[r, c] = panel_obj.panel()
 
+    scenario_labels = [
+        "Latte & croissant (friendly)",
+        "2 espressos (in a hurry)",
+        "Complaint (cold cappuccino)",
+        "Ask for a recommendation",
+    ]
     scenario_options = {
-        f"{i}: {s[:50]}": i for i, s in enumerate(CUSTOMER_SCENARIOS)
+        f"{i}: {scenario_labels[i]}": i for i in range(len(CUSTOMER_SCENARIOS))
     }
     scenario_select = pn.widgets.Select(
         name="", options=scenario_options, sizing_mode="stretch_width",
         margin=(0, 0, 5, 0),
     )
+    prompt_textarea = pn.widgets.TextAreaInput(
+        name="Customer Prompt",
+        value=build_default_prompt(0),
+        height=200,
+        sizing_mode="stretch_width",
+        margin=(0, 0, 10, 0),
+    )
+
+    def on_scenario_change(event):
+        prompt_textarea.value = build_default_prompt(event.new)
+
+    scenario_select.param.watch(on_scenario_change, "value")
+
     run_button = pn.widgets.Button(
         name="Run Conversation", button_type="primary", sizing_mode="stretch_width"
     )
@@ -75,25 +99,24 @@ def create_dashboard():
         log_entries.clear()
         conversation_log.object = ""
         status_indicator.value = True
-        runner.start(scenario_index=scenario_select.value)
+        runner.start(scenario_index=scenario_select.value, custom_prompt=prompt_textarea.value)
 
     run_button.on_click(on_run)
 
     def poll_events():
         events = event_bus.drain()
         for ev in events:
-            _dispatch_event(ev, agent_panels, log_entries, conversation_log)
+            _dispatch_event(ev, agent_panels, log_entries, conversation_log, coffee_machine_panel)
         if not runner.is_running and not events:
             status_indicator.value = False
+        stock_panel.refresh()
+        coffee_machine_panel.update_progress()
 
     sidebar = pn.Column(
-        pn.pane.HTML(
-            '<h2 style="margin:0 0 24px 0;padding:0;">Agent Observatory</h2>',
-            sizing_mode="stretch_width",
-        ),
         pn.pane.HTML('<label style="font-size:13px;font-weight:500;">Scenario</label>',
                      sizing_mode="stretch_width", margin=(0, 0, 4, 0)),
         scenario_select,
+        prompt_textarea,
         run_button,
         pn.Row(status_indicator, pn.pane.Markdown("", width=10)),
         pn.layout.Divider(),
@@ -108,7 +131,14 @@ def create_dashboard():
     template = pn.template.FastListTemplate(
         title="Coffee Shop Agent Observatory",
         sidebar=[sidebar],
-        main=[grid],
+        main=[pn.Column(
+            pn.Row(
+                pn.Column(stock_panel.panel(), sizing_mode="stretch_both", styles={"flex": "2"}),
+                pn.Column(coffee_machine_panel.panel(), sizing_mode="stretch_both", styles={"flex": "1"}),
+                sizing_mode="stretch_width",
+            ),
+            grid, sizing_mode="stretch_both",
+        )],
         accent_base_color="#795548",
         header_background="#4E342E",
         theme="default",
@@ -123,7 +153,8 @@ def create_dashboard():
 
 def _dispatch_event(
     event, agent_panels: dict[str, AgentPanel],
-    log_entries: list[str], conversation_log
+    log_entries: list[str], conversation_log,
+    coffee_machine_panel: CoffeeMachinePanel,
 ):
     panel = agent_panels.get(event.agent_name)
 
@@ -146,12 +177,34 @@ def _dispatch_event(
         if panel:
             panel.set_status("executing_tool")
             panel.add_tool_call(event.tool_name or "?", event.tool_args)
+        if event.tool_name == "start_preparation":
+            coffee_machine_panel.start_brewing("coffee")
 
     elif event.event_type == EventType.TOOL_RESULT:
         if panel:
             panel.set_status("idle")
             panel.set_tool_result(event.tool_name or "?", event.tool_result or "")
             panel.add_message("tool", f"{event.tool_name}: {_truncate(event.tool_result or '', 100)}")
+        if event.tool_name == "end_preparation" and event.tool_result:
+            try:
+                result_data = json.loads(event.tool_result)
+                status = result_data.get("status", "")
+                if status == "ready":
+                    coffee_machine_panel.complete(True)
+                elif status == "contaminated":
+                    coffee_machine_panel.complete(True)
+                elif status in ("failed", "error"):
+                    coffee_machine_panel.complete(False)
+                    coffee_machine_panel.mark_dirty()
+            except (json.JSONDecodeError, TypeError):
+                pass
+        elif event.tool_name == "clean_machine" and event.tool_result:
+            try:
+                result_data = json.loads(event.tool_result)
+                if result_data.get("status") in ("cleaned", "already_clean"):
+                    coffee_machine_panel.reset()
+            except (json.JSONDecodeError, TypeError):
+                pass
 
     elif event.event_type == EventType.HANDOFF:
         if panel:

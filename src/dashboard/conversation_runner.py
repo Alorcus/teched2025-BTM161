@@ -1,3 +1,4 @@
+import json
 import threading
 import time
 import uuid
@@ -24,19 +25,19 @@ class ConversationRunner:
         self.is_running = False
         self._active_agent = "order_agent"
 
-    def start(self, scenario_index=None):
+    def start(self, scenario_index=None, custom_prompt=None):
         with self._lock:
             if self.is_running:
                 return
             self.is_running = True
         self._thread = threading.Thread(
-            target=self._run, args=(scenario_index,), daemon=True
+            target=self._run, args=(scenario_index, custom_prompt), daemon=True
         )
         self._thread.start()
 
-    def _run(self, scenario_index):
+    def _run(self, scenario_index, custom_prompt=None):
         try:
-            self._run_conversation(scenario_index)
+            self._run_conversation(scenario_index, custom_prompt)
         except Exception as e:
             logger.exception("Conversation runner failed")
             self.event_bus.publish(DashboardEvent(
@@ -48,9 +49,9 @@ class ConversationRunner:
             with self._lock:
                 self.is_running = False
 
-    def _run_conversation(self, scenario_index):
+    def _run_conversation(self, scenario_index, custom_prompt=None):
         reset_inventory()
-        self.shop.customer_agent.reset(scenario_index)
+        self.shop.customer_agent.reset(scenario_index, custom_prompt=custom_prompt)
         self._active_agent = "order_agent"
         thread_id = str(uuid.uuid4())
 
@@ -227,15 +228,27 @@ class ConversationRunner:
                     content=msg.content,
                 ))
         elif isinstance(msg, ToolMessage):
+            content = msg.content if isinstance(msg.content, str) else str(msg.content)
             self.event_bus.publish(DashboardEvent(
                 event_type=EventType.TOOL_RESULT,
                 agent_name=agent_name,
                 tool_name=getattr(msg, "name", None),
-                tool_result=msg.content if isinstance(msg.content, str) else str(msg.content),
+                tool_result=content,
             ))
+            self._check_contamination(content)
 
     def _parse_agent_name(self, ns: tuple) -> str | None:
         if not ns:
             return None
         first = ns[0] if isinstance(ns[0], str) else str(ns[0])
         return first.split(":")[0] if ":" in first else first
+
+    def _check_contamination(self, content: str):
+        try:
+            data = json.loads(content)
+            if data.get("contaminated") is True:
+                self.shop.customer_agent.inject_experience(
+                    "You received your coffee but it tastes slightly off — almost metallic. Something isn't right."
+                )
+        except (json.JSONDecodeError, TypeError, AttributeError):
+            pass

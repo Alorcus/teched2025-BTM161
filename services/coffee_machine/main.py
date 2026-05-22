@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from .state import create_job, get_job
+from .state import create_job, get_job, clean_machine
 from .worker import run_worker
 
 # Configure the coffee_shop.coffee_machine logger hierarchy to match the main program's format.
@@ -66,8 +66,16 @@ def job_status(job_id: str):
         "job_id": job["job_id"],
         "status": job["status"],
         "started_at": job["started_at"],
-        "finished_at": job["finished_at"]
+        "finished_at": job["finished_at"],
+        "contaminated": job.get("contaminated", False),
     }
+
+
+@app.post("/clean")
+def clean():
+    result = clean_machine()
+    logger.info("Clean request: %s", result["status"])
+    return result
 
 
 @app.get("/healthz")

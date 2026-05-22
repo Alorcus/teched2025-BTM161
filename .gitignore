@@ -23,3 +23,6 @@ dev.ipynb
 *.db
 *.db-wal
 *.db-shm
+
+# Coffee machine service logs
+src/services/coffee-machine/logs/

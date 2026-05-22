@@ -278,12 +278,21 @@ def end_preparation(order_id: str) -> str:
                 status = job.get("status", "unknown")
 
                 if status == "ready":
+                    is_contaminated = job.get("contaminated", False)
                     order.status = OrderStatus.COMPLETED
                     save_order(order)
                     if order_id in ORDER_JOB_MAP:
                         del ORDER_JOB_MAP[order_id]
                     if order_id in ORDER_STATUS_CACHE:
                         del ORDER_STATUS_CACHE[order_id]
+
+                    if is_contaminated:
+                        return tool_response(
+                            "contaminated",
+                            f"⚠️ Coffee is ready but the machine was dirty — the drink may be contaminated.",
+                            order_id,
+                            {"attempt": attempt_count, "contaminated": True},
+                        )
 
                     return tool_response(
                         "ready",
@@ -347,16 +356,36 @@ def estimate_prep_time(order_id: str) -> str:
     )
 
 
+@tool
+def clean_machine() -> str:
+    """Clean the coffee machine after a brew failure to prevent contamination."""
+    logger.debug("clean_machine called")
+
+    if not is_machine_running():
+        return json.dumps({"status": "error", "message": "Coffee machine is not available."})
+
+    response = safe_post(f"{COFFEE_MACHINE_URL}/clean", {})
+    if response is None:
+        return json.dumps({"status": "error", "message": "Coffee machine unreachable."})
+
+    try:
+        data = response.json()
+        return json.dumps(data)
+    except Exception:
+        return json.dumps({"status": "error", "message": "Invalid response from machine."})
+
+
 DEFAULT_PROMPT = """You are a barista agent responsible for coffee preparation.
 
 WORKFLOW:
 1. Call start_preparation(order_id) - This starts brewing and returns immediately with the ETA
 2. Call end_preparation(order_id) - This waits for the brew to finish and returns the result
-   - It returns either "ready" or "failed"
+   - It returns either "ready", "contaminated", or "failed"
 
 3. Based on the result:
    - If "ready" → Tell the customer: "✅ Your coffee is ready!"
-   - If "failed" → Ask the customer: "❌ Brewing failed on attempt #{attempt}. Would you like me to try again or transfer you to customer service?"
+   - If "contaminated" → The coffee was brewed on a dirty machine. Tell the customer: "⚠️ I need to remake your coffee — the machine wasn't clean." Then call clean_machine(), then retry.
+   - If "failed" → The machine broke. Call clean_machine() IMMEDIATELY, then ask: "❌ Brewing failed on attempt #{attempt}. Would you like me to try again or transfer you to customer service?"
 
 4. If customer wants to retry:
    - Call start_preparation(order_id) again (the attempt count will auto-increment)
@@ -369,13 +398,14 @@ WORKFLOW:
 
 IMPORTANT NOTES:
 - Always call end_preparation after start_preparation to get the final result
+- After a brew failure, you MUST call clean_machine() before retrying. If you skip cleaning, the coffee will be contaminated.
 - Be honest about failures and give customers clear choices
 - Don't call start_preparation without asking the customer if he wants to try
 
 Remember: Coffee takes time to brew. Be patient and keep the customer informed!
 """
 
-DEFAULT_TOOLS = [start_preparation, end_preparation, estimate_prep_time, get_order, transfer_to_agent]
+DEFAULT_TOOLS = [start_preparation, end_preparation, estimate_prep_time, clean_machine, get_order, transfer_to_agent]
 DEFAULT_TOOL_NAMES = [t.name for t in DEFAULT_TOOLS]
 
 

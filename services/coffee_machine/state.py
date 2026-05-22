@@ -22,6 +22,7 @@ rng = random.Random(SEED)
 # ----------------------------
 jobs = {}
 job_events = defaultdict(list)  # job_id -> event list
+machine_dirty = False
 
 
 # ----------------------------
@@ -53,6 +54,7 @@ def emit_event(job, activity: str, duration: float = None):
 # Create Job (entry event)
 # ----------------------------
 def create_job(drink: str, correlation_id: str):
+    global machine_dirty
     job_id = str(uuid.uuid4())
 
     duration = rng.uniform(1, 3)
@@ -71,6 +73,7 @@ def create_job(drink: str, correlation_id: str):
 
         "duration": duration,
         "will_fail": will_fail,
+        "contaminated": machine_dirty and not will_fail,
 
         "started_at": None,
         "finished_at": None,
@@ -81,7 +84,7 @@ def create_job(drink: str, correlation_id: str):
 
     # OCEL lifecycle start
     emit_event(job, "user_prompt")
-    logger.info("Job created: %s (drink=%s, duration=%.1fs)", job_id[:8], drink, duration)
+    logger.info("Job created: %s (drink=%s, duration=%.1fs, contaminated=%s)", job_id[:8], drink, duration, job["contaminated"])
 
     return job
 
@@ -104,6 +107,7 @@ def compute_status(job):
 # Read model (GET = side-effect controlled)
 # ----------------------------
 def get_job(job_id: str):
+    global machine_dirty
     job = jobs.get(job_id)
     if not job:
         return None
@@ -131,6 +135,10 @@ def get_job(job_id: str):
             duration=job["duration"]
         )
 
+        if status == "failed":
+            machine_dirty = True
+            logger.info("Machine marked dirty after job %s failure", job_id[:8])
+
         job["finished_at"] = job["created_at"] + job["duration"]
         job["logged_finished"] = True
         logger.info("Job %s finished: %s", job_id[:8], status)
@@ -143,3 +151,15 @@ def get_job(job_id: str):
 # ----------------------------
 def get_job_events(job_id: str):
     return job_events.get(job_id, [])
+
+
+# ----------------------------
+# Machine cleaning
+# ----------------------------
+def clean_machine():
+    global machine_dirty
+    if machine_dirty:
+        machine_dirty = False
+        logger.info("Machine cleaned")
+        return {"status": "cleaned"}
+    return {"status": "already_clean"}
