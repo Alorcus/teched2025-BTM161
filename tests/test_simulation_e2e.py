@@ -55,7 +55,7 @@ class TestSimulationE2E(unittest.TestCase):
         order_repr = "Order not found in database"
         try:
             sys.path.insert(0, str(PROJECT_ROOT))
-            from src.agents.order_store import load_order, engine
+            from src.agents.order_store import load_order
             from src.agents.shared_components import OrderStatus
 
             order = load_order("ORD0001")

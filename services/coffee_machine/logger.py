@@ -6,7 +6,7 @@ from pathlib import Path
 
 logger = logging.getLogger("coffee_shop.coffee_machine.logger")
 
-LOG_DIR = Path("logs")
+LOG_DIR = Path(__file__).resolve().parent / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 LOG_PATH = LOG_DIR / "coffee_machine.csv"

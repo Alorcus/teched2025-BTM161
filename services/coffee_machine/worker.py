@@ -1,6 +1,6 @@
 import time
 import logging
-from state import jobs, get_job
+from .state import jobs, get_job
 
 logger = logging.getLogger("coffee_shop.coffee_machine.worker")
 

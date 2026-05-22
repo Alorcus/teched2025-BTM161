@@ -7,6 +7,7 @@ from langchain_core.messages import AIMessage, ToolMessage
 
 from src.coffee_shop import CoffeeShop
 from src.agents import reset_inventory, CUSTOMER_SCENARIOS
+from src.stream import SWARM_AGENTS
 from .event_bus import EventBus, DashboardEvent, EventType
 
 logger = logging.getLogger("coffee_shop.dashboard")
@@ -189,8 +190,7 @@ class ConversationRunner:
                                 isinstance(msg, AIMessage)
                                 and msg.content
                                 and not msg.tool_calls
-                                and getattr(msg, "name", None)
-                                in ("order_agent", "inventory_agent", "barista_agent", "customer_service_agent")
+                                and getattr(msg, "name", None) in SWARM_AGENTS
                             ):
                                 last_agent_message = msg.content
         except Exception as e:

@@ -26,7 +26,7 @@ from .context_isolation import create_context_isolation_hook
 
 COFFEE_MACHINE_URL = "http://127.0.0.1:8001"
 REQUEST_TIMEOUT = 5
-COFFEE_MACHINE_PATH = Path(__file__).parent.parent / "services" / "coffee-machine"
+COFFEE_MACHINE_PATH = Path(__file__).resolve().parents[2] / "services" / "coffee_machine"
 COFFEE_MACHINE_PORT = 8001
 COFFEE_MACHINE_PROCESS = None
 _MACHINE_LOCK = threading.Lock()

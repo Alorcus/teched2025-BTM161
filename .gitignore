@@ -7,7 +7,7 @@ mlruns/
 # Generated outputs
 generated_event_log/
 generated_ocel/
-src/services/coffee-machine/logs/
+services/coffee_machine/logs/
 
 # Python cache
 __pycache__/

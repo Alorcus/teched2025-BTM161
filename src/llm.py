@@ -3,18 +3,16 @@ import os
 
 from dotenv import load_dotenv
 
-logger = logging.getLogger("coffee_shop.handoff")
+logger = logging.getLogger("coffee_shop.llm")
 
 load_dotenv()
 
 
-def _create_chat_llm():
+def create_chat_llm():
+    """Create a chat LLM instance based on environment configuration."""
     provider = os.getenv("LLM_PROVIDER", "ollama").lower().strip()
 
     if provider == "anthropic":
-        # Uses the SAP-internal Hyperspace AI (HAI) proxy, which forwards
-        # requests to Anthropic. Model IDs and base_url defaults reflect
-        # the HAI convention, not the public Anthropic API.
         from langchain_anthropic import ChatAnthropic
 
         api_key = os.getenv("ANTHROPIC_API_KEY")
@@ -37,9 +35,6 @@ def _create_chat_llm():
     raise ValueError(
         f"Unknown LLM_PROVIDER: '{provider}'. Supported values: 'ollama', 'anthropic'."
     )
-
-
-chat_llm = _create_chat_llm()
 
 
 class _HandoffDeferrer:

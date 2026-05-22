@@ -5,7 +5,7 @@ import os
 import logging
 from collections import defaultdict
 
-from logger import log_event
+from .logger import log_event
 
 logger = logging.getLogger("coffee_shop.coffee_machine.state")
 
