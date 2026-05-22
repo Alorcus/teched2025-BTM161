@@ -173,7 +173,7 @@ def transfer_to_agent(
     logger.debug("handoff %s -> %s | summary=%s", from_agent, target_agent, str(context_summary)[:80])
     tool_message = ToolMessage(
         content=f"Successfully transferred to {target_agent}. Context: {context_summary}",
-        name=f"transfer_to_{target_agent}",
+        name="transfer_to_agent",
         tool_call_id=tool_call_id,
     )
     return Command(
@@ -188,5 +188,4 @@ def transfer_to_agent(
                 "expectation": expectation,
             },
         },
-
-)
+    )

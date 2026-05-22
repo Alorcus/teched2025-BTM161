@@ -24,12 +24,13 @@ TOOLS_AND_TARGETS = [
 ]
 
 
-def _invoke_handoff(tool, from_agent="order_agent"):
+def _invoke_handoff(tool, target="inventory_agent", from_agent="order_agent"):
     """Helper: invoke a handoff tool via ToolNode and return the Command."""
     tn = ToolNode([tool])
     tool_call = {
         "name": tool.name,
         "args": {
+            "target_agent": target,
             "context_summary": "Test context summary",
             "expectation": "Test expectation",
         },
@@ -53,7 +54,7 @@ class TestHandoffToolReturnsOnlyNewMessage(unittest.TestCase):
     def test_messages_update_contains_only_tool_message(self):
         for tool, target in TOOLS_AND_TARGETS:
             with self.subTest(tool=tool.name):
-                cmd = _invoke_handoff(tool)
+                cmd = _invoke_handoff(tool, target=target)
                 msgs = cmd.update["messages"]
                 self.assertEqual(len(msgs), 1,
                                  f"{tool.name} should emit exactly 1 message, got {len(msgs)}")
@@ -66,7 +67,7 @@ class TestHandoffSetsActiveAgent(unittest.TestCase):
     def test_active_agent_set_correctly(self):
         for tool, target in TOOLS_AND_TARGETS:
             with self.subTest(tool=tool.name):
-                cmd = _invoke_handoff(tool)
+                cmd = _invoke_handoff(tool, target=target)
                 self.assertEqual(cmd.update["active_agent"], target)
 
 
@@ -76,7 +77,7 @@ class TestHandoffContextPopulated(unittest.TestCase):
     def test_handoff_context_has_all_keys(self):
         for tool, target in TOOLS_AND_TARGETS:
             with self.subTest(tool=tool.name):
-                cmd = _invoke_handoff(tool, from_agent="source_agent")
+                cmd = _invoke_handoff(tool, target=target, from_agent="source_agent")
                 hc = cmd.update["handoff_context"]
                 self.assertEqual(hc["from_agent"], "source_agent")
                 self.assertEqual(hc["context_summary"], "Test context summary")
@@ -170,7 +171,7 @@ class TestNoMessageDuplicationAcrossHandoffs(unittest.TestCase):
         # Each handoff tool returns update with [tool_message] only
         total_messages = list(initial_messages)
         for tool, target in TOOLS_AND_TARGETS[:3]:
-            cmd = _invoke_handoff(tool)
+            cmd = _invoke_handoff(tool, target=target)
             # The reducer appends cmd.update["messages"] to existing state
             total_messages.extend(cmd.update["messages"])
 

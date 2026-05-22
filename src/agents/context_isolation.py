@@ -24,7 +24,9 @@ def _find_boundary(messages: list, agent_name: str) -> int:
         if isinstance(msg, ToolMessage):
             name = getattr(msg, "name", "") or ""
             if name == handoff_tool_name:
-                return i
+                content = getattr(msg, "content", "") or ""
+                if f"transferred to {agent_name}" in content:
+                    return i
     return -1
 
 

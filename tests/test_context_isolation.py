@@ -35,7 +35,7 @@ class TestHandoffAgentGetsOnlyPostBoundaryMessages(unittest.TestCase):
         messages = [
             HumanMessage(content="I want 2 espressos"),
             AIMessage(content="Processing...", name="order_agent"),
-            ToolMessage(content="Transferred", name="transfer_to_agent", tool_call_id="tc1"),
+            ToolMessage(content="Successfully transferred to inventory_agent. Context: Order ORD0001", name="transfer_to_agent", tool_call_id="tc1"),
             AIMessage(content="Checking stock for espresso", name="inventory_agent"),
             HumanMessage(content="extra message"),
         ]
@@ -63,7 +63,7 @@ class TestHandoffAgentGetsBriefingPrepended(unittest.TestCase):
     def test_briefing_structure(self):
         hook = create_context_isolation_hook("barista_agent")
         messages = [
-            ToolMessage(content="Transferred", name="transfer_to_agent", tool_call_id="tc2"),
+            ToolMessage(content="Successfully transferred to barista_agent. Context: All items confirmed", name="transfer_to_agent", tool_call_id="tc2"),
             AIMessage(content="Preparing order", name="barista_agent"),
         ]
         state = {
@@ -147,7 +147,7 @@ class TestOrphanedToolMessagesAreStripped(unittest.TestCase):
         messages = [
             HumanMessage(content="Ring it up"),
             # This ToolMessage has no preceding AIMessage with matching tool_use
-            ToolMessage(content="Transferred", name="transfer_to_agent", tool_call_id="tc-orphan"),
+            ToolMessage(content="Successfully transferred to inventory_agent. Context: test", name="transfer_to_agent", tool_call_id="tc-orphan"),
         ]
         state = {"messages": messages, "handoff_context": None}
         result = hook(state)
@@ -158,17 +158,18 @@ class TestOrphanedToolMessagesAreStripped(unittest.TestCase):
     def test_valid_tool_message_kept(self):
         hook = create_context_isolation_hook("inventory_agent")
         messages = [
-            ToolMessage(content="Transferred", name="transfer_to_agent", tool_call_id="tc-boundary"),
+            ToolMessage(content="Successfully transferred to inventory_agent. Context: test", name="transfer_to_agent", tool_call_id="tc-boundary"),
             AIMessage(content="", name="inventory_agent", tool_calls=[{"id": "tc-check", "name": "check_inventory", "args": {}}]),
             ToolMessage(content="All available", tool_call_id="tc-check"),
         ]
         state = {"messages": messages, "handoff_context": None}
         result = hook(state)
-        # After boundary: AIMessage + ToolMessage (both valid, tool_use matches)
+        # After boundary: briefing (from boundary content fallback) + AIMessage + ToolMessage
         own = result["llm_input_messages"]
-        self.assertEqual(len(own), 2)
-        self.assertIsInstance(own[0], AIMessage)
-        self.assertIsInstance(own[1], ToolMessage)
+        self.assertEqual(len(own), 3)
+        self.assertIsInstance(own[0], HumanMessage)  # briefing from boundary extraction
+        self.assertIsInstance(own[1], AIMessage)
+        self.assertIsInstance(own[2], ToolMessage)
 
     def test_mixed_orphaned_and_valid(self):
         hook = create_context_isolation_hook("order_agent")
@@ -195,7 +196,7 @@ class TestEmptyMessagesAfterBoundaryNeverFalsy(unittest.TestCase):
         hook = create_context_isolation_hook("inventory_agent")
         messages = [
             HumanMessage(content="Order something"),
-            ToolMessage(content="Transferred", name="transfer_to_agent", tool_call_id="tc1"),
+            ToolMessage(content="Successfully transferred to inventory_agent. Context: test", name="transfer_to_agent", tool_call_id="tc1"),
         ]
         state = {"messages": messages, "handoff_context": None}
         result = hook(state)
@@ -208,7 +209,7 @@ class TestEmptyMessagesAfterBoundaryNeverFalsy(unittest.TestCase):
         hook = create_context_isolation_hook("inventory_agent")
         messages = [
             HumanMessage(content="Order something"),
-            ToolMessage(content="Transferred", name="transfer_to_agent", tool_call_id="tc1"),
+            ToolMessage(content="Successfully transferred to inventory_agent. Context: test", name="transfer_to_agent", tool_call_id="tc1"),
         ]
         state = {
             "messages": messages,
