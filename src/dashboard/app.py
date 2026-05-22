@@ -11,7 +11,7 @@ from src.agents.order_agent import DEFAULT_PROMPT as ORDER_PROMPT, DEFAULT_TOOL_
 from src.agents.inventory_agent import DEFAULT_PROMPT as INVENTORY_PROMPT, DEFAULT_TOOL_NAMES as INVENTORY_TOOLS
 from src.agents.barista_agent import DEFAULT_PROMPT as BARISTA_PROMPT, DEFAULT_TOOL_NAMES as BARISTA_TOOLS
 from src.agents.customer_service_agent import DEFAULT_PROMPT as CS_PROMPT, DEFAULT_TOOL_NAMES as CS_TOOLS
-from .event_bus import EventBus, EventType
+from .event_bus import EventBus, EventType, DashboardEvent
 from .agent_panel import AgentPanel
 from .conversation_runner import ConversationRunner
 from .stock_panel import StockPanel
@@ -19,6 +19,23 @@ from .coffee_machine_panel import CoffeeMachinePanel
 from .tray_panel import TrayPanel
 
 logger = logging.getLogger("coffee_shop.dashboard")
+
+
+class _EventBusLogHandler(logging.Handler):
+    """Forwards Python log records to the dashboard event bus."""
+
+    def __init__(self, event_bus: EventBus):
+        super().__init__(level=logging.DEBUG)
+        self._event_bus = event_bus
+
+    def emit(self, record: logging.LogRecord):
+        agent = record.name.replace("coffee_shop.", "").split(".")[0]
+        self._event_bus.publish(DashboardEvent(
+            event_type=EventType.LOG_MESSAGE,
+            agent_name=agent,
+            content=record.getMessage(),
+            log_level=record.levelno,
+        ))
 
 AGENT_REGISTRY = {
     "order_agent": {"prompt": ORDER_PROMPT, "tools": ORDER_TOOLS},
@@ -35,6 +52,11 @@ def create_dashboard():
     shop.open_shop()
     event_bus = EventBus()
     runner = ConversationRunner(shop, event_bus)
+
+    coffee_shop_logger = logging.getLogger("coffee_shop")
+    coffee_shop_logger.setLevel(logging.DEBUG)
+    coffee_shop_logger.addHandler(_EventBusLogHandler(event_bus))
+
     stock_panel = StockPanel()
     coffee_machine_panel = CoffeeMachinePanel()
     tray_panel = TrayPanel()
@@ -51,7 +73,8 @@ def create_dashboard():
             tools=reg.get("tools", []),
         )
 
-    grid = pn.GridSpec(ncols=2, nrows=2, sizing_mode="stretch_both")
+    grid = pn.GridSpec(ncols=2, nrows=2, sizing_mode="stretch_both",
+                       styles={"gap": "2px"})
     positions = [(0, 0), (0, 1), (1, 0), (1, 1)]
     for (agent_name, panel_obj), (r, c) in zip(agent_panels.items(), positions):
         grid[r, c] = panel_obj.panel()
@@ -68,6 +91,12 @@ def create_dashboard():
     scenario_select = pn.widgets.Select(
         name="", options=scenario_options, sizing_mode="stretch_width",
         margin=(0, 0, 5, 0),
+    )
+
+    log_level_options = {"DEBUG": 10, "INFO": 20, "WARNING": 30, "ERROR": 40}
+    log_level_select = pn.widgets.Select(
+        name="", options=log_level_options, value=20,
+        sizing_mode="stretch_width", margin=(0, 0, 5, 0),
     )
     prompt_textarea = pn.widgets.TextAreaInput(
         name="Customer Prompt",
@@ -108,16 +137,29 @@ def create_dashboard():
     def poll_events():
         events = event_bus.drain()
         for ev in events:
-            _dispatch_event(ev, agent_panels, log_entries, conversation_log, coffee_machine_panel, tray_panel)
+            _dispatch_event(ev, agent_panels, log_entries, conversation_log,
+                            coffee_machine_panel, tray_panel, log_level_select.value)
         if not runner.is_running and not events:
             status_indicator.value = False
         stock_panel.refresh()
         coffee_machine_panel.update_progress()
 
     sidebar = pn.Column(
-        pn.pane.HTML('<label style="font-size:13px;font-weight:500;">Scenario</label>',
-                     sizing_mode="stretch_width", margin=(0, 0, 4, 0)),
-        scenario_select,
+        pn.Row(
+            pn.Column(
+                pn.pane.HTML('<label style="font-size:13px;font-weight:500;">Scenario</label>',
+                             sizing_mode="stretch_width", margin=(0, 0, 2, 0)),
+                scenario_select,
+                sizing_mode="stretch_width", styles={"flex": "2"},
+            ),
+            pn.Column(
+                pn.pane.HTML('<label style="font-size:13px;font-weight:500;">Log Level</label>',
+                             sizing_mode="stretch_width", margin=(0, 0, 2, 0)),
+                log_level_select,
+                sizing_mode="stretch_width", styles={"flex": "1"},
+            ),
+            sizing_mode="stretch_width", margin=(0, 0, 5, 0),
+        ),
         prompt_textarea,
         run_button,
         pn.Row(status_indicator, pn.pane.Markdown("", width=10)),
@@ -137,7 +179,7 @@ def create_dashboard():
             pn.Row(
                 pn.Column(tray_panel.panel(), width=160, height=160),
                 pn.Column(stock_panel.panel(), sizing_mode="stretch_both", styles={"flex": "2"}),
-                pn.Column(coffee_machine_panel.panel(), sizing_mode="stretch_both", styles={"flex": "1"}),
+                pn.Column(coffee_machine_panel.panel(), sizing_mode="stretch_width", styles={"flex": "1"}),
                 sizing_mode="stretch_width",
             ),
             grid, sizing_mode="stretch_both",
@@ -159,8 +201,25 @@ def _dispatch_event(
     log_entries: list[str], conversation_log,
     coffee_machine_panel: CoffeeMachinePanel,
     tray_panel: TrayPanel,
+    min_log_level: int = 20,
 ):
     panel = agent_panels.get(event.agent_name)
+
+    if event.event_type == EventType.LOG_MESSAGE:
+        if event.log_level >= min_log_level:
+            level_name = logging.getLevelName(event.log_level)
+            color = {
+                "DEBUG": "#9E9E9E",
+                "INFO": "#2196F3",
+                "WARNING": "#FF9800",
+                "ERROR": "#F44336",
+            }.get(level_name, "#666")
+            _log(log_entries, conversation_log,
+                 f'<span style="font-family:monospace;font-size:11px;color:{color};'
+                 f'border-left:3px solid {color};padding-left:6px;">'
+                 f'[{level_name}] {event.agent_name}: '
+                 f'{_truncate(event.content, 120)}</span>')
+        return
 
     if event.event_type == EventType.AGENT_THINKING:
         if panel:

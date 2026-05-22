@@ -1,19 +1,47 @@
+import random
 import time
 
 import panel as pn
+
+FAILURE_RATE = 0.2
 
 
 class CoffeeMachinePanel:
     def __init__(self):
         self._pane = pn.pane.HTML("", sizing_mode="stretch_width", min_width=250)
+        self._regen_button = pn.widgets.Button(
+            name="♻️", button_type="light", width=36, height=28,
+            margin=(0, 0, 0, 0),
+        )
+        self._regen_button.on_click(lambda e: self.regenerate_queue())
+        self._queue_pane = pn.pane.HTML("", sizing_mode="stretch_width")
         self._state = "idle"
         self._drink = ""
         self._brew_start: float | None = None
         self._brew_eta: float = 3.0
+        self._rng = random.Random()
+        self._last_result: str = "INIT"
+        self._queue: list[str] = [self._random_result() for _ in range(4)]
         self._render()
 
     def panel(self):
-        return self._pane
+        self._frame = pn.Column(
+            self._pane,
+            pn.Row(
+                self._queue_pane,
+                self._regen_button,
+                sizing_mode="stretch_width",
+                styles={"align-items": "center"},
+            ),
+            sizing_mode="stretch_width",
+            styles={
+                "border": "2px solid #e0e0e0",
+                "border-radius": "12px",
+                "padding": "12px",
+                "background": "#fafafa",
+            },
+        )
+        return self._frame
 
     def start_brewing(self, drink: str = "coffee"):
         self._state = "brewing"
@@ -29,6 +57,7 @@ class CoffeeMachinePanel:
     def complete(self, success: bool):
         self._state = "ready" if success else "failed"
         self._brew_start = None
+        self._shift_queue(success)
         self._render()
 
     def mark_dirty(self):
@@ -41,9 +70,25 @@ class CoffeeMachinePanel:
         self._brew_start = None
         self._render()
 
+    def regenerate_queue(self):
+        self._queue = [self._random_result() for _ in range(4)]
+        self._render()
+
     @property
     def state(self):
         return self._state
+
+    def peek_next_result(self) -> str:
+        return self._queue[0] if self._queue else "SUCC"
+
+    def _random_result(self) -> str:
+        return "FAIL" if self._rng.random() < FAILURE_RATE else "SUCC"
+
+    def _shift_queue(self, success: bool):
+        self._last_result = "SUCC" if success else "FAIL"
+        if self._queue:
+            self._queue.pop(0)
+        self._queue.append(self._random_result())
 
     def _progress_fraction(self) -> float:
         if not self._brew_start:
@@ -64,9 +109,16 @@ class CoffeeMachinePanel:
             "dirty": "#FF9800",
         }.get(self._state, "#e0e0e0")
 
+        if hasattr(self, "_frame"):
+            self._frame.styles = {
+                "border": f"2px solid {border_color}",
+                "border-radius": "12px",
+                "padding": "12px",
+                "background": "#fafafa",
+            }
+
         self._pane.object = (
-            f'<div style="border:2px solid {border_color};border-radius:12px;'
-            f'padding:12px;background:#fafafa;min-width:220px;">'
+            f'<div style="min-width:220px;">'
             f'<div style="font-weight:600;font-size:14px;margin-bottom:8px;">'
             f'Coffee Machine</div>'
             f'{machine_svg}'
@@ -74,6 +126,8 @@ class CoffeeMachinePanel:
             f'{status_html}'
             f'</div>'
         )
+
+        self._queue_pane.object = self._build_queue()
 
     def _build_svg(self) -> str:
         fill = {
@@ -136,3 +190,30 @@ class CoffeeMachinePanel:
                 '🔧 Machine dirty — needs cleaning!</div>'
             )
         return ""
+
+    def _build_queue(self) -> str:
+        def badge(label: str, is_last: bool = False) -> str:
+            if label == "INIT":
+                bg, color = "#9E9E9E", "#fff"
+            elif label == "SUCC":
+                bg, color = "#4CAF50", "#fff"
+            else:
+                bg, color = "#F44336", "#fff"
+            opacity = "1" if is_last else "0.7"
+            return (
+                f'<span style="display:inline-block;padding:2px 5px;border-radius:3px;'
+                f'font-size:10px;font-weight:600;font-family:monospace;'
+                f'background:{bg};color:{color};opacity:{opacity};margin:0 2px;">'
+                f'{label}</span>'
+            )
+
+        parts = [badge(self._last_result, is_last=True)]
+        parts.append('<span style="font-size:11px;margin:0 3px;color:#666;">▶</span>')
+        for r in self._queue:
+            parts.append(badge(r))
+
+        return (
+            f'<div style="padding:4px 0;font-size:11px;display:flex;align-items:center;flex-wrap:wrap;">'
+            f'{"".join(parts)}'
+            f'</div>'
+        )

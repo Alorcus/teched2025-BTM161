@@ -14,6 +14,7 @@ class EventType(Enum):
     TOOL_CALL = auto()
     TOOL_RESULT = auto()
     HANDOFF = auto()
+    LOG_MESSAGE = auto()
 
 
 @dataclass
@@ -27,6 +28,7 @@ class DashboardEvent:
     tool_result: str | None = None
     handoff_context: dict | None = None
     target_agent: str | None = None
+    log_level: int = 0
 
 
 class EventBus:
