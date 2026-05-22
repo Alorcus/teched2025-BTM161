@@ -1,7 +1,7 @@
 """Tests 20-24: Barista tools.
 
-Validates start_preparation (success/failure/retry paths, precondition guard)
-and estimate_prep_time.
+Validates start_preparation (fires brew), end_preparation (polls for result),
+retry paths, precondition guard, and estimate_prep_time.
 """
 import json
 import unittest
@@ -9,7 +9,7 @@ from unittest.mock import patch, MagicMock
 
 from src.agents.order_store import init_db, reset_inventory, save_order, load_order
 from src.agents.barista_agent import (
-    start_preparation, estimate_prep_time,
+    start_preparation, end_preparation, estimate_prep_time,
     ORDER_STATUS_CACHE, ORDER_JOB_MAP,
 )
 from src.agents.shared_components import Order, OrderItem, OrderStatus
@@ -44,7 +44,32 @@ def _mock_status_response(status):
 
 
 class TestStartPreparationSuccess(unittest.TestCase):
-    """Test 20: Barista marks order COMPLETED on success path."""
+    """Test 20: start_preparation fires brew and returns brewing status."""
+
+    def setUp(self):
+        init_db()
+        reset_inventory()
+        ORDER_STATUS_CACHE.clear()
+        ORDER_JOB_MAP.clear()
+
+    @patch("src.agents.barista_agent.safe_post")
+    @patch("src.agents.barista_agent.is_machine_running", return_value=True)
+    @patch("src.agents.barista_agent.time.sleep")
+    def test_start_returns_brewing(self, mock_sleep, mock_running, mock_post):
+        order_id = _create_confirmed_order()
+        mock_post.return_value = _mock_brew_response()
+
+        result = start_preparation.invoke({"order_id": order_id})
+        data = json.loads(result)
+        self.assertEqual(data["status"], "brewing")
+        self.assertIn("eta_seconds", data)
+
+        order = load_order(order_id)
+        self.assertEqual(order.status, OrderStatus.IN_PREPARATION)
+
+
+class TestEndPreparationSuccess(unittest.TestCase):
+    """Test 20b: end_preparation marks order COMPLETED on success path."""
 
     def setUp(self):
         init_db()
@@ -56,12 +81,13 @@ class TestStartPreparationSuccess(unittest.TestCase):
     @patch("src.agents.barista_agent.safe_post")
     @patch("src.agents.barista_agent.is_machine_running", return_value=True)
     @patch("src.agents.barista_agent.time.sleep")
-    def test_success(self, mock_sleep, mock_running, mock_post, mock_get):
+    def test_end_success(self, mock_sleep, mock_running, mock_post, mock_get):
         order_id = _create_confirmed_order()
         mock_post.return_value = _mock_brew_response()
         mock_get.return_value = _mock_status_response("ready")
 
-        result = start_preparation.invoke({"order_id": order_id})
+        start_preparation.invoke({"order_id": order_id})
+        result = end_preparation.invoke({"order_id": order_id})
         data = json.loads(result)
         self.assertEqual(data["status"], "ready")
 
@@ -69,8 +95,8 @@ class TestStartPreparationSuccess(unittest.TestCase):
         self.assertEqual(order.status, OrderStatus.COMPLETED)
 
 
-class TestStartPreparationFailure(unittest.TestCase):
-    """Test 21: Barista marks PREPARATION_ERROR on failure path."""
+class TestEndPreparationFailure(unittest.TestCase):
+    """Test 21: end_preparation marks PREPARATION_ERROR on failure path."""
 
     def setUp(self):
         init_db()
@@ -87,7 +113,8 @@ class TestStartPreparationFailure(unittest.TestCase):
         mock_post.return_value = _mock_brew_response()
         mock_get.return_value = _mock_status_response("failed")
 
-        result = start_preparation.invoke({"order_id": order_id})
+        start_preparation.invoke({"order_id": order_id})
+        result = end_preparation.invoke({"order_id": order_id})
         data = json.loads(result)
         self.assertEqual(data["status"], "failed")
 
@@ -152,10 +179,31 @@ class TestStartPreparationRetryAfterFailure(unittest.TestCase):
 
         result = start_preparation.invoke({"order_id": order.order_id_str})
         data = json.loads(result)
+        self.assertEqual(data["status"], "brewing")
+
+        result = end_preparation.invoke({"order_id": order.order_id_str})
+        data = json.loads(result)
         self.assertEqual(data["status"], "ready")
 
         loaded = load_order(order.order_id_str)
         self.assertEqual(loaded.status, OrderStatus.COMPLETED)
+
+
+class TestEndPreparationWithoutStart(unittest.TestCase):
+    """Test: end_preparation fails if no brewing is active."""
+
+    def setUp(self):
+        init_db()
+        reset_inventory()
+        ORDER_STATUS_CACHE.clear()
+        ORDER_JOB_MAP.clear()
+
+    def test_no_active_brewing(self):
+        order_id = _create_confirmed_order()
+        result = end_preparation.invoke({"order_id": order_id})
+        data = json.loads(result)
+        self.assertEqual(data["status"], "error")
+        self.assertIn("No active brewing", data["message"])
 
 
 class TestEstimatePrepTime(unittest.TestCase):

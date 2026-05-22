@@ -6,10 +6,10 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 logger = logging.getLogger("coffee_shop.context_isolation")
 
 AGENT_TO_HANDOFF_TOOL = {
-    "order_agent": "transfer_to_order_agent",
-    "inventory_agent": "transfer_to_inventory",
-    "barista_agent": "transfer_to_barista",
-    "customer_service_agent": "transfer_to_customer_service",
+    "order_agent": "transfer_to_agent",
+    "inventory_agent": "transfer_to_agent",
+    "barista_agent": "transfer_to_agent",
+    "customer_service_agent": "transfer_to_agent",
 }
 
 
@@ -24,7 +24,9 @@ def _find_boundary(messages: list, agent_name: str) -> int:
         if isinstance(msg, ToolMessage):
             name = getattr(msg, "name", "") or ""
             if name == handoff_tool_name:
-                return i
+                content = getattr(msg, "content", "") or ""
+                if f"transferred to {agent_name}" in content:
+                    return i
     return -1
 
 

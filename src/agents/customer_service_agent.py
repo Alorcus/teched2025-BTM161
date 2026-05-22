@@ -5,7 +5,7 @@ import logging
 logger = logging.getLogger("coffee_shop.customer_service_agent")
 
 from .shared_components import (
-    transfer_to_order_agent, transfer_to_barista, transfer_to_inventory,
+    transfer_to_agent,
     OrderIdSchema, OrderStatus,
 )
 from ..llm import bind_tools_sequential
@@ -25,6 +25,7 @@ class PartialRefundSchema(BaseModel):
 @tool(args_schema=OrderIdSchema)
 def offer_refund(order_id: str) -> str:
     """Process a full refund for an order."""
+    logger.debug("offer_refund called for %s", order_id)
     order = load_order(order_id)
     if order is None:
         return f"Error: Order '{order_id}' not found."
@@ -45,6 +46,7 @@ def offer_refund(order_id: str) -> str:
 @tool(args_schema=PartialRefundSchema)
 def offer_partial_refund(order_id: str, refund_percent: int = 50) -> str:
     """Process a partial refund for an order."""
+    logger.debug("offer_partial_refund called for %s, refund=%d%%", order_id, refund_percent)
     order = load_order(order_id)
     if order is None:
         return f"Error: Order '{order_id}' not found."
@@ -82,7 +84,7 @@ You can transfer to:
 
 Always prioritize customer satisfaction and be generous with compensation when needed."""
 
-DEFAULT_TOOLS = [offer_refund, offer_partial_refund, get_order, transfer_to_order_agent, transfer_to_barista, transfer_to_inventory]
+DEFAULT_TOOLS = [offer_refund, offer_partial_refund, get_order, transfer_to_agent]
 DEFAULT_TOOL_NAMES = [t.name for t in DEFAULT_TOOLS]
 
 

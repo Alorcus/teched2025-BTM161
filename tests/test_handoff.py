@@ -9,8 +9,7 @@ from langgraph.types import Command
 from langchain_core.messages import AIMessage
 
 from src.agents.shared_components import (
-    transfer_to_inventory, transfer_to_barista,
-    transfer_to_customer_service, transfer_to_order_agent,
+    transfer_to_agent, 
 )
 
 
@@ -18,10 +17,7 @@ class TestHandoffToolInjection(unittest.TestCase):
     """Verify InjectedState and InjectedToolCallId are properly injected at runtime."""
 
     ALL_TOOLS = [
-        transfer_to_inventory,
-        transfer_to_barista,
-        transfer_to_customer_service,
-        transfer_to_order_agent,
+        transfer_to_agent,
     ]
 
     def test_state_args_detected(self):
@@ -33,19 +29,20 @@ class TestHandoffToolInjection(unittest.TestCase):
                           f"InjectedState not detected (got {state_args})")
 
     def test_tool_call_schema_excludes_injected_params(self):
-        """LLM-facing schema must only expose context_summary and expectation."""
+        """LLM-facing schema must expose target_agent, context_summary, and expectation only."""
         for tool in self.ALL_TOOLS:
             schema = tool.tool_call_schema.model_json_schema()
             props = set(schema["properties"].keys())
-            self.assertEqual(props, {"context_summary", "expectation"},
+            self.assertEqual(props, {"target_agent", "context_summary", "expectation"},
                              f"{tool.name} schema exposes wrong fields: {props}")
 
     def test_handoff_executes_through_tool_node(self):
         """Handoff tools must execute without TypeError when called via ToolNode."""
-        tn = ToolNode([transfer_to_inventory])
+        tn = ToolNode([transfer_to_agent])
         tool_call = {
-            "name": "transfer_to_inventory",
+            "name": "transfer_to_agent",
             "args": {
+                "target_agent": "inventory_agent",
                 "context_summary": "Customer ordered 1 espresso, ORD0001 created.",
                 "expectation": "Check espresso stock availability.",
             },
@@ -73,16 +70,16 @@ class TestHandoffToolInjection(unittest.TestCase):
         forwarded_msgs = cmd.update["messages"]
         self.assertEqual(len(forwarded_msgs), 1)
         tool_msg = forwarded_msgs[0]
-        self.assertEqual(tool_msg.name, "transfer_to_inventory")
+        self.assertEqual(tool_msg.name, "transfer_to_agent")
         self.assertIn("Successfully transferred", tool_msg.content)
 
     def test_all_handoff_tools_execute(self):
         """All four handoff tools must execute without error."""
         tools_and_targets = [
-            (transfer_to_inventory, "inventory_agent"),
-            (transfer_to_barista, "barista_agent"),
-            (transfer_to_customer_service, "customer_service_agent"),
-            (transfer_to_order_agent, "order_agent"),
+            (transfer_to_agent, "inventory_agent"),
+            (transfer_to_agent, "barista_agent"),
+            (transfer_to_agent, "customer_service_agent"),
+            (transfer_to_agent, "order_agent"),
         ]
         for tool, expected_target in tools_and_targets:
             with self.subTest(tool=tool.name):
@@ -90,6 +87,7 @@ class TestHandoffToolInjection(unittest.TestCase):
                 tool_call = {
                     "name": tool.name,
                     "args": {
+                        "target_agent": expected_target,
                         "context_summary": "Test context",
                         "expectation": "Test expectation",
                     },
@@ -170,7 +168,7 @@ class TestContextIsolationHook(unittest.TestCase):
             "messages": [
                 HumanMessage(content="I want a latte"),
                 AIMessage(content="Processing your order..."),
-                ToolMessage(content="Transferred", name="transfer_to_inventory", tool_call_id="tc1"),
+                ToolMessage(content="Successfully transferred to inventory_agent. Context: Order ORD0001 for 1 latte", name="transfer_to_agent", tool_call_id="tc1"),
                 AIMessage(content="Checking stock..."),
             ],
             "handoff_context": {

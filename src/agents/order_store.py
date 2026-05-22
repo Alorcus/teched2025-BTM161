@@ -1,4 +1,5 @@
 import logging
+import os
 import threading
 from contextvars import ContextVar
 from pathlib import Path
@@ -14,7 +15,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 
 from .shared_components import Order, MenuItem, MENU
 
-_DB_PATH = Path(__file__).resolve().parents[2] / "coffee_shop.db"
+_DB_PATH = Path(os.environ.get("COFFEE_SHOP_DB", Path(__file__).resolve().parents[2] / "coffee_shop.db"))
 _write_lock = threading.Lock()
 
 _engine_var: ContextVar[Engine] = ContextVar("coffee_shop_engine")
@@ -278,6 +279,7 @@ class GetOrderSchema(BaseModel):
 @tool(args_schema=GetOrderSchema)
 def get_order(order_id: str) -> str:
     """Look up the current state of an order by its ID."""
+    logger.debug("get_order called for %s", order_id)
     order = load_order(order_id)
     if order is None:
         return f"Error: Order '{order_id}' not found."

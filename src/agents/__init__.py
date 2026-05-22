@@ -1,7 +1,7 @@
 from .shared_components import (
     MenuItem, OrderItem, Order, MENU,
     OrderStatus, Size, ALLOWED_EXTRAS,
-    transfer_to_inventory, transfer_to_barista, transfer_to_customer_service, transfer_to_order_agent,
+    transfer_to_agent,
 )
 from .order_store import (
     init_db, reset_inventory, set_item_stock, get_all_inventory,
@@ -17,7 +17,7 @@ __all__ = [
     'MenuItem', 'OrderItem', 'Order', 'MENU',
     'OrderStatus', 'Size', 'ALLOWED_EXTRAS',
     'init_db', 'reset_inventory', 'set_item_stock', 'get_all_inventory',
-    'transfer_to_inventory', 'transfer_to_barista', 'transfer_to_customer_service', 'transfer_to_order_agent',
+    'transfer_to_agent',
     'create_order_agent', 'create_inventory_agent', 'create_barista_agent', 'create_customer_service_agent',
     'CustomerAgent', 'CUSTOMER_SCENARIOS',
 ]

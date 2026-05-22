@@ -7,7 +7,7 @@ logger = logging.getLogger("coffee_shop.inventory_agent")
 
 from .shared_components import (
     OrderIdSchema, OrderStatus,
-    transfer_to_barista, transfer_to_customer_service,
+    transfer_to_agent,
 )
 from ..llm import bind_tools_sequential
 from .order_store import (
@@ -22,6 +22,7 @@ from .context_isolation import create_context_isolation_hook
 @tool(args_schema=OrderIdSchema)
 def check_inventory(order_id: str) -> str:
     """Check if all items in the order are available in inventory."""
+    logger.debug("check_inventory called for %s", order_id)
     order = load_order(order_id)
     if order is None:
         return f"Error: Order '{order_id}' not found."
@@ -55,6 +56,7 @@ def check_inventory(order_id: str) -> str:
 @tool(args_schema=OrderIdSchema)
 def update_stock(order_id: str) -> str:
     """Update inventory after order confirmation."""
+    logger.debug("update_stock called for %s", order_id)
     order = load_order(order_id)
     if order is None:
         return f"Error: Order '{order_id}' not found."
@@ -86,6 +88,7 @@ def update_stock(order_id: str) -> str:
 @tool
 def get_alternatives(item_name: str) -> str:
     """Get alternative items for out-of-stock products."""
+    logger.debug("get_alternatives called for %s", item_name)
     item = get_inventory_item(item_name.lower())
     if item is None:
         return f"Error: Item '{item_name}' not found in menu."
@@ -115,8 +118,7 @@ You can transfer to:
 - Barista agent: when all items are confirmed available and stock is updated
 - Customer service agent: when items are unavailable and need resolution"""
 
-DEFAULT_TOOLS = [check_inventory, update_stock, get_alternatives, get_order,
-                 transfer_to_barista, transfer_to_customer_service]
+DEFAULT_TOOLS = [check_inventory, update_stock, get_alternatives, get_order, transfer_to_agent]
 DEFAULT_TOOL_NAMES = [t.name for t in DEFAULT_TOOLS]
 
 

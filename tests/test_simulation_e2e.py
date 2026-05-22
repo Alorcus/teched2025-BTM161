@@ -1,11 +1,11 @@
 import os
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DB_PATH = PROJECT_ROOT / "coffee_shop.db"
 
 TIMEOUT_SECONDS = 300
 
@@ -14,13 +14,20 @@ class TestSimulationE2E(unittest.TestCase):
     """Integration test: run a full simulation and verify the order reaches COMPLETED."""
 
     def setUp(self):
-        if DB_PATH.exists():
-            DB_PATH.unlink()
+        self._tmp_dir = tempfile.mkdtemp()
+        self._db_path = Path(self._tmp_dir) / "coffee_shop.db"
+
+    def tearDown(self):
+        if self._db_path.exists():
+            try:
+                self._db_path.unlink()
+            except OSError:
+                pass
 
     def test_scenario_0_completes_order(self):
         env = os.environ.copy()
-        # Use seed 100 to ensure first brew succeeds (seed 42 fails on first attempt)
         env["COFFEE_MACHINE_SEED"] = "100"
+        env["COFFEE_SHOP_DB"] = str(self._db_path)
 
         try:
             result = subprocess.run(
@@ -45,20 +52,23 @@ class TestSimulationE2E(unittest.TestCase):
                 f"\n--- STDERR (partial) ---\n{stderr}\n"
             )
 
-        # Always capture output for diagnostics
         stdout = result.stdout
         stderr = result.stderr
         exit_code = result.returncode
 
-        # Query the DB for the order created during simulation
+        # Query the DB created by the subprocess
         order = None
         order_repr = "Order not found in database"
         try:
-            sys.path.insert(0, str(PROJECT_ROOT))
-            from src.agents.order_store import load_order
-            from src.agents.shared_components import OrderStatus
+            from sqlmodel import Session, select, create_engine as _ce
+            from src.agents.shared_components import Order, OrderStatus
 
-            order = load_order("ORD0001")
+            eng = _ce(
+                f"sqlite:///{self._db_path}",
+                connect_args={"check_same_thread": False},
+            )
+            with Session(eng) as session:
+                order = session.exec(select(Order)).first()
             if order:
                 order_repr = (
                     f"Order(id={order.id}, customer={order.customer!r}, "
@@ -69,7 +79,6 @@ class TestSimulationE2E(unittest.TestCase):
         except Exception as e:
             order_repr = f"Failed to query DB: {e}"
 
-        # Build diagnostic dump
         diagnostics = (
             "\n"
             "=" * 80 + "\n"
@@ -82,17 +91,14 @@ class TestSimulationE2E(unittest.TestCase):
             "=" * 80 + "\n"
         )
 
-        # Assert non-zero exit code
         if exit_code != 0:
             self.fail(f"Simulation exited with code {exit_code}{diagnostics}")
 
-        # Assert order exists
         self.assertIsNotNone(
             order,
             f"No order found in database after simulation{diagnostics}",
         )
 
-        # Assert order completed
         self.assertEqual(
             order.status,
             OrderStatus.COMPLETED,
