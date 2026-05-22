@@ -1,4 +1,5 @@
 import logging
+import os
 import threading
 from pathlib import Path
 from typing import Optional
@@ -13,7 +14,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 
 from .shared_components import Order, MenuItem, MENU
 
-_DB_PATH = Path(__file__).resolve().parents[2] / "coffee_shop.db"
+_DB_PATH = Path(os.environ.get("COFFEE_SHOP_DB", Path(__file__).resolve().parents[2] / "coffee_shop.db"))
 _write_lock = threading.Lock()
 
 engine = create_engine(

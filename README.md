@@ -193,6 +193,9 @@ Orders and inventory are persisted in a local SQLite database (`coffee_shop.db`)
 
 ## Running the Tests
 
+Use the Python interpreter from the Poetry virtual environment (`poetry env activate` first, or prefix with `poetry run python`).
+
+
 ```bash
 python -m unittest discover -s tests -v
 ```
@@ -202,8 +205,6 @@ Individual test modules can be run directly, e.g.:
 ```bash
 python -m unittest tests/test_tools_order.py -v
 ```
-
-Use the Python interpreter from the Poetry virtual environment (`poetry env activate` first, or prefix with `poetry run python`).
 
 ---
 ## Contributing
