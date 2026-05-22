@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from .state import create_job, get_job, clean_machine
+from .state import create_job, get_job, get_queue, clean_machine, reseed
 from .worker import run_worker
 
 # Configure the coffee_shop.coffee_machine logger hierarchy to match the main program's format.
@@ -38,6 +38,10 @@ app = FastAPI(lifespan=lifespan)
 class BrewRequest(BaseModel):
     drink: str
     correlation_id: str
+
+
+class ReseedRequest(BaseModel):
+    seed: int
 
 
 # -------- Endpoints --------
@@ -76,6 +80,18 @@ def clean():
     result = clean_machine()
     logger.info("Clean request: %s", result["status"])
     return result
+
+
+@app.post("/reseed")
+def reseed_endpoint(req: ReseedRequest):
+    result = reseed(req.seed)
+    logger.info("Reseed request: seed=%d", req.seed)
+    return result
+
+
+@app.get("/queue")
+def queue():
+    return {"queue": get_queue()}
 
 
 @app.get("/healthz")

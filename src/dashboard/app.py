@@ -74,7 +74,7 @@ def create_dashboard():
         )
 
     grid = pn.GridSpec(ncols=2, nrows=2, sizing_mode="stretch_both",
-                       styles={"gap": "2px"})
+                       styles={"gap": "5px"})
     positions = [(0, 0), (0, 1), (1, 0), (1, 1)]
     for (agent_name, panel_obj), (r, c) in zip(agent_panels.items(), positions):
         grid[r, c] = panel_obj.panel()
@@ -159,6 +159,7 @@ def create_dashboard():
                 sizing_mode="stretch_width", styles={"flex": "1"},
             ),
             sizing_mode="stretch_width", margin=(0, 0, 5, 0),
+            styles={"gap": "5px"},
         ),
         prompt_textarea,
         run_button,

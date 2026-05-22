@@ -3,38 +3,49 @@ import random
 import time
 
 import panel as pn
+import requests
+
+from services.coffee_machine.state import (
+    reseed as backend_reseed,
+    get_queue as backend_get_queue,
+)
 
 FAILURE_RATE = 0.2
 SEED = int(os.environ.get("COFFEE_MACHINE_SEED", "100"))
+COFFEE_MACHINE_URL = "http://127.0.0.1:8001"
 
 
 class CoffeeMachinePanel:
     def __init__(self):
-        self._pane = pn.pane.HTML("", sizing_mode="stretch_width", min_width=250)
+        self._title_pane = pn.pane.HTML(
+            '<div style="font-weight:600;font-size:14px;">Coffee Machine</div>',
+            sizing_mode="stretch_width",
+        )
+        self._queue_pane = pn.pane.HTML("", sizing_mode="stretch_width")
         self._regen_button = pn.widgets.Button(
             name="♻️", button_type="light", width=36, height=28,
             margin=(0, 0, 0, 0),
         )
         self._regen_button.on_click(lambda e: self.regenerate_queue())
-        self._queue_pane = pn.pane.HTML("", sizing_mode="stretch_width")
+        self._pane = pn.pane.HTML("", sizing_mode="stretch_width", min_width=250)
         self._state = "idle"
         self._drink = ""
         self._brew_start: float | None = None
         self._brew_eta: float = 3.0
-        self._rng = random.Random(SEED)
         self._last_result: str = "INIT"
-        self._queue: list[str] = [self._next_outcome() for _ in range(4)]
+        self._queue: list[str] = backend_get_queue()
         self._render()
 
     def panel(self):
         self._frame = pn.Column(
-            self._pane,
+            self._title_pane,
             pn.Row(
                 self._queue_pane,
                 self._regen_button,
                 sizing_mode="stretch_width",
                 styles={"align-items": "center"},
             ),
+            self._pane,
             sizing_mode="stretch_width",
             styles={
                 "border": "2px solid #e0e0e0",
@@ -73,8 +84,9 @@ class CoffeeMachinePanel:
         self._render()
 
     def regenerate_queue(self):
-        self._rng = random.Random(SEED)
-        self._queue = [self._next_outcome() for _ in range(4)]
+        new_seed = random.randint(0, 2**31)
+        backend_reseed(new_seed)
+        self._queue = backend_get_queue()
         self._render()
 
     @property
@@ -84,16 +96,12 @@ class CoffeeMachinePanel:
     def peek_next_result(self) -> str:
         return self._queue[0] if self._queue else "SUCC"
 
-    def _next_outcome(self) -> str:
-        """Mirrors the coffee machine RNG: uniform(1,3) then random() < FAILURE_RATE."""
-        self._rng.uniform(1, 3)  # consume duration (matches state.py create_job)
-        return "FAIL" if self._rng.random() < FAILURE_RATE else "SUCC"
+    def _fetch_queue(self) -> list[str]:
+        return backend_get_queue()
 
     def _shift_queue(self, success: bool):
         self._last_result = "SUCC" if success else "FAIL"
-        if self._queue:
-            self._queue.pop(0)
-        self._queue.append(self._next_outcome())
+        self._queue = backend_get_queue()
 
     def _progress_fraction(self) -> float:
         if not self._brew_start:
@@ -124,8 +132,6 @@ class CoffeeMachinePanel:
 
         self._pane.object = (
             f'<div style="min-width:220px;">'
-            f'<div style="font-weight:600;font-size:14px;margin-bottom:8px;">'
-            f'Coffee Machine</div>'
             f'{machine_svg}'
             f'{progress_html}'
             f'{status_html}'

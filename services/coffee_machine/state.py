@@ -17,12 +17,20 @@ FAILURE_RATE = 0.2  # 20% failure rate
 
 rng = random.Random(SEED)
 
+
+def _generate_outcome() -> str:
+    """Pre-roll one brew outcome consuming the same RNG calls as create_job."""
+    rng.uniform(1, 3)  # duration
+    return "FAIL" if rng.random() < FAILURE_RATE else "SUCC"
+
+
 # ----------------------------
 # In-memory stores
 # ----------------------------
 jobs = {}
 job_events = defaultdict(list)  # job_id -> event list
 machine_dirty = False
+outcome_queue: list[str] = [_generate_outcome() for _ in range(4)]
 
 
 # ----------------------------
@@ -57,11 +65,12 @@ def create_job(drink: str, correlation_id: str):
     global machine_dirty
     job_id = str(uuid.uuid4())
 
+    outcome = outcome_queue.pop(0)
+    outcome_queue.append(_generate_outcome())
+    will_fail = outcome == "FAIL"
     duration = rng.uniform(1, 3)
-    random_val = rng.random()
-    will_fail = random_val < FAILURE_RATE
 
-    logger.debug("Job %s: random=%.4f, will_fail=%s, FAILURE_RATE=%s", job_id[:8], random_val, will_fail, FAILURE_RATE)
+    logger.debug("Job %s: outcome=%s, will_fail=%s", job_id[:8], outcome, will_fail)
 
     job = {
         "job_id": job_id,
@@ -153,6 +162,10 @@ def get_job_events(job_id: str):
     return job_events.get(job_id, [])
 
 
+def get_queue() -> list[str]:
+    return list(outcome_queue)
+
+
 # ----------------------------
 # Machine cleaning
 # ----------------------------
@@ -163,3 +176,11 @@ def clean_machine():
         logger.info("Machine cleaned")
         return {"status": "cleaned"}
     return {"status": "already_clean"}
+
+
+def reseed(new_seed: int):
+    global rng, outcome_queue
+    rng = random.Random(new_seed)
+    outcome_queue = [_generate_outcome() for _ in range(4)]
+    logger.info("Machine RNG reseeded with %d", new_seed)
+    return {"status": "reseeded", "seed": new_seed}
