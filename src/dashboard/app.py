@@ -16,6 +16,7 @@ from .agent_panel import AgentPanel
 from .conversation_runner import ConversationRunner
 from .stock_panel import StockPanel
 from .coffee_machine_panel import CoffeeMachinePanel
+from .tray_panel import TrayPanel
 
 logger = logging.getLogger("coffee_shop.dashboard")
 
@@ -36,6 +37,7 @@ def create_dashboard():
     runner = ConversationRunner(shop, event_bus)
     stock_panel = StockPanel()
     coffee_machine_panel = CoffeeMachinePanel()
+    tray_panel = TrayPanel()
 
     agent_panels: dict[str, AgentPanel] = {}
     for agent_name, config in shop.agent_config.items():
@@ -106,7 +108,7 @@ def create_dashboard():
     def poll_events():
         events = event_bus.drain()
         for ev in events:
-            _dispatch_event(ev, agent_panels, log_entries, conversation_log, coffee_machine_panel)
+            _dispatch_event(ev, agent_panels, log_entries, conversation_log, coffee_machine_panel, tray_panel)
         if not runner.is_running and not events:
             status_indicator.value = False
         stock_panel.refresh()
@@ -133,6 +135,7 @@ def create_dashboard():
         sidebar=[sidebar],
         main=[pn.Column(
             pn.Row(
+                pn.Column(tray_panel.panel(), width=160, height=160),
                 pn.Column(stock_panel.panel(), sizing_mode="stretch_both", styles={"flex": "2"}),
                 pn.Column(coffee_machine_panel.panel(), sizing_mode="stretch_both", styles={"flex": "1"}),
                 sizing_mode="stretch_width",
@@ -155,6 +158,7 @@ def _dispatch_event(
     event, agent_panels: dict[str, AgentPanel],
     log_entries: list[str], conversation_log,
     coffee_machine_panel: CoffeeMachinePanel,
+    tray_panel: TrayPanel,
 ):
     panel = agent_panels.get(event.agent_name)
 
@@ -205,6 +209,14 @@ def _dispatch_event(
                     coffee_machine_panel.reset()
             except (json.JSONDecodeError, TypeError):
                 pass
+        elif event.tool_name == "place_on_tray" and event.tool_result:
+            try:
+                result_data = json.loads(event.tool_result)
+                order_id = result_data.get("order_id")
+                if order_id:
+                    tray_panel.refresh(order_id)
+            except (json.JSONDecodeError, TypeError):
+                pass
 
     elif event.event_type == EventType.HANDOFF:
         if panel:
@@ -237,6 +249,7 @@ def _dispatch_event(
     elif event.event_type == EventType.CONVERSATION_END:
         _log(log_entries, conversation_log,
              '<span style="color:#F44336"><b>END</b></span> Conversation complete')
+        tray_panel.clear()
 
 
 def _log(entries: list[str], pane, html_line: str):

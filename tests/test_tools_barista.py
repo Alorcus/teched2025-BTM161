@@ -92,7 +92,7 @@ class TestEndPreparationSuccess(unittest.TestCase):
         self.assertEqual(data["status"], "ready")
 
         order = load_order(order_id)
-        self.assertEqual(order.status, OrderStatus.COMPLETED)
+        self.assertEqual(order.status, OrderStatus.IN_PREPARATION)
 
 
 class TestEndPreparationFailure(unittest.TestCase):
@@ -186,7 +186,7 @@ class TestStartPreparationRetryAfterFailure(unittest.TestCase):
         self.assertEqual(data["status"], "ready")
 
         loaded = load_order(order.order_id_str)
-        self.assertEqual(loaded.status, OrderStatus.COMPLETED)
+        self.assertEqual(loaded.status, OrderStatus.IN_PREPARATION)
 
 
 class TestEndPreparationWithoutStart(unittest.TestCase):

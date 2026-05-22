@@ -22,6 +22,7 @@ from .shared_components import (
 )
 from .order_store import load_order, save_order, get_order
 from .context_isolation import create_context_isolation_hook
+from .tray_tools import place_on_tray, check_tray
 
 
 COFFEE_MACHINE_URL = "http://127.0.0.1:8001"
@@ -279,12 +280,13 @@ def end_preparation(order_id: str) -> str:
 
                 if status == "ready":
                     is_contaminated = job.get("contaminated", False)
-                    order.status = OrderStatus.COMPLETED
-                    save_order(order)
                     if order_id in ORDER_JOB_MAP:
                         del ORDER_JOB_MAP[order_id]
-                    if order_id in ORDER_STATUS_CACHE:
-                        del ORDER_STATUS_CACHE[order_id]
+                    ORDER_STATUS_CACHE[order_id] = {
+                        **ORDER_STATUS_CACHE.get(order_id, {}),
+                        "status": "ready",
+                        "last_brew_contaminated": is_contaminated,
+                    }
 
                     if is_contaminated:
                         return tool_response(
@@ -383,7 +385,7 @@ WORKFLOW:
    - It returns either "ready", "contaminated", or "failed"
 
 3. Based on the result:
-   - If "ready" → Tell the customer: "✅ Your coffee is ready!"
+   - If "ready" → Call place_on_tray(order_id, drink_name, quantity) to put the coffee on the customer's tray. Then tell the customer: "✅ Your coffee is on the tray!"
    - If "contaminated" → The coffee was brewed on a dirty machine. Tell the customer: "⚠️ I need to remake your coffee — the machine wasn't clean." Then call clean_machine(), then retry.
    - If "failed" → The machine broke. Call clean_machine() IMMEDIATELY, then ask: "❌ Brewing failed on attempt #{attempt}. Would you like me to try again or transfer you to customer service?"
 
@@ -397,6 +399,7 @@ WORKFLOW:
    - expectation: what should customer service do (e.g. "Help the customer with alternatives")
 
 IMPORTANT NOTES:
+- After a successful brew, ALWAYS call place_on_tray to put the coffee on the tray before informing the customer.
 - Always call end_preparation after start_preparation to get the final result
 - After a brew failure, you MUST call clean_machine() before retrying. If you skip cleaning, the coffee will be contaminated.
 - Be honest about failures and give customers clear choices
@@ -405,7 +408,7 @@ IMPORTANT NOTES:
 Remember: Coffee takes time to brew. Be patient and keep the customer informed!
 """
 
-DEFAULT_TOOLS = [start_preparation, end_preparation, estimate_prep_time, clean_machine, get_order, transfer_to_agent]
+DEFAULT_TOOLS = [start_preparation, end_preparation, estimate_prep_time, clean_machine, place_on_tray, check_tray, get_order, transfer_to_agent]
 DEFAULT_TOOL_NAMES = [t.name for t in DEFAULT_TOOLS]
 
 

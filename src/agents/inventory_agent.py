@@ -16,6 +16,7 @@ from .order_store import (
     get_inventory_item, get_alternatives_from_db,
 )
 from .context_isolation import create_context_isolation_hook
+from .tray_tools import place_on_tray, check_tray
 
 
 # INVENTORY AGENT TOOLS
@@ -108,17 +109,19 @@ You are the inventory management agent for a coffee shop.
 
 Your job:
 - Check item availability for an order using check_inventory.
-- If all items are available: update stock levels with update_stock, then MUST transfer to the barista agent.
+- If all items are available: update stock levels with update_stock.
+- After updating stock: call place_on_tray for each food/pastry item in the order (e.g. croissants, muffins, sandwiches). Do NOT place coffee items — the barista handles those.
+- Then MUST transfer to the barista agent.
 - If items are unavailable: suggest alternatives using get_alternatives, then transfer to customer service.
 
-After checking inventory and updating stock, you MUST transfer immediately.
-Do NOT tell the customer the order is ready — you only handle stock.
+After checking inventory, updating stock, and placing food items on the tray, you MUST transfer immediately.
+Do NOT tell the customer the order is ready — you only handle stock and food items.
 
 You can transfer to:
-- Barista agent: when all items are confirmed available and stock is updated
+- Barista agent: when all items are confirmed available, stock is updated, and food items are on the tray
 - Customer service agent: when items are unavailable and need resolution"""
 
-DEFAULT_TOOLS = [check_inventory, update_stock, get_alternatives, get_order, transfer_to_agent]
+DEFAULT_TOOLS = [check_inventory, update_stock, place_on_tray, check_tray, get_alternatives, get_order, transfer_to_agent]
 DEFAULT_TOOL_NAMES = [t.name for t in DEFAULT_TOOLS]
 
 

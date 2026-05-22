@@ -6,6 +6,9 @@ import mlflow
 
 from src.agents import reset_inventory
 from src.agents.customer_agent import CustomerAgent
+from src.agents.tray import get_tray, clear_tray
+from src.agents.order_store import load_recent_order, save_order
+from src.agents.shared_components import OrderStatus
 from src.stream import extract_messages
 
 logger = logging.getLogger("coffee_shop.conversation")
@@ -73,4 +76,29 @@ class ConversationEngine:
             if on_message and message:
                 on_message("customer", message)
 
+        self._consume_tray(customer_agent)
+
         return self.traces_of_latest_conversations[trace_start:]
+
+    def _consume_tray(self, customer_agent: CustomerAgent):
+        """Customer takes the tray — apply effects and mark order complete."""
+        order = load_recent_order()
+        if not order:
+            return
+        order_id = order.order_id_str
+
+        tray_items = get_tray(order_id)
+        if not tray_items:
+            return
+
+        has_contaminated = any(entry.contaminated for entry in tray_items)
+        if has_contaminated:
+            customer_agent.inject_experience(
+                "You received your coffee but it tastes slightly off — almost metallic. Something isn't right."
+            )
+
+        if order.status != OrderStatus.COMPLETED:
+            order.status = OrderStatus.COMPLETED
+            save_order(order)
+
+        clear_tray(order_id)

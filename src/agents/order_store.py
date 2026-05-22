@@ -135,6 +135,20 @@ def load_order(order_id: str) -> Optional[Order]:
         return order
 
 
+def load_recent_order() -> Optional[Order]:
+    """Load the most recently created order. Returns None if no orders exist."""
+    with Session(get_engine()) as session:
+        order = session.exec(select(Order).order_by(Order.id.desc())).first()
+        if order is None:
+            return None
+        _ = order.items
+        session.expunge(order)
+        make_transient(order)
+        for item in order.items:
+            make_transient(item)
+        return order
+
+
 # ---------------------------------------------------------------------------
 # Inventory operations
 # ---------------------------------------------------------------------------

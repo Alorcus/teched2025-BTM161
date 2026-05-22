@@ -14,6 +14,7 @@ from .shared_components import (
 from ..llm import bind_tools_sequential
 from .order_store import save_order, load_order, get_order
 from .context_isolation import create_context_isolation_hook
+from .tray_tools import check_tray
 
 
 class CustomerOrderItemSchema(BaseModel):
@@ -141,7 +142,7 @@ You can transfer to:
 
 Be warm, conversational, and guide the customer through their order naturally."""
 
-DEFAULT_TOOLS = [process_order, calculate_total, get_order, transfer_to_agent]
+DEFAULT_TOOLS = [process_order, calculate_total, check_tray, get_order, transfer_to_agent]
 DEFAULT_TOOL_NAMES = [t.name for t in DEFAULT_TOOLS]
 
 

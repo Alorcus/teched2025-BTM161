@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 import json
 
 from .order_store import load_order, save_order, get_order
+from .tray_tools import check_tray
 
 
 class PartialRefundSchema(BaseModel):
@@ -84,7 +85,7 @@ You can transfer to:
 
 Always prioritize customer satisfaction and be generous with compensation when needed."""
 
-DEFAULT_TOOLS = [offer_refund, offer_partial_refund, get_order, transfer_to_agent]
+DEFAULT_TOOLS = [offer_refund, offer_partial_refund, check_tray, get_order, transfer_to_agent]
 DEFAULT_TOOL_NAMES = [t.name for t in DEFAULT_TOOLS]
 
 

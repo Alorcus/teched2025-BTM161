@@ -7,7 +7,10 @@ import logging
 from langchain_core.messages import AIMessage, ToolMessage
 
 from src.coffee_shop import CoffeeShop
-from src.agents import reset_inventory, CUSTOMER_SCENARIOS
+from src.agents import CUSTOMER_SCENARIOS
+from src.agents.tray import get_tray, clear_tray
+from src.agents.order_store import load_order, save_order
+from src.agents.shared_components import OrderStatus
 from src.stream import SWARM_AGENTS
 from .event_bus import EventBus, DashboardEvent, EventType
 
@@ -24,6 +27,7 @@ class ConversationRunner:
         self._lock = threading.Lock()
         self.is_running = False
         self._active_agent = "order_agent"
+        self._current_order_id: str | None = None
 
     def start(self, scenario_index=None, custom_prompt=None):
         with self._lock:
@@ -50,9 +54,9 @@ class ConversationRunner:
                 self.is_running = False
 
     def _run_conversation(self, scenario_index, custom_prompt=None):
-        reset_inventory()
         self.shop.customer_agent.reset(scenario_index, custom_prompt=custom_prompt)
         self._active_agent = "order_agent"
+        self._current_order_id = None
         thread_id = str(uuid.uuid4())
 
         scenario_label = (
@@ -102,10 +106,35 @@ class ConversationRunner:
                     content=message,
                 ))
 
+        self._consume_tray()
+
         self.event_bus.publish(DashboardEvent(
             event_type=EventType.CONVERSATION_END,
             agent_name="system",
         ))
+
+    def _consume_tray(self):
+        """Customer takes the tray — apply effects, mark order complete, clear tray."""
+        order_id = self._current_order_id
+        if not order_id:
+            return
+
+        tray_items = get_tray(order_id)
+        if not tray_items:
+            return
+
+        has_contaminated = any(entry.contaminated for entry in tray_items)
+        if has_contaminated:
+            self.shop.customer_agent.inject_experience(
+                "You received your coffee but it tastes slightly off — almost metallic. Something isn't right."
+            )
+
+        order = load_order(order_id)
+        if order and order.status != OrderStatus.COMPLETED:
+            order.status = OrderStatus.COMPLETED
+            save_order(order)
+
+        clear_tray(order_id)
 
     def _stream_with_events(self, thread_id: str, message: str) -> str | None:
         config = self.shop._get_config(thread_id)
@@ -235,7 +264,21 @@ class ConversationRunner:
                 tool_name=getattr(msg, "name", None),
                 tool_result=content,
             ))
-            self._check_contamination(content)
+            self._track_order_id(getattr(msg, "name", None), content)
+
+    def _track_order_id(self, tool_name: str | None, content: str):
+        """Extract order_id from tool results to track the current order."""
+        if self._current_order_id:
+            return
+        if tool_name not in ("process_order", "check_inventory", "start_preparation"):
+            return
+        try:
+            data = json.loads(content)
+            order_id = data.get("order_id")
+            if order_id:
+                self._current_order_id = order_id
+        except (json.JSONDecodeError, TypeError, AttributeError):
+            pass
 
     def _parse_agent_name(self, ns: tuple) -> str | None:
         if not ns:
@@ -243,12 +286,3 @@ class ConversationRunner:
         first = ns[0] if isinstance(ns[0], str) else str(ns[0])
         return first.split(":")[0] if ":" in first else first
 
-    def _check_contamination(self, content: str):
-        try:
-            data = json.loads(content)
-            if data.get("contaminated") is True:
-                self.shop.customer_agent.inject_experience(
-                    "You received your coffee but it tastes slightly off — almost metallic. Something isn't right."
-                )
-        except (json.JSONDecodeError, TypeError, AttributeError):
-            pass
