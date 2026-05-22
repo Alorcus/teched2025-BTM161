@@ -1,9 +1,11 @@
+import os
 import random
 import time
 
 import panel as pn
 
 FAILURE_RATE = 0.2
+SEED = int(os.environ.get("COFFEE_MACHINE_SEED", "100"))
 
 
 class CoffeeMachinePanel:
@@ -19,9 +21,9 @@ class CoffeeMachinePanel:
         self._drink = ""
         self._brew_start: float | None = None
         self._brew_eta: float = 3.0
-        self._rng = random.Random()
+        self._rng = random.Random(SEED)
         self._last_result: str = "INIT"
-        self._queue: list[str] = [self._random_result() for _ in range(4)]
+        self._queue: list[str] = [self._next_outcome() for _ in range(4)]
         self._render()
 
     def panel(self):
@@ -71,7 +73,8 @@ class CoffeeMachinePanel:
         self._render()
 
     def regenerate_queue(self):
-        self._queue = [self._random_result() for _ in range(4)]
+        self._rng = random.Random(SEED)
+        self._queue = [self._next_outcome() for _ in range(4)]
         self._render()
 
     @property
@@ -81,14 +84,16 @@ class CoffeeMachinePanel:
     def peek_next_result(self) -> str:
         return self._queue[0] if self._queue else "SUCC"
 
-    def _random_result(self) -> str:
+    def _next_outcome(self) -> str:
+        """Mirrors the coffee machine RNG: uniform(1,3) then random() < FAILURE_RATE."""
+        self._rng.uniform(1, 3)  # consume duration (matches state.py create_job)
         return "FAIL" if self._rng.random() < FAILURE_RATE else "SUCC"
 
     def _shift_queue(self, success: bool):
         self._last_result = "SUCC" if success else "FAIL"
         if self._queue:
             self._queue.pop(0)
-        self._queue.append(self._random_result())
+        self._queue.append(self._next_outcome())
 
     def _progress_fraction(self) -> float:
         if not self._brew_start:
