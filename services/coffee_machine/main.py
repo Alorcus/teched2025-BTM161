@@ -7,8 +7,8 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from state import create_job, get_job
-from worker import run_worker
+from .state import create_job, get_job
+from .worker import run_worker
 
 # Configure the coffee_shop.coffee_machine logger hierarchy to match the main program's format.
 # When run standalone (uvicorn), this ensures logs are visible; when imported from the main
