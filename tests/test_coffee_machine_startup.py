@@ -77,5 +77,22 @@ class TestCoffeeMachineStartup(unittest.TestCase):
         self.assertLess(resp.status_code, 500)
 
 
+class TestCoffeeMachineShutdown(unittest.TestCase):
+    """Verify stop_coffee_machine() actually terminates the server."""
+
+    def test_stop_kills_server(self):
+        started = start_coffee_machine()
+        self.assertTrue(started)
+
+        resp = requests.get(f"{COFFEE_MACHINE_URL}/healthz", timeout=3)
+        self.assertEqual(resp.status_code, 200)
+
+        stop_coffee_machine()
+        time.sleep(1)
+
+        with self.assertRaises(requests.ConnectionError):
+            requests.get(f"{COFFEE_MACHINE_URL}/healthz", timeout=2)
+
+
 if __name__ == "__main__":
     unittest.main()

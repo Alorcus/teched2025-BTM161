@@ -1,3 +1,4 @@
+import atexit
 import html as html_mod
 import json
 import logging
@@ -9,7 +10,7 @@ from src.coffee_shop import CoffeeShop
 from src.agents import CUSTOMER_SCENARIOS, build_default_prompt
 from src.agents.order_agent import DEFAULT_PROMPT as ORDER_PROMPT, DEFAULT_TOOL_NAMES as ORDER_TOOLS
 from src.agents.inventory_agent import DEFAULT_PROMPT as INVENTORY_PROMPT, DEFAULT_TOOL_NAMES as INVENTORY_TOOLS
-from src.agents.barista_agent import DEFAULT_PROMPT as BARISTA_PROMPT, DEFAULT_TOOL_NAMES as BARISTA_TOOLS, start_coffee_machine
+from src.agents.barista_agent import DEFAULT_PROMPT as BARISTA_PROMPT, DEFAULT_TOOL_NAMES as BARISTA_TOOLS, start_coffee_machine, stop_coffee_machine
 from src.agents.customer_service_agent import DEFAULT_PROMPT as CS_PROMPT, DEFAULT_TOOL_NAMES as CS_TOOLS
 from .event_bus import EventBus, EventType, DashboardEvent
 from .agent_panel import AgentPanel
@@ -58,6 +59,7 @@ def create_dashboard():
     coffee_shop_logger.addHandler(_EventBusLogHandler(event_bus))
 
     start_coffee_machine()
+    atexit.register(stop_coffee_machine)
 
     stock_panel = StockPanel()
     coffee_machine_panel = CoffeeMachinePanel()
