@@ -20,9 +20,10 @@ from .shared_components import (
     OrderStatus,
     transfer_to_agent,
 )
-from .order_store import load_order, save_order, get_order
+from .order_store import load_order, get_order
 from .context_isolation import create_context_isolation_hook
 from .tray_tools import place_on_tray, check_tray
+from .order_state_machine import state_machine, InvalidTransitionError
 
 
 COFFEE_MACHINE_URL = "http://127.0.0.1:8001"
@@ -213,8 +214,10 @@ def start_preparation(order_id: str) -> str:
     if not job_id:
         return tool_response("error", "No job_id returned", order_id)
 
-    order.status = OrderStatus.IN_PREPARATION
-    save_order(order)
+    try:
+        order = state_machine.transition(order, OrderStatus.IN_PREPARATION, context="prepare_order: starting")
+    except InvalidTransitionError as e:
+        return json.dumps({"order_id": order_id, "error": f"Cannot start preparation: {e}"})
 
     # Increment attempt count
     attempt_count = ORDER_STATUS_CACHE.get(order_id, {}).get("attempt_count", 0) + 1
@@ -304,8 +307,10 @@ def end_preparation(order_id: str) -> str:
                     )
 
                 elif status == "failed":
-                    order.status = OrderStatus.PREPARATION_ERROR
-                    save_order(order)
+                    try:
+                        order = state_machine.transition(order, OrderStatus.PREPARATION_ERROR, context=f"brewing failed on attempt #{attempt_count}")
+                    except InvalidTransitionError as e:
+                        logger.warning(f"Cannot transition to PREPARATION_ERROR: {e}")
                     if order_id in ORDER_JOB_MAP:
                         del ORDER_JOB_MAP[order_id]
 
@@ -319,8 +324,10 @@ def end_preparation(order_id: str) -> str:
             except Exception as e:
                 logger.error(f"Status check error: {e}")
 
-    order.status = OrderStatus.PREPARATION_ERROR
-    save_order(order)
+    try:
+        state_machine.transition(order, OrderStatus.PREPARATION_ERROR, context="brewing timed out")
+    except InvalidTransitionError as e:
+        logger.warning(f"Cannot transition to PREPARATION_ERROR: {e}")
     return tool_response("error", "Brewing timed out. Please try again.", order_id)
 
 

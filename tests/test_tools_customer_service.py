@@ -34,7 +34,7 @@ class TestOfferRefund(unittest.TestCase):
         reset_inventory()
 
     def test_full_refund(self):
-        order_id = _create_order_with_total(10.50)
+        order_id = _create_order_with_total(10.50, status=OrderStatus.COMPLETED)
         result = offer_refund.invoke({"order_id": order_id})
         data = json.loads(result)
 

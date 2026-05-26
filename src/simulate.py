@@ -6,6 +6,8 @@ from .coffee_shop import CoffeeShop
 from .agents.customer_agent import CUSTOMER_SCENARIOS
 from .trace_processing import TraceProcessor
 
+coffee_shop_logger = logging.getLogger("coffee_shop")
+
 
 def parse_scenario(value):
     if value == "all":
@@ -16,10 +18,10 @@ def parse_scenario(value):
         idx = int(value)
         if 0 <= idx < len(CUSTOMER_SCENARIOS):
             return ("fixed", idx)
-        print(f"Error: scenario index must be 0-{len(CUSTOMER_SCENARIOS) - 1}")
+        coffee_shop_logger.error(f"scenario index must be 0-{len(CUSTOMER_SCENARIOS) - 1}")
         sys.exit(1)
     except ValueError:
-        print(f"Error: --scenario must be 0-{len(CUSTOMER_SCENARIOS) - 1}, 'all', or 'random'")
+        coffee_shop_logger.error(f"'--scenario' must be 0-{len(CUSTOMER_SCENARIOS) - 1}, 'all', or 'random'")
         sys.exit(1)
 
 
@@ -48,46 +50,66 @@ def main():
         help="Export event logs after simulation",
     )
     parser.add_argument(
+        "--reset-inventory", action=argparse.BooleanOptionalAction, default=True,
+        help="Reset inventory before each trace (default: true). Use --no-reset-inventory to keep inventory state across traces.",
+    )
+    parser.add_argument(
         "--quiet", action="store_true",
         help="Minimal output: only trace numbers, scenarios, and summary",
     )
     parser.add_argument(
-        "--log-level", type=str, default="warning",
+        "--full-messages", action="store_true",
+        help="Print full message content instead of truncating to 200 characters",
+    )
+    parser.add_argument(
+        "--log-level", type=str, default="info",
         choices=["debug", "info", "warning", "error"],
-        help="Set the logging level for the coffee_shop logger (default: warning)",
+        help="Set the logging level for the coffee_shop logger (default: info). Note: levels above info will not show progress messages, and debug/info may produce output even with --quiet.",
     )
     args = parser.parse_args()
 
     scenario_mode, scenario_index = parse_scenario(args.scenario)
 
-    logging.getLogger("coffee_shop").setLevel(getattr(logging, args.log_level.upper()))
+    if args.quiet and args.full_messages:
+        coffee_shop_logger.warning("'--full-messages' has no effect when '--quiet' is set")
+    
+    if args.quiet and args.log_level.lower() in ["debug", "info"]:
+        coffee_shop_logger.warning("debug/info log levels may produce output even if '--quiet' is set")
 
-    print("Initializing coffee shop...")
+    coffee_shop_logger.setLevel(getattr(logging, args.log_level.upper()))
+
+    coffee_shop_logger.info("Initializing coffee shop...")
     shop = CoffeeShop()
-    shop.open_shop()
-    print(f"Coffee shop is open. Running {args.traces} trace(s).\n")
+    shop.open_shop(reset_inventory_first=args.reset_inventory)
+    coffee_shop_logger.info(f"Coffee shop is open. Running {args.traces} trace(s).")
+    coffee_shop_logger.info(f"Resetting inventory before each trace: {args.reset_inventory}")
 
     all_trace_ids = []
     for i in range(args.traces):
         idx = pick_scenario_index(scenario_mode, scenario_index, i)
         scenario_label = CUSTOMER_SCENARIOS[idx] if idx is not None else "random"
-        print(f"--- Trace {i + 1}/{args.traces} | Scenario {idx}: {scenario_label[:60]} ---")
+        coffee_shop_logger.info(f"=== Conversation {i + 1}/{args.traces} | Scenario {idx}: {scenario_label[:60]} ===")
 
         if args.quiet:
             on_message = None
         else:
             def on_message(role, content):
-                prefix = "  [Customer]" if role == "customer" else "  [Agent]   "
-                print(f"{prefix} {content[:200]}")
+                prefix = "[Customer]" if role == "customer" else "[Agent]   "
+                body = "\n" + content if args.full_messages else "\n" + content[:200]
+                coffee_shop_logger.info(f"{prefix} {body}")
 
-        trace_ids = shop.run_conversation(scenario_index=idx, on_message=on_message)
+        trace_ids = shop.run_conversation(
+            scenario_index=idx, 
+            on_message=on_message,
+            reset_inventory_first=args.reset_inventory,
+        )
         all_trace_ids.extend(trace_ids)
-        print(f"  Trace IDs: {trace_ids}\n")
+        coffee_shop_logger.info(f"Trace IDs: {trace_ids}")
 
-    print(f"=== Simulation complete: {len(all_trace_ids)} trace(s) generated ===")
+    coffee_shop_logger.info(f"=== Simulation complete: {len(all_trace_ids)} trace(s) generated ===")
 
     if args.export_logs:
-        print("\nExporting event logs...")
+        coffee_shop_logger.info("Exporting event logs...")
         processor = TraceProcessor()
         processor.process_all_traces()
 

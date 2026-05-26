@@ -11,12 +11,13 @@ from .shared_components import (
 )
 from ..llm import bind_tools_sequential
 from .order_store import (
-    load_order, save_order, get_order,
+    load_order, get_order,
     check_inventory_availability, check_and_update_stock,
     get_inventory_item, get_alternatives_from_db,
 )
 from .context_isolation import create_context_isolation_hook
 from .tray_tools import place_on_tray, check_tray
+from .order_state_machine import state_machine, InvalidTransitionError
 
 
 # INVENTORY AGENT TOOLS
@@ -33,8 +34,13 @@ def check_inventory(order_id: str) -> str:
         return report["error"]
 
     new_status = OrderStatus.INVENTORY_CONFIRMED if report["all_available"] else OrderStatus.INVENTORY_ISSUES
-    order.status = new_status
-    save_order(order)
+    try:
+        order = state_machine.transition(order, new_status, context="check_inventory")
+    except InvalidTransitionError as e:
+        return json.dumps({
+            "order_id": order_id,
+            "error": f"Cannot record inventory check result: {e}",
+        })
     if report["all_available"]:
         logger.debug("Inventory check passed for %s", order_id)
     else:
@@ -70,8 +76,10 @@ def update_stock(order_id: str) -> str:
     try:
         items_report = check_and_update_stock(order)
     except (KeyError, ValueError) as e:
-        order.status = OrderStatus.INVENTORY_ISSUES
-        save_order(order)
+        try:
+            order = state_machine.transition(order, OrderStatus.INVENTORY_ISSUES, context=f"update_stock: {e}")
+        except InvalidTransitionError:
+            pass
         return f"Error updating stock: {e}"
 
     summary = f"Stock updated for order {order_id}. {len(items_report)} item(s) deducted."

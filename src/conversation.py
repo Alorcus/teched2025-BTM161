@@ -9,6 +9,7 @@ from src.agents.customer_agent import CustomerAgent
 from src.agents.tray import get_tray, clear_tray
 from src.agents.order_store import load_recent_order, save_order
 from src.agents.shared_components import OrderStatus
+from src.agents.order_state_machine import state_machine, InvalidTransitionError
 from src.stream import extract_messages
 
 logger = logging.getLogger("coffee_shop.conversation")
@@ -98,7 +99,9 @@ class ConversationEngine:
             )
 
         if order.status != OrderStatus.COMPLETED:
-            order.status = OrderStatus.COMPLETED
-            save_order(order)
+            try:
+                state_machine.transition(order, OrderStatus.COMPLETED, context="tray pickup by customer")
+            except InvalidTransitionError:
+                pass
 
         clear_tray(order_id)

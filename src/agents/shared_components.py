@@ -75,6 +75,7 @@ class MenuItem(SQLModel, table=True):
     price: float
     stock: int
     category: str
+    last_modified: datetime = SQLField(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class OrderItem(SQLModel, table=True):
