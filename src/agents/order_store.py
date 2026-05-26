@@ -1,5 +1,7 @@
 import logging
+import os
 import threading
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -8,28 +10,55 @@ logger = logging.getLogger("coffee_shop.order_store")
 
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
-from sqlalchemy import event
+from sqlalchemy import Engine, event
 from sqlalchemy.orm import make_transient
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from .shared_components import Order, MenuItem, MENU
 
-_DB_PATH = Path(__file__).resolve().parents[2] / "coffee_shop.db"
+_DB_PATH = Path(os.environ.get("COFFEE_SHOP_DB", Path(__file__).resolve().parents[2] / "coffee_shop.db"))
 _write_lock = threading.Lock()
 
-engine = create_engine(
-    f"sqlite:///{_DB_PATH}",
-    connect_args={"check_same_thread": False, "timeout": 10},
-    echo=False,
-)
+_engine_var: ContextVar[Engine] = ContextVar("coffee_shop_engine")
+_default_engine: Engine | None = None
 
 
-@event.listens_for(engine, "connect")
-def _set_sqlite_pragmas(dbapi_conn, connection_record):
-    cursor = dbapi_conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL")
-    cursor.execute("PRAGMA foreign_keys=ON")
-    cursor.close()
+def _attach_pragmas(eng: Engine) -> None:
+    @event.listens_for(eng, "connect")
+    def _set_sqlite_pragmas(dbapi_conn, connection_record):
+        cursor = dbapi_conn.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
+
+def create_order_store_engine(db_url: str | None = None) -> Engine:
+    """Create a new SQLAlchemy engine for the order store."""
+    if db_url is None:
+        db_url = f"sqlite:///{_DB_PATH}"
+    eng = create_engine(
+        db_url,
+        connect_args={"check_same_thread": False, "timeout": 10},
+        echo=False,
+    )
+    _attach_pragmas(eng)
+    return eng
+
+
+def set_engine(eng: Engine) -> None:
+    """Set the engine for the current context (thread/async task)."""
+    _engine_var.set(eng)
+
+
+def get_engine() -> Engine:
+    """Get the engine for the current context, falling back to a lazy default."""
+    try:
+        return _engine_var.get()
+    except LookupError:
+        global _default_engine
+        if _default_engine is None:
+            _default_engine = create_order_store_engine()
+        return _default_engine
 
 
 # ---------------------------------------------------------------------------
@@ -38,8 +67,8 @@ def _set_sqlite_pragmas(dbapi_conn, connection_record):
 
 def init_db() -> None:
     """Create tables if they don't exist and seed inventory from MENU."""
-    SQLModel.metadata.create_all(engine)
-    with Session(engine) as session:
+    SQLModel.metadata.create_all(get_engine())
+    with Session(get_engine()) as session:
         first = session.exec(select(MenuItem)).first()
         if first is None:
             for key, item in MENU.items():
@@ -77,7 +106,7 @@ def save_order(order: Order) -> None:
     is_new = order.id is None
     order.last_modified = datetime.now(timezone.utc)
     with _write_lock:
-        with Session(engine) as session:
+        with Session(get_engine()) as session:
             if not is_new:
                 merged = session.merge(order)
                 session.commit()
@@ -99,11 +128,25 @@ def load_order(order_id: str) -> Optional[Order]:
     int_id = _parse_order_id(order_id)
     if int_id is None:
         return None
-    with Session(engine) as session:
+    with Session(get_engine()) as session:
         order = session.get(Order, int_id)
         if order is None:
             return None
         _ = order.items  # force-load relationship while session is open
+        session.expunge(order)
+        make_transient(order)
+        for item in order.items:
+            make_transient(item)
+        return order
+
+
+def load_recent_order() -> Optional[Order]:
+    """Load the most recently created order. Returns None if no orders exist."""
+    with Session(get_engine()) as session:
+        order = session.exec(select(Order).order_by(Order.id.desc())).first()
+        if order is None:
+            return None
+        _ = order.items
         session.expunge(order)
         make_transient(order)
         for item in order.items:
@@ -117,7 +160,7 @@ def load_order(order_id: str) -> Optional[Order]:
 
 def check_inventory_availability(order: Order) -> dict:
     """Check stock levels for every item in the order (read-only)."""
-    with Session(engine) as session:
+    with Session(get_engine()) as session:
         details = []
         all_available = True
         unavailable_items = []
@@ -159,7 +202,7 @@ def check_and_update_stock(order: Order) -> list[dict]:
     """
     items_report = []
     with _write_lock:
-        with Session(engine) as session:
+        with Session(get_engine()) as session:
             for order_item in order.items:
                 item = session.get(MenuItem, order_item.name)
                 if item is None:
@@ -192,7 +235,7 @@ def check_and_update_stock(order: Order) -> list[dict]:
 def reset_inventory() -> None:
     """Reset all inventory stock levels to MENU defaults."""
     with _write_lock:
-        with Session(engine) as session:
+        with Session(get_engine()) as session:
             for key, defaults in MENU.items():
                 item = session.get(MenuItem, key)
                 if item:
@@ -214,7 +257,7 @@ def reset_inventory() -> None:
 def set_item_stock(name: str, stock: int) -> None:
     """Set stock for a single inventory item (used by scenario buttons)."""
     with _write_lock:
-        with Session(engine) as session:
+        with Session(get_engine()) as session:
             item = session.get(MenuItem, name)
             if item:
                 item.stock = stock
@@ -224,7 +267,7 @@ def set_item_stock(name: str, stock: int) -> None:
 
 def get_all_inventory() -> dict[str, MenuItem]:
     """Return full inventory as {name: MenuItem}. Used by the UI."""
-    with Session(engine) as session:
+    with Session(get_engine()) as session:
         items = session.exec(select(MenuItem)).all()
         result = {}
         for item in items:
@@ -235,7 +278,7 @@ def get_all_inventory() -> dict[str, MenuItem]:
 
 def get_inventory_item(name: str) -> Optional[dict]:
     """Return a single inventory item as a dict, or None."""
-    with Session(engine) as session:
+    with Session(get_engine()) as session:
         item = session.get(MenuItem, name)
         if item is None:
             return None
@@ -244,7 +287,7 @@ def get_inventory_item(name: str) -> Optional[dict]:
 
 def get_alternatives_from_db(item_name: str) -> list[dict]:
     """Get in-stock alternatives in the same category."""
-    with Session(engine) as session:
+    with Session(get_engine()) as session:
         item = session.get(MenuItem, item_name)
         if item is None:
             return []
@@ -268,6 +311,7 @@ class GetOrderSchema(BaseModel):
 @tool(args_schema=GetOrderSchema)
 def get_order(order_id: str) -> str:
     """Look up the current state of an order by its ID."""
+    logger.debug("get_order called for %s", order_id)
     order = load_order(order_id)
     if order is None:
         return f"Error: Order '{order_id}' not found."

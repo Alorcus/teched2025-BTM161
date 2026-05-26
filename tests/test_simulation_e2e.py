@@ -1,0 +1,110 @@
+import os
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+TIMEOUT_SECONDS = 300
+
+
+class TestSimulationE2E(unittest.TestCase):
+    """Integration test: run a full simulation and verify the order reaches COMPLETED."""
+
+    def setUp(self):
+        self._tmp_dir = tempfile.mkdtemp()
+        self._db_path = Path(self._tmp_dir) / "coffee_shop.db"
+
+    def tearDown(self):
+        if self._db_path.exists():
+            try:
+                self._db_path.unlink()
+            except OSError:
+                pass
+
+    def test_scenario_0_completes_order(self):
+        env = os.environ.copy()
+        env["COFFEE_MACHINE_SEED"] = "100"
+        env["COFFEE_SHOP_DB"] = str(self._db_path)
+
+        try:
+            result = subprocess.run(
+                [
+                    sys.executable, "-m", "src.simulate",
+                    "--scenario", "0",
+                    "--log-level", "debug",
+                    "--traces", "1",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=TIMEOUT_SECONDS,
+                cwd=str(PROJECT_ROOT),
+                env=env,
+            )
+        except subprocess.TimeoutExpired as e:
+            stdout = (e.stdout or b"").decode(errors="replace")
+            stderr = (e.stderr or b"").decode(errors="replace")
+            self.fail(
+                f"Simulation timed out after {TIMEOUT_SECONDS}s\n"
+                f"\n--- STDOUT (partial) ---\n{stdout}\n"
+                f"\n--- STDERR (partial) ---\n{stderr}\n"
+            )
+
+        stdout = result.stdout
+        stderr = result.stderr
+        exit_code = result.returncode
+
+        # Query the DB created by the subprocess
+        order = None
+        order_repr = "Order not found in database"
+        try:
+            from sqlmodel import Session, select, create_engine as _ce
+            from src.agents.shared_components import Order, OrderStatus
+
+            eng = _ce(
+                f"sqlite:///{self._db_path}",
+                connect_args={"check_same_thread": False},
+            )
+            with Session(eng) as session:
+                order = session.exec(select(Order)).first()
+            if order:
+                order_repr = (
+                    f"Order(id={order.id}, customer={order.customer!r}, "
+                    f"status={order.status.value!r}, total={order.total}, "
+                    f"items={[f'{i.quantity}x {i.name}' for i in order.items]}, "
+                    f"created_at={order.created_at}, last_modified={order.last_modified})"
+                )
+        except Exception as e:
+            order_repr = f"Failed to query DB: {e}"
+
+        diagnostics = (
+            "\n"
+            "=" * 80 + "\n"
+            "SIMULATION DIAGNOSTIC DUMP\n"
+            "=" * 80 + "\n"
+            f"\n--- EXIT CODE: {exit_code} ---\n\n"
+            f"--- STDOUT (full) ---\n{stdout}\n"
+            f"--- STDERR (full) ---\n{stderr}\n"
+            f"--- FINAL ORDER STATE ---\n{order_repr}\n"
+            "=" * 80 + "\n"
+        )
+
+        if exit_code != 0:
+            self.fail(f"Simulation exited with code {exit_code}{diagnostics}")
+
+        self.assertIsNotNone(
+            order,
+            f"No order found in database after simulation{diagnostics}",
+        )
+
+        self.assertEqual(
+            order.status,
+            OrderStatus.COMPLETED,
+            f"Order status is {order.status.value!r}, expected 'completed'{diagnostics}",
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

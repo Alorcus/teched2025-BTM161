@@ -1,11 +1,34 @@
 from enum import Enum
-from typing import List, Optional
+from typing import List, Optional, Annotated, Any, TypedDict
 from datetime import datetime, timezone
+import logging
 
-from langgraph_swarm import create_handoff_tool
+from langgraph.types import Command
+from langgraph.prebuilt import InjectedState
+from langgraph_swarm import SwarmState
+from langchain_core.tools import tool, InjectedToolCallId
+from langchain_core.messages import ToolMessage
 from pydantic import BaseModel, Field
 from sqlalchemy import Enum as SAEnum
 from sqlmodel import SQLModel, Field as SQLField, Relationship, Column, JSON
+
+logger = logging.getLogger("coffee_shop.handoff")
+
+
+def _resolve_from_agent(state: dict) -> str:
+    """Determine which agent is calling this tool.
+
+    Checks active_agent first (available when ToolNode gets parent state),
+    then falls back to the .name attribute on the last AIMessage.
+    """
+    active = state.get("active_agent")
+    if active and active != "unknown":
+        return active
+    for msg in reversed(state.get("messages", [])):
+        name = getattr(msg, "name", None)
+        if name and name.endswith("_agent"):
+            return name
+    return "unknown"
 
 
 # ---------------------------------------------------------------------------
@@ -102,14 +125,28 @@ class Order(SQLModel, table=True):
 # ---------------------------------------------------------------------------
 
 MENU = {
-    "espresso": MenuItem(name="espresso", price=2.50, stock=20, category="coffee"),
-    "latte": MenuItem(name="latte", price=4.00, stock=15, category="coffee"),
-    "cappuccino": MenuItem(name="cappuccino", price=3.75, stock=18, category="coffee"),
-    "americano": MenuItem(name="americano", price=3.00, stock=22, category="coffee"),
-    "croissant": MenuItem(name="croissant", price=2.75, stock=8, category="pastry"),
-    "muffin": MenuItem(name="muffin", price=3.25, stock=12, category="pastry"),
-    "sandwich": MenuItem(name="sandwich", price=6.50, stock=5, category="food"),
+    "espresso": MenuItem(name="espresso", price=2.50, stock=3, category="coffee"),
+    "latte": MenuItem(name="latte", price=4.00, stock=2, category="coffee"),
+    "cappuccino": MenuItem(name="cappuccino", price=3.75, stock=3, category="coffee"),
+    "americano": MenuItem(name="americano", price=3.00, stock=4, category="coffee"),
+    "croissant": MenuItem(name="croissant", price=2.75, stock=2, category="pastry"),
+    "muffin": MenuItem(name="muffin", price=3.25, stock=3, category="pastry"),
+    "sandwich": MenuItem(name="sandwich", price=6.50, stock=1, category="food"),
 }
+
+
+# ---------------------------------------------------------------------------
+# Extended Swarm State with handoff context
+# ---------------------------------------------------------------------------
+
+class HandoffContext(TypedDict, total=False):
+    from_agent: str
+    context_summary: str
+    expectation: str
+
+
+class CoffeeShopState(SwarmState):
+    handoff_context: Optional[HandoffContext]
 
 
 # ---------------------------------------------------------------------------
@@ -121,25 +158,35 @@ class OrderIdSchema(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Handoff Tools
+# Handoff Tools — each requires explicit context summary and expectation
 # ---------------------------------------------------------------------------
 
-transfer_to_inventory = create_handoff_tool(
-    agent_name="inventory_agent",
-    description="Transfer to inventory agent to check item availability."
-)
-
-transfer_to_barista = create_handoff_tool(
-    agent_name="barista_agent",
-    description="Transfer to barista agent to prepare the order."
-)
-
-transfer_to_customer_service = create_handoff_tool(
-    agent_name="customer_service_agent",
-    description="Transfer to customer service agent for issues, complaints, or order modifications."
-)
-
-transfer_to_order_agent = create_handoff_tool(
-    agent_name="order_agent",
-    description="Transfer back to order agent for new or modified orders."
-)
+@tool 
+def transfer_to_agent(
+    target_agent: Annotated[str, "The agent to transfer to (e.g. 'inventory_agent')"],
+    context_summary: Annotated[str, "Summary of what you know so far that is relevant for the next agent"],
+    expectation: Annotated[str, "What you expect the next agent to accomplish"],
+    state: Annotated[Any, InjectedState],
+    tool_call_id: Annotated[str, InjectedToolCallId],
+) -> Command:
+    """Generic transfer tool that can be used to transfer to any agent."""
+    from_agent = _resolve_from_agent(state)
+    logger.debug("handoff %s -> %s | summary=%s", from_agent, target_agent, str(context_summary)[:80])
+    tool_message = ToolMessage(
+        content=f"Successfully transferred to {target_agent}. Context: {context_summary}",
+        name="transfer_to_agent",
+        tool_call_id=tool_call_id,
+    )
+    return Command(
+        goto=target_agent,
+        graph=Command.PARENT,
+        update={
+            "messages": [tool_message],
+            "active_agent": target_agent,
+            "handoff_context": {
+                "from_agent": from_agent,
+                "context_summary": context_summary,
+                "expectation": expectation,
+            },
+        },
+    )

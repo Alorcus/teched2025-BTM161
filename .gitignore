@@ -7,6 +7,7 @@ mlruns/
 # Generated outputs
 generated_event_log/
 generated_ocel/
+services/coffee_machine/logs/
 
 generated_visualizations/
 
@@ -26,3 +27,6 @@ dev.ipynb
 *.db
 *.db-wal
 *.db-shm
+
+# Coffee machine service logs
+src/services/coffee-machine/logs/

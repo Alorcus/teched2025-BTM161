@@ -7,7 +7,7 @@ logger = logging.getLogger("coffee_shop.inventory_agent")
 
 from .shared_components import (
     OrderIdSchema, OrderStatus,
-    transfer_to_barista, transfer_to_customer_service,
+    transfer_to_agent,
 )
 from ..llm import bind_tools_sequential
 from .order_store import (
@@ -15,6 +15,8 @@ from .order_store import (
     check_inventory_availability, check_and_update_stock,
     get_inventory_item, get_alternatives_from_db,
 )
+from .context_isolation import create_context_isolation_hook
+from .tray_tools import place_on_tray, check_tray
 from .order_state_machine import state_machine, InvalidTransitionError
 
 
@@ -22,6 +24,7 @@ from .order_state_machine import state_machine, InvalidTransitionError
 @tool(args_schema=OrderIdSchema)
 def check_inventory(order_id: str) -> str:
     """Check if all items in the order are available in inventory."""
+    logger.debug("check_inventory called for %s", order_id)
     order = load_order(order_id)
     if order is None:
         return f"Error: Order '{order_id}' not found."
@@ -60,6 +63,7 @@ def check_inventory(order_id: str) -> str:
 @tool(args_schema=OrderIdSchema)
 def update_stock(order_id: str) -> str:
     """Update inventory after order confirmation."""
+    logger.debug("update_stock called for %s", order_id)
     order = load_order(order_id)
     if order is None:
         return f"Error: Order '{order_id}' not found."
@@ -93,6 +97,7 @@ def update_stock(order_id: str) -> str:
 @tool
 def get_alternatives(item_name: str) -> str:
     """Get alternative items for out-of-stock products."""
+    logger.debug("get_alternatives called for %s", item_name)
     item = get_inventory_item(item_name.lower())
     if item is None:
         return f"Error: Item '{item_name}' not found in menu."
@@ -107,26 +112,33 @@ def get_alternatives(item_name: str) -> str:
     })
 
 
+DEFAULT_PROMPT = """\
+You are the inventory management agent for a coffee shop.
+
+Your job:
+- Check item availability for an order using check_inventory.
+- If all items are available: update stock levels with update_stock.
+- After updating stock: call place_on_tray for each food/pastry item in the order (e.g. croissants, muffins, sandwiches). Do NOT place coffee items — the barista handles those.
+- Then MUST transfer to the barista agent.
+- If items are unavailable: suggest alternatives using get_alternatives, then transfer to customer service.
+
+After checking inventory, updating stock, and placing food items on the tray, you MUST transfer immediately.
+Do NOT tell the customer the order is ready — you only handle stock and food items.
+
+You can transfer to:
+- Barista agent: when all items are confirmed available, stock is updated, and food items are on the tray
+- Customer service agent: when items are unavailable and need resolution"""
+
+DEFAULT_TOOLS = [check_inventory, update_stock, place_on_tray, check_tray, get_alternatives, get_order, transfer_to_agent]
+DEFAULT_TOOL_NAMES = [t.name for t in DEFAULT_TOOLS]
+
+
 def create_inventory_agent(chat_llm, prompt=None):
     """Create and return the inventory agent."""
     if not prompt:
-        prompt = """You are the inventory management agent for a coffee shop.
+        prompt = DEFAULT_PROMPT
 
-        Your job:
-        - Check item availability for an order using check_inventory.
-        - If all items are available: update stock levels with update_stock, then MUST transfer to the barista agent.
-        - If items are unavailable: suggest alternatives using get_alternatives, then transfer to customer service.
-
-        After checking inventory and updating stock, you MUST transfer immediately.
-        Do NOT tell the customer the order is ready — you only handle stock.
-
-        You can transfer to:
-        - Barista agent: when all items are confirmed available and stock is updated
-        - Customer service agent: when items are unavailable and need resolution
-        """
-
-    tools = [check_inventory, update_stock, get_alternatives, get_order,
-             transfer_to_barista, transfer_to_customer_service]
+    tools = list(DEFAULT_TOOLS)
 
     llm_with_tools = bind_tools_sequential(chat_llm, tools)
 
@@ -135,4 +147,5 @@ def create_inventory_agent(chat_llm, prompt=None):
         name="inventory_agent",
         tools=tools,
         prompt=prompt,
+        pre_model_hook=create_context_isolation_hook("inventory_agent"),
     )

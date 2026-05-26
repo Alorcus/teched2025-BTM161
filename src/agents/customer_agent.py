@@ -11,23 +11,42 @@ CUSTOMER_SCENARIOS = [
 ]
 
 
+def build_default_prompt(scenario_index: int = 0) -> str:
+    """Build the full default system prompt for a given scenario index."""
+    scenario = CUSTOMER_SCENARIOS[scenario_index] if 0 <= scenario_index < len(CUSTOMER_SCENARIOS) else CUSTOMER_SCENARIOS[0]
+    return f"""You are a customer at an AI-powered coffee shop chatting with the staff.
+
+Your goal: {scenario}
+
+Guidelines:
+- Keep replies short (1-2 sentences max).
+- Be natural, like a real customer texting.
+- Respond directly to what the staff last said.
+- When your order is confirmed ready OR your complaint is fully resolved, reply with exactly one word: DONE
+"""
+
+
 class CustomerAgent:
     def __init__(self, llm):
         self.llm = llm
         self.history = []
         self.scenario = CUSTOMER_SCENARIOS[0]
+        self.custom_prompt: str | None = None
         self.max_turns = 15
         self.turn_count = 0
 
-    def reset(self, scenario_index=None):
+    def reset(self, scenario_index=None, custom_prompt=None):
         self.history = []
         self.turn_count = 0
+        self.custom_prompt = custom_prompt
         if scenario_index is not None and 0 <= scenario_index < len(CUSTOMER_SCENARIOS):
             self.scenario = CUSTOMER_SCENARIOS[scenario_index]
         else:
             self.scenario = random.choice(CUSTOMER_SCENARIOS)
 
     def _system_prompt(self):
+        if self.custom_prompt:
+            return self.custom_prompt
         return f"""You are a customer at an AI-powered coffee shop chatting with the staff.
 
 Your goal: {self.scenario}
@@ -38,6 +57,10 @@ Guidelines:
 - Respond directly to what the staff last said.
 - When your order is confirmed ready OR your complaint is fully resolved, reply with exactly one word: DONE
 """
+
+    def inject_experience(self, text: str):
+        """Inject a mid-conversation experience note (e.g. contaminated coffee)."""
+        self.history.append(("system_note", text))
 
     def get_initial_message(self):
         """Generate the opening message to kick off the conversation."""
@@ -63,6 +86,8 @@ Guidelines:
         for role, content in self.history:
             if role == "customer":
                 messages.append(AIMessage(content=content))
+            elif role == "system_note":
+                messages.append(SystemMessage(content=f"[Experience: {content}]"))
             else:
                 messages.append(HumanMessage(content=content))
 
