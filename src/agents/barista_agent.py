@@ -28,7 +28,7 @@ from .order_state_machine import state_machine, InvalidTransitionError
 
 COFFEE_MACHINE_URL = "http://127.0.0.1:8001"
 REQUEST_TIMEOUT = 5
-COFFEE_MACHINE_PATH = Path(__file__).resolve().parents[2] / "services" / "coffee_machine"
+COFFEE_MACHINE_PATH = Path(__file__).resolve().parents[2]
 COFFEE_MACHINE_PORT = 8001
 COFFEE_MACHINE_PROCESS = None
 _MACHINE_LOCK = threading.Lock()
@@ -48,13 +48,14 @@ def is_machine_running() -> bool:
 
 
 def check_port_in_use(port: int) -> bool:
-    """Check if a port is already in use."""
+    """Check if a port has an active listener."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(1)
         try:
-            s.bind(("127.0.0.1", port))
-            return False
-        except socket.error:
+            s.connect(("127.0.0.1", port))
             return True
+        except (socket.error, OSError):
+            return False
 
 
 def start_coffee_machine() -> bool:
@@ -79,8 +80,7 @@ def start_coffee_machine() -> bool:
                     "poetry",
                     "run",
                     "uvicorn",
-                    "main:app",
-                    "--reload",
+                    "services.coffee_machine.main:app",
                     "--port",
                     str(COFFEE_MACHINE_PORT),
                     "--host",

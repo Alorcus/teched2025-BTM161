@@ -123,6 +123,16 @@ class ConversationRunner:
         if not tray_items:
             return
 
+        items_summary = ", ".join(
+            f"{e.quantity}x {e.item_name}" for e in tray_items
+        )
+        self.event_bus.publish(DashboardEvent(
+            event_type=EventType.TOOL_CALL,
+            agent_name="customer",
+            tool_name="take_tray",
+            tool_args={"order_id": order_id, "items": items_summary},
+        ))
+
         has_contaminated = any(entry.contaminated for entry in tray_items)
         if has_contaminated:
             self.shop.customer_agent.inject_experience(
@@ -135,6 +145,16 @@ class ConversationRunner:
             save_order(order)
 
         clear_tray(order_id)
+
+        result = {"status": "picked_up", "items": items_summary}
+        if has_contaminated:
+            result["warning"] = "contaminated items received"
+        self.event_bus.publish(DashboardEvent(
+            event_type=EventType.TOOL_RESULT,
+            agent_name="customer",
+            tool_name="take_tray",
+            tool_result=json.dumps(result),
+        ))
 
     def _stream_with_events(self, thread_id: str, message: str) -> str | None:
         config = self.shop._get_config(thread_id)

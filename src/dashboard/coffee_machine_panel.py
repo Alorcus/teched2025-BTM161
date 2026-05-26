@@ -1,22 +1,50 @@
+import logging
 import os
 import random
 import time
+from typing import Optional
 
 import panel as pn
 import requests
 
-from services.coffee_machine.state import (
-    reseed as backend_reseed,
-    get_queue as backend_get_queue,
-)
+logger = logging.getLogger("coffee_shop.dashboard.coffee_machine")
 
-FAILURE_RATE = 0.2
-SEED = int(os.environ.get("COFFEE_MACHINE_SEED", "100"))
-COFFEE_MACHINE_URL = "http://127.0.0.1:8001"
+COFFEE_MACHINE_URL = os.environ.get("COFFEE_MACHINE_URL", "http://127.0.0.1:8001")
+_HTTP_TIMEOUT = 2.0
+
+
+class CoffeeMachineClient:
+    """Thin HTTP wrapper for the coffee machine backend."""
+
+    def __init__(self, base_url: str = COFFEE_MACHINE_URL):
+        self._base_url = base_url.rstrip("/")
+        self._session = requests.Session()
+
+    def get_queue(self) -> Optional[list[str]]:
+        try:
+            resp = self._session.get(f"{self._base_url}/queue", timeout=_HTTP_TIMEOUT)
+            resp.raise_for_status()
+            return resp.json()["queue"]
+        except (requests.RequestException, KeyError, ValueError) as exc:
+            logger.warning("Failed to fetch queue: %s", exc)
+            return None
+
+    def reseed(self, seed: int) -> bool:
+        try:
+            resp = self._session.post(
+                f"{self._base_url}/reseed", json={"seed": seed}, timeout=_HTTP_TIMEOUT
+            )
+            resp.raise_for_status()
+            return True
+        except requests.RequestException as exc:
+            logger.warning("Failed to reseed: %s", exc)
+            return False
 
 
 class CoffeeMachinePanel:
-    def __init__(self):
+    def __init__(self, client: Optional[CoffeeMachineClient] = None):
+        self._client = client or CoffeeMachineClient()
+
         self._title_pane = pn.pane.HTML(
             '<div style="font-weight:600;font-size:14px;">Coffee Machine</div>',
             sizing_mode="stretch_width",
@@ -33,7 +61,9 @@ class CoffeeMachinePanel:
         self._brew_start: float | None = None
         self._brew_eta: float = 3.0
         self._last_result: str = "INIT"
-        self._queue: list[str] = backend_get_queue()
+        self._queue: list[str] = []
+
+        self._refresh_queue()
         self._render()
 
     def panel(self):
@@ -70,7 +100,8 @@ class CoffeeMachinePanel:
     def complete(self, success: bool):
         self._state = "ready" if success else "failed"
         self._brew_start = None
-        self._shift_queue(success)
+        self._last_result = "SUCC" if success else "FAIL"
+        self._refresh_queue()
         self._render()
 
     def mark_dirty(self):
@@ -85,8 +116,8 @@ class CoffeeMachinePanel:
 
     def regenerate_queue(self):
         new_seed = random.randint(0, 2**31)
-        backend_reseed(new_seed)
-        self._queue = backend_get_queue()
+        if self._client.reseed(new_seed):
+            self._refresh_queue()
         self._render()
 
     @property
@@ -96,12 +127,10 @@ class CoffeeMachinePanel:
     def peek_next_result(self) -> str:
         return self._queue[0] if self._queue else "SUCC"
 
-    def _fetch_queue(self) -> list[str]:
-        return backend_get_queue()
-
-    def _shift_queue(self, success: bool):
-        self._last_result = "SUCC" if success else "FAIL"
-        self._queue = backend_get_queue()
+    def _refresh_queue(self):
+        queue = self._client.get_queue()
+        if queue is not None:
+            self._queue = queue
 
     def _progress_fraction(self) -> float:
         if not self._brew_start:
