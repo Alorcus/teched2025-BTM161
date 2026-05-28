@@ -1,4 +1,3 @@
-from langgraph.prebuilt import create_react_agent
 from langchain_core.tools import tool
 import logging
 import json
@@ -7,16 +6,12 @@ logger = logging.getLogger("coffee_shop.inventory_agent")
 
 from .shared_components import (
     OrderIdSchema, OrderStatus,
-    transfer_to_agent,
 )
-from ..llm import bind_tools_sequential
 from .order_store import (
-    load_order, get_order,
+    load_order,
     check_inventory_availability, check_and_update_stock,
     get_inventory_item, get_alternatives_from_db,
 )
-from .context_isolation import create_context_isolation_hook
-from .tray_tools import place_on_tray, check_tray
 from .order_state_machine import state_machine, InvalidTransitionError
 
 
@@ -112,40 +107,3 @@ def get_alternatives(item_name: str) -> str:
     })
 
 
-DEFAULT_PROMPT = """\
-You are the inventory management agent for a coffee shop.
-
-Your job:
-- Check item availability for an order using check_inventory.
-- If all items are available: update stock levels with update_stock.
-- After updating stock: call place_on_tray for each food/pastry item in the order (e.g. croissants, muffins, sandwiches). Do NOT place coffee items — the barista handles those.
-- Then MUST transfer to the barista agent.
-- If items are unavailable: suggest alternatives using get_alternatives, then transfer to customer service.
-
-After checking inventory, updating stock, and placing food items on the tray, you MUST transfer immediately.
-Do NOT tell the customer the order is ready — you only handle stock and food items.
-
-You can transfer to:
-- Barista agent: when all items are confirmed available, stock is updated, and food items are on the tray
-- Customer service agent: when items are unavailable and need resolution"""
-
-DEFAULT_TOOLS = [check_inventory, update_stock, place_on_tray, check_tray, get_alternatives, get_order, transfer_to_agent]
-DEFAULT_TOOL_NAMES = [t.name for t in DEFAULT_TOOLS]
-
-
-def create_inventory_agent(chat_llm, prompt=None):
-    """Create and return the inventory agent."""
-    if not prompt:
-        prompt = DEFAULT_PROMPT
-
-    tools = list(DEFAULT_TOOLS)
-
-    llm_with_tools = bind_tools_sequential(chat_llm, tools)
-
-    return create_react_agent(
-        model=llm_with_tools,
-        name="inventory_agent",
-        tools=tools,
-        prompt=prompt,
-        pre_model_hook=create_context_isolation_hook("inventory_agent"),
-    )

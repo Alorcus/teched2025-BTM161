@@ -3,6 +3,7 @@
 
 # MLflow experiment tracking
 mlruns/
+guardrail_log/
 
 # Generated outputs
 generated_event_log/
