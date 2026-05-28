@@ -251,6 +251,14 @@ Add new visualizations by creating a private export method. Use, for exmaple, `p
 
 ---
 
+## Metrics Dashboard
+
+(0. Update poetry dependencies)
+1. Navigate to `src/metrics``
+2. Run the dasboard on localhost with `streamlit run dashboard.py`
+
+---
+
 ## Contributing
 
 Please read the [CONTRIBUTING.md](./CONTRIBUTING.md) to understand the contribution guidelines.
