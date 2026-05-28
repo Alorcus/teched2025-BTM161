@@ -155,7 +155,7 @@ def create_metrics_dashboard():
                 f"**Log:** `{selected_file.name}`  ·  "
                 f"{ocel.events.height:,} events  ·  "
                 f"{ocel.objects.height:,} objects",
-                styles={"font-size": "14px", "color": "#666", "margin-bottom": "15px"}
+                styles={"font-size": "14px", "color": "#666", "margin-bottom": "10px"}
             )
 
             # KPI Metrics
@@ -200,9 +200,9 @@ def create_metrics_dashboard():
 
             # Agent Workload Chart
             workload_section = pn.Column(
-                pn.pane.Markdown("### System Metrics", styles={"margin-top": "20px"}),
+                pn.pane.Markdown("### System Metrics", styles={"margin-top": "10px"}),
                 pn.layout.Divider(),
-                pn.pane.Markdown("**Agent Workload**", styles={"margin-bottom": "10px"}),
+                pn.pane.Markdown("**Agent Workload**", styles={"margin-bottom": "5px"}),
             )
 
             if agent_counts.height:
@@ -223,9 +223,9 @@ def create_metrics_dashboard():
 
             # Duration Chart
             duration_section = pn.Column(
-                pn.pane.Markdown("### Time Metrics", styles={"margin-top": "20px"}),
+                pn.pane.Markdown("### Time Metrics", styles={"margin-top": "10px"}),
                 pn.layout.Divider(),
-                pn.pane.Markdown("**Average Activity Duration**", styles={"margin-bottom": "10px"}),
+                pn.pane.Markdown("**Average Activity Duration**", styles={"margin-bottom": "5px"}),
             )
 
             if duration_stats.height:
@@ -270,27 +270,28 @@ def create_metrics_dashboard():
         width=300,
     )
 
-    # Navigation tabs
+    # Navigation tabs for header
     nav_tabs = pn.Row(
         pn.pane.HTML(
-            '<a href="/" style="display:inline-block;padding:8px 16px;background:#F5F5F5;color:#333;'
-            'border-radius:4px;text-decoration:none;font-weight:500;border:1px solid #ddd;margin-right:10px;">'
-            'Observatory</a>',
+            '<a href="/" style="display:inline-block;padding:6px 14px;background:rgba(255,255,255,0.15);color:white;'
+            'border-radius:4px;text-decoration:none;font-weight:500;font-size:13px;margin-right:8px;">'
+            'Interaction Observatory</a>',
             sizing_mode="fixed"
         ),
         pn.pane.HTML(
-            '<div style="display:inline-block;padding:8px 16px;background:#4E342E;color:white;'
-            'border-radius:4px;font-weight:600;">Metrics</div>',
+            '<div style="display:inline-block;padding:6px 14px;background:#6D4C41;color:white;'
+            'border-radius:4px;font-weight:600;font-size:13px;">Metrics</div>',
             sizing_mode="fixed"
         ),
-        margin=(0, 0, 10, 0),
+        margin=(0, 0, 0, 0),
     )
 
     # Template
     template = pn.template.FastListTemplate(
-        title="Coffee Shop Metrics",
+        title="Coffee Shop Agent Observatory",
         sidebar=[sidebar],
-        main=[pn.Column(nav_tabs, metrics_content, sizing_mode="stretch_both")],
+        header=[nav_tabs],
+        main=[pn.Column(metrics_content, sizing_mode="stretch_both", styles={"gap": "5px"})],
         accent_base_color="#795548",
         header_background="#4E342E",
         theme="default",

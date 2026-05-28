@@ -146,11 +146,10 @@ def create_observatory_dashboard():
 
     # Save as Event Log button
     save_button = pn.widgets.Button(
-        name="💾 Save as Event Log",
+        name="Save as Event Log",
         button_type="success",
         sizing_mode="stretch_width",
         disabled=True,  # Disabled until conversation completes
-        margin=(5, 0, 0, 0),
     )
 
     def on_save_log(event):
@@ -217,34 +216,36 @@ def create_observatory_dashboard():
         styles={"display": "flex", "flex-direction": "column"},
     )
 
-    # Navigation tabs
+    # Navigation tabs for header
     nav_tabs = pn.Row(
         pn.pane.HTML(
-            '<div style="display:inline-block;padding:8px 16px;background:#4E342E;color:white;'
-            'border-radius:4px;font-weight:600;margin-right:10px;">Observatory</div>',
+            '<div style="display:inline-block;padding:6px 14px;background:#6D4C41;color:white;'
+            'border-radius:4px;font-weight:600;margin-right:8px;font-size:13px;">Interaction Observatory</div>',
             sizing_mode="fixed"
         ),
         pn.pane.HTML(
-            '<a href="/metrics" style="display:inline-block;padding:8px 16px;background:#F5F5F5;color:#333;'
-            'border-radius:4px;text-decoration:none;font-weight:500;border:1px solid #ddd;">'
+            '<a href="/metrics" style="display:inline-block;padding:6px 14px;background:rgba(255,255,255,0.15);color:white;'
+            'border-radius:4px;text-decoration:none;font-weight:500;font-size:13px;">'
             'Metrics</a>',
             sizing_mode="fixed"
         ),
-        margin=(0, 0, 10, 0),
+        margin=(0, 0, 0, 0),
     )
 
     template = pn.template.FastListTemplate(
         title="Coffee Shop Agent Observatory",
         sidebar=[sidebar],
+        header=[nav_tabs],
         main=[pn.Column(
-            nav_tabs,
             pn.Row(
                 pn.Column(tray_panel.panel(), width=160, height=160),
                 pn.Column(stock_panel.panel(), sizing_mode="stretch_both", styles={"flex": "2"}),
                 pn.Column(coffee_machine_panel.panel(), sizing_mode="stretch_width", styles={"flex": "1"}),
                 sizing_mode="stretch_width",
             ),
-            grid, sizing_mode="stretch_both",
+            grid,
+            sizing_mode="stretch_both",
+            styles={"gap": "5px"},
         )],
         accent_base_color="#795548",
         header_background="#4E342E",
