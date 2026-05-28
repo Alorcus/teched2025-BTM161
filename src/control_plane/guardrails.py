@@ -56,7 +56,7 @@ class SoftGuardrail(Guardrail):
 
     def eval(self, context: GuardrailContext) -> Verdict:
         return Verdict(
-            allowed=Effect.ALLOW,
+            effect=Effect.ALLOW,
             guardrail_name=self.name,
             guardrail_type=self.type,
             reason_internal="soft guardrail evaluation skipped (stub)",

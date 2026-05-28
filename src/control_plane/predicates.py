@@ -7,13 +7,13 @@ def allowed_handover_targets_predicate(context: GuardrailContext) -> Verdict:
     allowed = context.allowed_handovers
     if target in allowed:
         return Verdict(
-            allowed=Effect.ALLOW,
+            effect=Effect.ALLOW,
             guardrail_name="",
             guardrail_type="",
             reason_internal=f"{target!r} is in allowed_handovers={allowed}",
         )
     return Verdict(
-        allowed=Effect.DENY,
+        effect=Effect.DENY,
         guardrail_name="",
         guardrail_type="",
         reason_internal=f"{target!r} not in allowed_handovers={allowed} for agent {context.agent_id!r}",
@@ -31,13 +31,13 @@ def discount_within_limit_predicate(max_pct: int):
         pct = int(context.tool_args.get("discount_percent", 0) or 0)
         if pct <= max_pct:
             return Verdict(
-                allowed=Effect.ALLOW,
+                effect=Effect.ALLOW,
                 guardrail_name="",
                 guardrail_type="",
                 reason_internal=f"discount_percent={pct} within limit {max_pct}",
             )
         return Verdict(
-            allowed=Effect.FLAG,
+            effect=Effect.FLAG,
             guardrail_name="",
             guardrail_type="",
             reason_internal=f"discount_percent={pct} exceeds limit {max_pct} (flagged, not blocked)",
