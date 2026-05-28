@@ -253,9 +253,8 @@ Add new visualizations by creating a private export method. Use, for exmaple, `p
 
 ## Metrics Dashboard
 
-(0. Update poetry dependencies)
-1. Navigate to `src/metrics``
-2. Run the dasboard on localhost with `streamlit run dashboard.py`
+1. Update poetry dependencies with `poetry install`
+2. Run the dashboard on localhost with `streamlit run src/metrics/dashboard.py`
 
 ---
 
