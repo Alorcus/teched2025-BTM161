@@ -10,17 +10,25 @@ import streamlit as st
 from src.trace_processing.eventlog_conversion import ObjectCentricEventlog
 
 
+COLOR_SCHEME = {
+    "beige":"#EBDBCB",
+    "yellow":"#FDCA40",
+    "orange":"#D87F12",
+    "red":"#8D0209",
+    "dark_red":"#721A0D",
+    "brown":"#563210",
+}
+
+
 st.set_page_config(page_title="Agentic Behavior Dashboard", layout="wide")
 LOG_DIR = Path("generated_event_log")
 
 AGENT_COLORS = {
-    "order_agent":            "#FDCA40",
-    "barista_agent":          "#D87F12",
-    "inventory_agent":        "#8D0209",
-    "customer_service_agent": "#563210",
-    "user":                   "#563210",
+    "order_agent": COLOR_SCHEME["yellow"],
+    "barista_agent": COLOR_SCHEME["orange"],
+    "inventory_agent": COLOR_SCHEME["red"],
+    "customer_service_agent": COLOR_SCHEME["brown"],
 } 
-# almond cream: #EBDBCB
 
 @st.cache_resource(show_spinner="Converting event log to OCEL …")
 def load_ocel(path: Path) -> ObjectCentricEventlog:
