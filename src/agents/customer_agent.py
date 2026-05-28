@@ -1,7 +1,15 @@
+import json
+import re
 import random
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 
 from ..llm import normalize_content
+
+FEEDBACK_OPTIONS = {
+    "excellent": 1.0,
+    "normal": 0.5,
+    "not_satisfied": 0.0,
+}
 
 CUSTOMER_SCENARIOS = [
     "You want to order a large latte and a croissant. Be friendly.",
@@ -57,6 +65,69 @@ Guidelines:
 - Respond directly to what the staff last said.
 - When your order is confirmed ready OR your complaint is fully resolved, reply with exactly one word: DONE
 """
+
+    def get_feedback(self) -> dict:
+        """Generate a subjective customer satisfaction rating based on the completed conversation."""
+        history_text = "\n".join(
+            f"{'You' if r == 'customer' else 'Staff'}: {c}"
+            for r, c in self.history
+            if r in ("customer", "agent")
+        )
+        messages = [
+            SystemMessage(content=(
+                "You are a customer at a coffee shop. You just finished a conversation with the staff.\n"
+                "Evaluate the quality of service from your subjective customer perspective.\n"
+                "Use exactly one of these labels:\n"
+                "- excellent  (smooth and successful, received what you wanted or a well-communicated alternative)\n"
+                "- normal     (acceptable, minor issues or friction, still okay overall)\n"
+                "- not_satisfied (poor service: wrong item, no substitute communication, long wait, confusing interaction, or unresolved issue)\n"
+                'Return only valid JSON in this exact format:\n'
+                '{"label": "excellent", "score": 1.0, "reason": "short explanation"}'
+            )),
+            HumanMessage(content=f"Your conversation:\n{history_text}\n\nYour rating:"),
+        ]
+        response = self.llm.invoke(messages)
+        raw = normalize_content(response.content).strip()
+
+        label = None
+        reason = "No reason provided."
+        try:
+            text = re.sub(r"```(?:json)?\s*", "", raw).strip().rstrip("`").strip()
+            start = text.find("{")
+            end = text.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                parsed = json.loads(text[start : end + 1])
+                label = str(parsed.get("label", "")).lower().strip()
+                reason = parsed.get("reason", "No reason provided.")
+        except (json.JSONDecodeError, AttributeError):
+            pass
+
+        if label in FEEDBACK_OPTIONS:
+            return {
+                "feedback_label": label,
+                "feedback_score": FEEDBACK_OPTIONS[label],
+                "feedback_reason": reason,
+                "raw_feedback_response": raw,
+                "valid": True,
+            }
+
+        for option in FEEDBACK_OPTIONS:
+            if option in raw.lower():
+                return {
+                    "feedback_label": option,
+                    "feedback_score": FEEDBACK_OPTIONS[option],
+                    "feedback_reason": reason,
+                    "raw_feedback_response": raw,
+                    "valid": False,
+                }
+
+        return {
+            "feedback_label": "normal",
+            "feedback_score": 0.5,
+            "feedback_reason": "Fallback used because the model response was invalid.",
+            "raw_feedback_response": raw,
+            "valid": False,
+        }
 
     def inject_experience(self, text: str):
         """Inject a mid-conversation experience note (e.g. contaminated coffee)."""

@@ -1,5 +1,7 @@
+import json
 import logging
 import uuid
+from pathlib import Path
 from typing import Callable
 
 import mlflow
@@ -14,6 +16,8 @@ from src.stream import extract_messages
 
 logger = logging.getLogger("coffee_shop.conversation")
 
+FEEDBACK_STORE_PATH = Path("./feedback_store.json")
+
 
 class ConversationEngine:
     """Headless conversation runner for the coffee shop multi-agent system."""
@@ -22,6 +26,7 @@ class ConversationEngine:
         self.app = app
         self.mlflow_enabled = mlflow_enabled
         self.traces_of_latest_conversations: list[str] = []
+        self.feedback_log: dict[str, dict] = {}
 
     def _get_config(self, thread_id):
         return {"configurable": {"thread_id": thread_id}}
@@ -79,7 +84,25 @@ class ConversationEngine:
 
         self._consume_tray(customer_agent)
 
+        order = load_recent_order()
+        order_id = order.order_id_str if order else None
+        feedback = customer_agent.get_feedback()
+        self.feedback_log[thread_id] = {"thread_id": thread_id, "order_id": order_id, **feedback}
+        self._save_feedback_store()
+        logger.info(
+            "Customer feedback [%s]: %s", feedback["feedback_label"], feedback["feedback_reason"]
+        )
+
         return self.traces_of_latest_conversations[trace_start:]
+
+    def _save_feedback_store(self):
+        existing = {}
+        if FEEDBACK_STORE_PATH.exists():
+            with open(FEEDBACK_STORE_PATH) as f:
+                existing = json.load(f)
+        existing.update(self.feedback_log)
+        with open(FEEDBACK_STORE_PATH, "w") as f:
+            json.dump(existing, f, indent=2)
 
     def _consume_tray(self, customer_agent: CustomerAgent):
         """Customer takes the tray — apply effects and mark order complete."""

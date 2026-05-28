@@ -1,7 +1,10 @@
+import json
 import os
+import uuid
+from datetime import datetime, timedelta
+from pathlib import Path
 from .log_generator import LogGenerator
 import pandas as pd
-from datetime import datetime
 
 class TraceProcessor:
     def __init__(self, base_path: str = "./mlruns"):
@@ -52,6 +55,12 @@ class TraceProcessor:
 
         print(f"📁 Found {len(traces)} traces")
 
+        feedback_store = {}
+        feedback_path = Path("./feedback_store.json")
+        if feedback_path.exists():
+            with open(feedback_path) as f:
+                feedback_store = json.load(f)
+
         successful_ingestions = 0
         failed_ingestions = 0
 
@@ -74,6 +83,35 @@ class TraceProcessor:
 
         # Sort combined logs by timestamp
         combined_logs.sort_values(by="time:timestamp", inplace=True)
+
+        # Append exactly one customer_feedback event per case, after all other events
+        feedback_rows = []
+        for case_id, fb in feedback_store.items():
+            case_mask = combined_logs["case_id"] == case_id
+            if not case_mask.any():
+                continue
+            last_ts = combined_logs.loc[case_mask, "time:timestamp"].max()
+            feedback_ts = (
+                datetime.strptime(last_ts, "%Y-%m-%dT%H:%M:%S.%f") + timedelta(milliseconds=1)
+            ).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
+            feedback_rows.append({
+                "case_id": case_id,
+                "identity:id": str(uuid.uuid4()),
+                "time:timestamp": feedback_ts,
+                "time_finished": feedback_ts,
+                "concept:name": "customer_feedback",
+                "concept:instance": f"customer rates: {fb['feedback_label']}",
+                "org:resource": "user",
+                "message": fb["feedback_label"],
+                "feedback_score": fb["feedback_score"],
+                "feedback_reason": fb["feedback_reason"],
+                "feedback_valid": fb["valid"],
+            })
+
+        if feedback_rows:
+            combined_logs = pd.concat(
+                [combined_logs, pd.DataFrame(feedback_rows)], ignore_index=True
+            ).sort_values(by="time:timestamp")
 
         self._generate_log_file(combined_logs, "./generated_event_log", json_format=export_as_json)
 
@@ -118,3 +156,15 @@ class TraceProcessor:
             print(f"\n✅ Log file generated at {file_path}")
         except Exception as e:
             print(f"\n″❌ Failed to generate log file at {file_path}: {e}")
+
+
+def _extract_case_id(trace_dict: dict) -> str | None:
+    """Extract the thread_id (case_id) from a raw MLflow trace dict."""
+    spans = trace_dict.get("data", {}).get("spans", trace_dict.get("spans", []))
+    root = next((s for s in spans if s.get("name") == "LangGraph"), None)
+    if not root:
+        return None
+    try:
+        return json.loads(root["attributes"]["metadata"]).get("thread_id")
+    except (KeyError, json.JSONDecodeError):
+        return None
