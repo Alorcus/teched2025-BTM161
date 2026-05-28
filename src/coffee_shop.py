@@ -1,5 +1,5 @@
 import logging
-from collections import defaultdict
+from pathlib import Path
 
 import mlflow
 
@@ -10,6 +10,7 @@ from src.agents import (
     init_db, reset_inventory, set_item_stock, get_all_inventory,
     CustomerAgent, CUSTOMER_SCENARIOS,
 )
+from src.control_plane import AgentRepo, Catalog, JsonlLogSink
 from src.graph import build_coffee_shop_graph
 from src.conversation import ConversationEngine
 from src.notebook_ui import NotebookUI, AGENT_CONFIG
@@ -40,7 +41,6 @@ class CoffeeShop:
 
     def __init__(self, config: CoffeeShopConfig | None = None):
         self.config = config or CoffeeShopConfig()
-        self.agent_definitions = defaultdict(str)
         self.traces_of_latest_conversations = []
         self.verbose_mode = True
         self.customer_agent_enabled = False
@@ -49,10 +49,9 @@ class CoffeeShop:
         self.agent_config = AGENT_CONFIG
         self._engine = None
         self._ui = None
-
-    def set_agent_definition(self, agent, definition):
-        """Set or update the definition for a specific agent before starting the shop"""
-        self.agent_definitions[agent] = definition
+        self.agent_repo: AgentRepo | None = None
+        self.catalog: Catalog | None = None
+        self.log_sink: JsonlLogSink | None = None
 
     def open_shop(self, reset_inventory_first=True):
         """Start the coffee shop application after potentially updating agent definitions"""
@@ -75,7 +74,16 @@ class CoffeeShop:
                 mlflow.create_experiment(self.config.mlflow_experiment)
             mlflow.set_experiment(self.config.mlflow_experiment)
 
-        self.app = build_coffee_shop_graph(llm, self.agent_definitions)
+        config_dir = Path(self.config.control_plane_config_dir)
+        self.agent_repo = AgentRepo(config_dir)
+        self.catalog = Catalog(config_dir)
+        self.log_sink = JsonlLogSink(self.config.guardrail_log_path)
+        _coffee_shop_logger.info(
+            "control plane: agents=%s | log=%s",
+            self.agent_repo.ids(), self.config.guardrail_log_path,
+        )
+
+        self.app = build_coffee_shop_graph(llm, self.agent_repo, self.catalog, self.log_sink)
 
         self._conversation_engine = ConversationEngine(
             self.app, mlflow_enabled=self.config.mlflow_enabled

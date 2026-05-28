@@ -8,10 +8,7 @@ import panel as pn
 
 from src.coffee_shop import CoffeeShop
 from src.agents import CUSTOMER_SCENARIOS, build_default_prompt
-from src.agents.order_agent import DEFAULT_PROMPT as ORDER_PROMPT, DEFAULT_TOOL_NAMES as ORDER_TOOLS
-from src.agents.inventory_agent import DEFAULT_PROMPT as INVENTORY_PROMPT, DEFAULT_TOOL_NAMES as INVENTORY_TOOLS
-from src.agents.barista_agent import DEFAULT_PROMPT as BARISTA_PROMPT, DEFAULT_TOOL_NAMES as BARISTA_TOOLS, start_coffee_machine, stop_coffee_machine
-from src.agents.customer_service_agent import DEFAULT_PROMPT as CS_PROMPT, DEFAULT_TOOL_NAMES as CS_TOOLS
+from src.agents.barista_agent import start_coffee_machine, stop_coffee_machine
 from .event_bus import EventBus, EventType, DashboardEvent
 from .agent_panel import AgentPanel
 from .conversation_runner import ConversationRunner
@@ -38,12 +35,18 @@ class _EventBusLogHandler(logging.Handler):
             log_level=record.levelno,
         ))
 
-AGENT_REGISTRY = {
-    "order_agent": {"prompt": ORDER_PROMPT, "tools": ORDER_TOOLS},
-    "inventory_agent": {"prompt": INVENTORY_PROMPT, "tools": INVENTORY_TOOLS},
-    "barista_agent": {"prompt": BARISTA_PROMPT, "tools": BARISTA_TOOLS},
-    "customer_service_agent": {"prompt": CS_PROMPT, "tools": CS_TOOLS},
-}
+def _agent_registry_from_repo(shop: CoffeeShop) -> dict[str, dict]:
+    """Read agent prompts/tool-names from the Agent Repo set up during open_shop()."""
+    repo = shop.agent_repo
+    if repo is None:
+        return {}
+    return {
+        agent_id: {
+            "prompt": d.base_prompt,
+            "tools": list(d.tools),
+        }
+        for agent_id, d in repo.all().items()
+    }
 
 
 def create_dashboard():
@@ -53,6 +56,7 @@ def create_dashboard():
     shop.open_shop()
     event_bus = EventBus()
     runner = ConversationRunner(shop, event_bus)
+    agent_registry = _agent_registry_from_repo(shop)
 
     coffee_shop_logger = logging.getLogger("coffee_shop")
     coffee_shop_logger.setLevel(logging.DEBUG)
@@ -69,7 +73,7 @@ def create_dashboard():
     for agent_name, config in shop.agent_config.items():
         if agent_name == "user":
             continue
-        reg = AGENT_REGISTRY.get(agent_name, {})
+        reg = agent_registry.get(agent_name, {})
         agent_panels[agent_name] = AgentPanel(
             agent_name=agent_name,
             config=config,
