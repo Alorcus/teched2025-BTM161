@@ -1,11 +1,3 @@
-"""
-Agentic Behavior Dashboard — OCEL 2.0
-Scans ./event_logs/ for raw CSV event logs, converts the selected one to an
-ObjectCentricEventlog on the fly, and works directly against its properties:
-  ocel.events, ocel.objects, ocel.event_object, ocel.object_object,
-  ocel.event_tables, ocel.object_tables, ocel.event_map_type, ocel.object_map_type
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -17,26 +9,24 @@ import streamlit as st
 
 from src.trace_processing.eventlog_conversion import ObjectCentricEventlog
 
-# ── Config ────────────────────────────────────────────────────────────────────
-st.set_page_config(page_title="Agentic Behavior Dashboard", layout="wide")
 
+st.set_page_config(page_title="Agentic Behavior Dashboard", layout="wide")
 LOG_DIR = Path("generated_event_log")
 
 AGENT_COLORS = {
-    "order_agent":            "#6366f1",
-    "barista_agent":          "#f59e0b",
-    "inventory_agent":        "#10b981",
-    "customer_service_agent": "#ef4444",
-    "user":                   "#64748b",
-}
-
-# ── Loader: CSV → ObjectCentricEventlog ───────────────────────────────────────
+    "order_agent":            "#FDCA40",
+    "barista_agent":          "#D87F12",
+    "inventory_agent":        "#8D0209",
+    "customer_service_agent": "#563210",
+    "user":                   "#563210",
+} 
+# almond cream: #EBDBCB
 
 @st.cache_resource(show_spinner="Converting event log to OCEL …")
 def load_ocel(path: Path) -> ObjectCentricEventlog:
     return ObjectCentricEventlog.from_eventlog(str(path))
 
-# ── Derived-data helpers ──────────────────────────────────────────────────────
+# Helpers
 
 def flat_event_table(ocel: ObjectCentricEventlog) -> pl.DataFrame:
     """Union all per-type event tables into one flat DataFrame."""
@@ -116,14 +106,13 @@ selected_name = st.sidebar.selectbox(
     index=0,
 )
 
+# Helper Tables
+
 ocel: ObjectCentricEventlog = load_ocel(LOG_DIR / selected_name)
-
-# ── Build derived tables ──────────────────────────────────────────────────────
-
 events_flat   = flat_event_table(ocel)
 is_handover   = events_flat["ocel_type"].str.contains("_handover_")
-core_events   = events_flat.filter(~is_handover)
-handover_evts = events_flat.filter(is_handover)
+non_handover_events   = events_flat.filter(~is_handover)
+handover_events = events_flat.filter(is_handover)
 h_matrix      = handover_matrix(ocel)
 agent_counts  = agent_event_counts(ocel)
 
@@ -131,12 +120,12 @@ token_events  = events_flat.filter(
     pl.col("input_tokens").is_not_null() & pl.col("response_tokens").is_not_null()
 )
 activity_freq = (
-    core_events.group_by("ocel_type")
+    non_handover_events.group_by("ocel_type")
     .agg(pl.len().alias("count"))
     .sort("count", descending=True)
 )
 duration_stats = (
-    core_events.drop_nulls("duration")
+    non_handover_events.drop_nulls("duration")
     .group_by("ocel_type")
     .agg(
         pl.mean("duration").alias("avg_duration"),
@@ -151,188 +140,62 @@ obj_type_counts = (
     .sort("count", descending=True)
 )
 
-# ── Header ────────────────────────────────────────────────────────────────────
+# Header
 
-st.title("🤖 Agent Behavior Dashboard")
+st.title("Agent Behavior Dashboard")
 st.caption(
     f"Log: `{selected_name}`  ·  "
     f"{ocel.events.height:,} events  ·  "
     f"{ocel.objects.height:,} objects"
 )
 
-# ── KPIs ──────────────────────────────────────────────────────────────────────
+# General KPIs
 
-k1, k2, k3, k4, k5 = st.columns(5)
-k1.metric("Total Events",      f"{ocel.events.height:,}")
-k2.metric("Unique Activities", str(core_events["ocel_type"].n_unique()))
-k3.metric("Handovers",         f"{handover_evts.height:,}")
-k4.metric("Input Tokens",
+m1, m2, m3, m4, m5 = st.columns(5)
+m1.metric("Total Events", f"{ocel.events.height:,}")
+m2.metric("Unique Activities", str(non_handover_events["ocel_type"].n_unique()))
+m3.metric("Handovers", f"{handover_events.height:,}")
+m4.metric("Used Input Tokens",
           f"{int(token_events['input_tokens'].sum()):,}" if token_events.height else "—")
-k5.metric("Response Tokens",
+m5.metric("Used Response Tokens",
           f"{int(token_events['response_tokens'].sum()):,}" if token_events.height else "—")
 
-st.divider()
 
-# ── Row 1: Activity frequency + Agent workload ────────────────────────────────
+# System Metrics Section
 
-col_l, col_r = st.columns(2)
+st.subheader("System Metrics ", divider="grey")
 
-with col_l:
-    st.subheader("Activity Frequency")
+st.markdown("_Agent Workload_")
+if agent_counts.height:
     fig = px.bar(
-        activity_freq.to_pandas(),
-        x="count", y="ocel_type", orientation="h",
-        color="count", color_continuous_scale="Blues",
-        labels={"ocel_type": "Activity", "count": "Occurrences"},
+        agent_counts.to_pandas(),
+        x="agent", y="event_count",
+        color="agent", color_discrete_map=AGENT_COLORS,
+        labels={"agent": "Agent", "event_count": "Events Handled"},
+    )
+    fig.update_layout(showlegend=False,
+                        margin=dict(l=0, r=10, t=10, b=0), height=380)
+    st.plotly_chart(fig, use_container_width=True)
+else:
+    st.info("No agent–event relationships found in this log.")
+
+
+# Time Metrics Section
+
+st.subheader("Time Metrics ", divider="grey")
+
+st.markdown("_Average Activity Duration_")
+if duration_stats.height:
+    fig = px.bar(
+        duration_stats.to_pandas().head(15),
+        x="avg_duration", y="ocel_type", orientation="h",
+        color="avg_duration", color_continuous_scale="Oranges",
+        labels={"ocel_type": "Activity", "avg_duration": "Avg Duration (s)"},
+        hover_data={"median_duration": True, "max_duration": True},
     )
     fig.update_layout(yaxis={"categoryorder": "total ascending"},
-                      coloraxis_showscale=False,
-                      margin=dict(l=0, r=10, t=10, b=0), height=380)
+                        coloraxis_showscale=False,
+                        margin=dict(l=0, r=10, t=10, b=0), height=380)
     st.plotly_chart(fig, use_container_width=True)
-
-with col_r:
-    st.subheader("Agent Workload")
-    if agent_counts.height:
-        fig = px.bar(
-            agent_counts.to_pandas(),
-            x="agent", y="event_count",
-            color="agent", color_discrete_map=AGENT_COLORS,
-            labels={"agent": "Agent", "event_count": "Events Handled"},
-        )
-        fig.update_layout(showlegend=False,
-                          margin=dict(l=0, r=10, t=10, b=0), height=380)
-        st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.info("No agent–event relationships found in this log.")
-
-# ── Row 2: Duration + Token scatter ──────────────────────────────────────────
-
-st.divider()
-col_l2, col_r2 = st.columns(2)
-
-with col_l2:
-    st.subheader("Average Duration by Activity (s)")
-    if duration_stats.height:
-        fig = px.bar(
-            duration_stats.to_pandas().head(15),
-            x="avg_duration", y="ocel_type", orientation="h",
-            color="avg_duration", color_continuous_scale="Oranges",
-            labels={"ocel_type": "Activity", "avg_duration": "Avg Duration (s)"},
-            hover_data={"median_duration": True, "max_duration": True},
-        )
-        fig.update_layout(yaxis={"categoryorder": "total ascending"},
-                          coloraxis_showscale=False,
-                          margin=dict(l=0, r=10, t=10, b=0), height=380)
-        st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.info("No duration data in this log.")
-
-with col_r2:
-    st.subheader("Token Usage per LLM Call")
-    if token_events.height:
-        fig = px.scatter(
-            token_events.select(["ocel_type", "input_tokens", "response_tokens"]).to_pandas(),
-            x="input_tokens", y="response_tokens",
-            color="ocel_type", opacity=0.75,
-            labels={"input_tokens": "Input Tokens",
-                    "response_tokens": "Response Tokens",
-                    "ocel_type": "Event Type"},
-        )
-        fig.update_layout(margin=dict(l=0, r=10, t=10, b=0), height=380)
-        st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.info("No token data in this log.")
-
-# ── Row 3: Handover Sankey + Timeline ────────────────────────────────────────
-
-st.divider()
-col_l3, col_r3 = st.columns(2)
-
-with col_l3:
-    st.subheader("Agent Handover Flow")
-    if h_matrix.height:
-        nodes = list(dict.fromkeys(
-            h_matrix["source"].to_list() + h_matrix["target"].to_list()
-        ))
-        node_idx    = {n: i for i, n in enumerate(nodes)}
-        node_colors = [AGENT_COLORS.get(n.lower().replace(" ", "_"), "#94a3b8")
-                       for n in nodes]
-        fig = go.Figure(go.Sankey(
-            node=dict(pad=15, thickness=20, label=nodes, color=node_colors),
-            link=dict(
-                source=[node_idx[s] for s in h_matrix["source"].to_list()],
-                target=[node_idx[t] for t in h_matrix["target"].to_list()],
-                value=h_matrix["count"].to_list(),
-                color="rgba(150,150,150,0.3)",
-            ),
-        ))
-        fig.update_layout(margin=dict(l=0, r=10, t=10, b=0), height=380)
-        st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.info("No handover events found in this log.")
-
-with col_r3:
-    st.subheader("Event Timeline")
-    tl = events_flat.drop_nulls("ocel_time").sort("ocel_time")
-    if tl.height:
-        tl_pd = tl.to_pandas()
-        tl_pd["minute"] = tl_pd["ocel_time"].dt.floor("min")
-        density = tl_pd.groupby("minute").size().reset_index(name="count")
-        fig = px.area(density, x="minute", y="count",
-                      labels={"minute": "Time", "count": "Events"},
-                      color_discrete_sequence=["#6366f1"])
-        fig.update_layout(margin=dict(l=0, r=10, t=10, b=0), height=380)
-        st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.info("No timestamp data in this log.")
-
-# ── Row 4: Object distribution + Event explorer ───────────────────────────────
-
-st.divider()
-col_l4, col_r4 = st.columns([1, 2])
-
-with col_l4:
-    st.subheader("Object Type Distribution")
-    fig = px.pie(
-        obj_type_counts.to_pandas(),
-        names="ocel_type", values="count", hole=0.45,
-        color_discrete_sequence=px.colors.qualitative.Pastel,
-    )
-    fig.update_layout(margin=dict(l=0, r=0, t=10, b=0), height=340)
-    st.plotly_chart(fig, use_container_width=True)
-
-with col_r4:
-    st.subheader("Event Explorer")
-    selected_table = st.selectbox(
-        "Event table",
-        options=list(ocel.event_tables.keys()),
-        format_func=lambda k: k.removeprefix("event_"),
-    )
-    type_filter = st.multiselect(
-        "Cross-type filter",
-        options=sorted(events_flat["ocel_type"].unique().to_list()),
-        default=[],
-        placeholder="All event types",
-    )
-    if type_filter:
-        show_df = events_flat.filter(pl.col("ocel_type").is_in(type_filter))
-        st.dataframe(show_df.sort("ocel_time").to_pandas(),
-                     use_container_width=True, height=300, hide_index=True)
-    else:
-        st.dataframe(ocel.event_tables[selected_table].sort("ocel_time").to_pandas(),
-                     use_container_width=True, height=300, hide_index=True)
-
-# ── Footer: raw OCEL table inspector ─────────────────────────────────────────
-
-with st.expander("🔍 Raw OCEL tables"):
-    tab_ev, tab_ob, tab_eo, tab_oo = st.tabs(
-        ["events", "objects", "event_object", "object_object"]
-    )
-    with tab_ev:
-        st.dataframe(ocel.events.to_pandas(), use_container_width=True, hide_index=True)
-    with tab_ob:
-        st.dataframe(ocel.objects.to_pandas(), use_container_width=True, hide_index=True)
-    with tab_eo:
-        st.dataframe(ocel.event_object.to_pandas(), use_container_width=True, hide_index=True)
-    with tab_oo:
-        st.dataframe(ocel.object_object.to_pandas(), use_container_width=True, hide_index=True)
+else:
+    st.info("No duration data in this log.")
