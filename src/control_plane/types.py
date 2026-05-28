@@ -11,7 +11,7 @@ class Effect(str, Enum):
 
 @dataclass
 class Verdict:
-    allowed: Effect
+    effect: Effect
     guardrail_name: str
     guardrail_type: str
     reason_internal: str = ""

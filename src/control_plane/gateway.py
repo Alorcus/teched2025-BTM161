@@ -59,21 +59,20 @@ class Gateway:
             allowed_handovers=list(self.allowed_handovers),
         )
 
-        applicable = [g for g in self.guardrails if g.applies_to(tool_name)]
-        # Ordered: hard first, then soft. Short-circuit on first DENY.
+        applicable = [guardrail for guardrail in self.guardrails if guardrail.applies_to(tool_name)]
         applicable.sort(key=lambda g: 0 if g.type == "hard" else 1)
 
         verdicts: list[Verdict] = []
         final = Effect.ALLOW
         deny_reason = ""
-        for g in applicable:
-            v = g.eval(context)
-            verdicts.append(v)
-            if v.allowed == Effect.DENY and final != Effect.DENY:
+        for guardrail in applicable:
+            verdict = guardrail.eval(context)
+            verdicts.append(verdict)
+            if verdict.effect == Effect.DENY and final != Effect.DENY:
                 final = Effect.DENY
-                deny_reason = v.reason_for_llm or v.reason_internal
-                break  # short-circuit
-            if v.allowed == Effect.FLAG and final == Effect.ALLOW:
+                deny_reason = verdict.reason_for_llm or verdict.reason_internal
+                break
+            if verdict.effect == Effect.FLAG and final == Effect.ALLOW:
                 final = Effect.FLAG  # observability only; doesn't block
 
         decision = CallDecision(
@@ -101,7 +100,7 @@ class Gateway:
                 {
                     "guardrail_name": v.guardrail_name,
                     "guardrail_type": v.guardrail_type,
-                    "allowed": v.allowed.value,
+                    "effect": v.effect.value,
                     "reason_internal": v.reason_internal,
                     "reason_for_llm": v.reason_for_llm,
                 }
