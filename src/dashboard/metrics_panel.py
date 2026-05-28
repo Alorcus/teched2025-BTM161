@@ -151,58 +151,49 @@ def create_metrics_dashboard():
             )
 
             # Header
-            header = pn.pane.Markdown(
-                f"**Log:** `{selected_file.name}`  ·  "
-                f"{ocel.events.height:,} events  ·  "
-                f"{ocel.objects.height:,} objects",
-                styles={"font-size": "14px", "color": "#666", "margin-bottom": "10px"}
+            header = pn.pane.HTML(
+                f'<div style="font-size:11px;color:#666;margin-bottom:6px;padding:4px 0;">'
+                f'<b>Log:</b> {selected_file.name}  ·  '
+                f'{ocel.events.height:,} events  ·  '
+                f'{ocel.objects.height:,} objects</div>',
+                sizing_mode="stretch_width"
             )
 
-            # KPI Metrics
-            kpi_grid = pn.GridSpec(ncols=5, nrows=1, sizing_mode='stretch_width')
-
-            kpi_grid[0, 0] = pn.indicators.Number(
-                name="Total Events",
-                value=ocel.events.height,
-                format="{value:,}",
-                styles={'font-size': '16pt'}
-            )
-
-            kpi_grid[0, 1] = pn.indicators.Number(
-                name="Unique Activities",
-                value=non_handover_events["ocel_type"].n_unique(),
-                format="{value}",
-                styles={'font-size': '16pt'}
-            )
-
-            kpi_grid[0, 2] = pn.indicators.Number(
-                name="Handovers",
-                value=handover_events.height,
-                format="{value:,}",
-                styles={'font-size': '16pt'}
-            )
-
+            # KPI Metrics - compact card-style layout
             input_tokens_val = int(token_events['input_tokens'].sum()) if token_events.height else 0
-            kpi_grid[0, 3] = pn.indicators.Number(
-                name="Input Tokens",
-                value=input_tokens_val,
-                format="{value:,}" if input_tokens_val > 0 else "—",
-                styles={'font-size': '16pt'}
-            )
-
             response_tokens_val = int(token_events['response_tokens'].sum()) if token_events.height else 0
-            kpi_grid[0, 4] = pn.indicators.Number(
-                name="Response Tokens",
-                value=response_tokens_val,
-                format="{value:,}" if response_tokens_val > 0 else "—",
-                styles={'font-size': '16pt'}
+
+            kpi_cards = [
+                ("Total Events", f"{ocel.events.height:,}"),
+                ("Activities", f"{non_handover_events['ocel_type'].n_unique()}"),
+                ("Handovers", f"{handover_events.height:,}"),
+                ("Input Tokens", f"{input_tokens_val:,}" if input_tokens_val > 0 else "—"),
+                ("Response Tokens", f"{response_tokens_val:,}" if response_tokens_val > 0 else "—"),
+            ]
+
+            kpi_html_cards = []
+            for label, value in kpi_cards:
+                kpi_html_cards.append(
+                    f'<div style="display:inline-block;margin:0 8px 8px 0;padding:6px 12px;'
+                    f'border:1px solid #e0e0e0;border-radius:6px;background:#fafafa;min-width:90px;">'
+                    f'<div style="font-size:10px;color:#666;margin-bottom:2px;">{label}</div>'
+                    f'<div style="font-weight:600;font-size:16px;color:#333;">{value}</div>'
+                    f'</div>'
+                )
+
+            kpi_panel = pn.pane.HTML(
+                '<div style="padding:4px 0;display:flex;flex-wrap:wrap;">' + "".join(kpi_html_cards) + '</div>',
+                sizing_mode="stretch_width"
             )
 
             # Agent Workload Chart
             workload_section = pn.Column(
-                pn.pane.Markdown("### System Metrics", styles={"margin-top": "10px"}),
-                pn.layout.Divider(),
-                pn.pane.Markdown("**Agent Workload**", styles={"margin-bottom": "5px"}),
+                pn.pane.HTML('<div style="font-size:13px;font-weight:600;margin-top:12px;margin-bottom:4px;">System Metrics</div>',
+                             sizing_mode="stretch_width"),
+                pn.layout.Divider(margin=(0, 0, 4, 0)),
+                pn.pane.HTML('<div style="font-size:11px;font-weight:500;margin-bottom:6px;">Agent Workload</div>',
+                             sizing_mode="stretch_width"),
+                sizing_mode="stretch_width"
             )
 
             if agent_counts.height:
@@ -214,18 +205,22 @@ def create_metrics_dashboard():
                 )
                 fig_workload.update_layout(
                     showlegend=False,
-                    margin=dict(l=0, r=10, t=10, b=0),
-                    height=380
+                    margin=dict(l=30, r=10, t=5, b=25),
+                    height=220,
+                    font=dict(size=10)
                 )
-                workload_section.append(pn.pane.Plotly(fig_workload, sizing_mode="stretch_width"))
+                workload_section.append(pn.pane.Plotly(fig_workload, sizing_mode="stretch_width", height=220))
             else:
                 workload_section.append(pn.pane.Alert("No agent–event relationships found in this log.", alert_type="info"))
 
             # Duration Chart
             duration_section = pn.Column(
-                pn.pane.Markdown("### Time Metrics", styles={"margin-top": "10px"}),
-                pn.layout.Divider(),
-                pn.pane.Markdown("**Average Activity Duration**", styles={"margin-bottom": "5px"}),
+                pn.pane.HTML('<div style="font-size:13px;font-weight:600;margin-top:16px;margin-bottom:4px;">Time Metrics</div>',
+                             sizing_mode="stretch_width"),
+                pn.layout.Divider(margin=(0, 0, 4, 0)),
+                pn.pane.HTML('<div style="font-size:11px;font-weight:500;margin-bottom:6px;">Average Activity Duration</div>',
+                             sizing_mode="stretch_width"),
+                sizing_mode="stretch_width"
             )
 
             if duration_stats.height:
@@ -239,19 +234,21 @@ def create_metrics_dashboard():
                 fig_duration.update_layout(
                     yaxis={"categoryorder": "total ascending"},
                     coloraxis_showscale=False,
-                    margin=dict(l=0, r=10, t=10, b=0),
-                    height=380
+                    margin=dict(l=150, r=10, t=5, b=25),
+                    height=250,
+                    font=dict(size=10)
                 )
-                duration_section.append(pn.pane.Plotly(fig_duration, sizing_mode="stretch_width"))
+                duration_section.append(pn.pane.Plotly(fig_duration, sizing_mode="stretch_width", height=250))
             else:
                 duration_section.append(pn.pane.Alert("No duration data in this log.", alert_type="info"))
 
             return pn.Column(
                 header,
-                kpi_grid,
+                kpi_panel,
                 workload_section,
                 duration_section,
-                sizing_mode="stretch_both"
+                sizing_mode="stretch_width",
+                styles={"padding": "8px 0"}
             )
 
         except Exception as e:
@@ -291,7 +288,7 @@ def create_metrics_dashboard():
         title="Coffee Shop Agent Observatory",
         sidebar=[sidebar],
         header=[nav_tabs],
-        main=[pn.Column(metrics_content, sizing_mode="stretch_both", styles={"gap": "5px"})],
+        main=[metrics_content],
         accent_base_color="#795548",
         header_background="#4E342E",
         theme="default",
