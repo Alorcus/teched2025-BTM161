@@ -199,7 +199,7 @@ class TestTrayConsumption(unittest.TestCase):
         ])
         tray_place(order_id, "latte", 1, "coffee", contaminated=False)
 
-        from src.dashboard.conversation_runner import ConversationRunner
+        from src.dashboard.interaction.conversation_runner import ConversationRunner
         runner = ConversationRunner.__new__(ConversationRunner)
         runner._current_order_id = order_id
         runner.shop = MagicMock()
@@ -216,7 +216,7 @@ class TestTrayConsumption(unittest.TestCase):
         ])
         tray_place(order_id, "latte", 1, "coffee", contaminated=True)
 
-        from src.dashboard.conversation_runner import ConversationRunner
+        from src.dashboard.interaction.conversation_runner import ConversationRunner
         runner = ConversationRunner.__new__(ConversationRunner)
         runner._current_order_id = order_id
         runner.shop = MagicMock()
@@ -229,7 +229,7 @@ class TestTrayConsumption(unittest.TestCase):
 
     def test_consume_no_order_id(self):
         """No crash when order_id is None."""
-        from src.dashboard.conversation_runner import ConversationRunner
+        from src.dashboard.interaction.conversation_runner import ConversationRunner
         runner = ConversationRunner.__new__(ConversationRunner)
         runner._current_order_id = None
         runner.shop = MagicMock()
@@ -241,7 +241,7 @@ class TestTrayConsumption(unittest.TestCase):
             OrderItem(name="latte", quantity=1, price=4.0, size=None, extras=[]),
         ])
 
-        from src.dashboard.conversation_runner import ConversationRunner
+        from src.dashboard.interaction.conversation_runner import ConversationRunner
         runner = ConversationRunner.__new__(ConversationRunner)
         runner._current_order_id = order_id
         runner.shop = MagicMock()
@@ -261,7 +261,7 @@ class TestTrayConsumption(unittest.TestCase):
         tray_place(order_id, "croissant", 1, "pastry", contaminated=False)
         tray_place(order_id, "latte", 1, "coffee", contaminated=True)
 
-        from src.dashboard.conversation_runner import ConversationRunner
+        from src.dashboard.interaction.conversation_runner import ConversationRunner
         runner = ConversationRunner.__new__(ConversationRunner)
         runner._current_order_id = order_id
         runner.shop = MagicMock()

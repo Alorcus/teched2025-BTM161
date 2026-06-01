@@ -226,7 +226,7 @@ def create_observatory_dashboard():
         pn.pane.HTML(
             '<a href="/metrics" style="display:inline-block;padding:6px 14px;background:rgba(255,255,255,0.15);color:white;'
             'border-radius:4px;text-decoration:none;font-weight:500;font-size:13px;">'
-            'Metrics</a>',
+            'Metrics Observatory</a>',
             sizing_mode="fixed"
         ),
         margin=(0, 0, 0, 0),

@@ -2,8 +2,8 @@ import logging
 
 import panel as pn
 
-from .observatory import create_observatory_dashboard
-from .metrics_panel import create_metrics_dashboard
+from .interaction import create_observatory_dashboard
+from .metrics import create_metrics_dashboard
 
 
 def main():
