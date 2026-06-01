@@ -11,6 +11,7 @@ import polars as pl
 
 
 COLOR_SCHEME = {
+    "off-white": "#F8F4E8",
     "beige": "#EBDBCB",
     "yellow": "#FDCA40",
     "orange": "#D87F12",
@@ -78,14 +79,15 @@ def per_order_kpi_card(title: str, subtitle: str, durations: pl.Series,
     clean = durations.drop_nulls()
     n = clean.len()
     if n == 0:
-        avg_str = med_str = "—"
+        avg_str = min_str = max_str = "—"
     else:
         avg_str = fmt_seconds(float(clean.mean()))
-        med_str = fmt_seconds(float(clean.median()))
+        min_str = fmt_seconds(float(clean.min()))
+        max_str = fmt_seconds(float(clean.max()))
     title_style = "font-size:12px;font-weight:600;color:#4E342E;margin-bottom:2px;"
     subtitle_style = "font-size:10px;color:#777;margin-bottom:6px;line-height:1.35;"
     avg_style = "font-weight:600;font-size:13px;color:#333;line-height:1.25;"
-    med_style = "font-weight:500;font-size:11px;color:#555;line-height:1.25;"
+    range_style = "font-weight:500;font-size:11px;color:#555;line-height:1.25;"
     footer_style = "font-size:10px;color:#999;margin-top:auto;padding-top:4px;"
     return (
         '<div style="padding:8px 10px;border:1px solid #e0e0e0;border-radius:6px;'
@@ -94,7 +96,7 @@ def per_order_kpi_card(title: str, subtitle: str, durations: pl.Series,
         f'<div style="{title_style}">{title}</div>'
         f'<div style="{subtitle_style}">{subtitle}</div>'
         f'<div style="{avg_style}">avg {avg_str}</div>'
-        f'<div style="{med_style}">med {med_str}</div>'
+        f'<div style="{range_style}">min {min_str} &nbsp;·&nbsp; max {max_str}</div>'
         f'<div style="{footer_style}">n={n} {unit}</div>'
         '</div>'
     )

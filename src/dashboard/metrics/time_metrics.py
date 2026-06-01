@@ -9,7 +9,7 @@ import polars as pl
 from src.trace_processing.eventlog_conversion import ObjectCentricEventlog
 
 from .eventlog_helpers import flat_event_table, per_order_durations
-from .ui import per_order_kpi_card, section_header, subsection_header
+from .ui import COLOR_SCHEME, per_order_kpi_card, section_header, subsection_header
 
 
 # Per-order KPI configuration. (label, subtitle, column-in-per_order_durations, unit)
@@ -103,5 +103,6 @@ class TimeMetricsSection:
             margin=dict(l=150, r=10, t=5, b=25),
             height=210,
             font=dict(size=10),
+            plot_bgcolor=COLOR_SCHEME["off-white"],
         )
         return pn.pane.Plotly(fig, height=210, sizing_mode="stretch_width")

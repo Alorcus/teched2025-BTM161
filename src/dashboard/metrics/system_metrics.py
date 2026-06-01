@@ -12,7 +12,7 @@ import plotly.express as px
 from src.trace_processing.eventlog_conversion import ObjectCentricEventlog
 
 from .eventlog_helpers import agent_event_counts
-from .ui import AGENT_COLORS, section_header, subsection_header
+from .ui import AGENT_COLORS, COLOR_SCHEME, section_header, subsection_header
 
 
 class SystemMetricsSection:
@@ -49,5 +49,6 @@ class SystemMetricsSection:
             margin=dict(l=30, r=10, t=5, b=25),
             height=180,
             font=dict(size=10),
+            plot_bgcolor=COLOR_SCHEME["off-white"],
         )
         return pn.pane.Plotly(fig, height=180, sizing_mode="stretch_width")
