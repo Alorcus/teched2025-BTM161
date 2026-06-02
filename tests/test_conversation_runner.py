@@ -10,8 +10,8 @@ from unittest.mock import MagicMock, patch, PropertyMock
 
 from langchain_core.messages import AIMessage, ToolMessage
 
-from src.dashboard.event_bus import EventBus, EventType
-from src.dashboard.conversation_runner import ConversationRunner, MAX_CONVERSATION_TURNS
+from src.dashboard.interaction.event_bus import EventBus, EventType
+from src.dashboard.interaction.conversation_runner import ConversationRunner, MAX_CONVERSATION_TURNS
 
 
 def _make_mock_shop():

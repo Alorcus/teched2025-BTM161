@@ -98,7 +98,12 @@ poetry run simulate --traces 10 --scenario all --export-logs
 
 ## Agent Observatory Dashboard
 
-A real-time observability dashboard built with [Panel](https://panel.holoviz.org/) that shows all agents simultaneously in a grid layout. Each agent panel displays its system prompt, available tools, current status, handoff context, message history (context-isolated), and tool call log — all updating live as a conversation streams through the system.
+A two-page observability dashboard built with [Panel](https://panel.holoviz.org/):
+
+- **Interaction Observatory** (`/`) — a real-time view of all agents in a grid layout. Each panel displays system prompt, available tools, current status, handoff context, context-isolated message history, and tool call log, updating live as a conversation streams through the system.
+- **Metrics Observatory** (`/metrics`) — analytics over previously-generated event logs (KPIs, per-agent workload, per-order timings, OCEL-based visualizations).
+
+Switch between the two pages via the tabs in the header.
 
 ### Launch
 
@@ -112,16 +117,37 @@ panel serve src/dashboard/app.py --show --port 5006
 
 ### Features
 
+#### Interaction Observatory (/)
+
 - **2x2 grid layout** showing all 4 agents at once (scales to 3x3 for up to 9)
 - **Live status badges**: idle / thinking / executing tool / handed off
 - **Handoff context display**: see what each agent received from the previous agent
 - **Tool call log**: arguments and results for every tool invocation
 - **Context-isolated messages**: the same filtered view each agent's LLM actually sees
-- **Sidebar controls**: scenario selector, run button, and global conversation log
+- **Sidebar controls**: scenario selector, log-level filter, customizable customer prompt, run button, and global conversation log
+
+#### Metrics Observatory (/metrics)
+
+- **Event log selector**: choose any CSV in `generated_event_log/` (defaults to most recent)
+- **Overview**: KPI cards summarizing the selected log
+- **System Metrics**: per-agent workload and activity breakdown
+- **Time Metrics**: per-order durations (e.g. total order time) and timing distributions
+- **Visualization**: OCEL-based diagrams (object-type mapping, OC-DFG, OC-PN) generated via the `Visualizer`
+
+### Workflow
+
+The Interaction Observatory does **not** save event logs. Generate logs separately via the headless simulator, then explore them in the Metrics Observatory:
+
+1. **Generate logs** via the CLI: `poetry run simulate --traces 10 --scenario all --export-logs` — this produces CSVs in `generated_event_log/` from MLflow traces (with full token counts and durations).
+2. **Open the dashboard** with `poetry run dashboard`.
+3. **Explore conversations live** in the Interaction Observatory (run a scenario, watch agents collaborate).
+4. **Switch to the Metrics Observatory** tab and pick any generated log to analyze.
 
 ### How It Works
 
 The dashboard runs the same `CoffeeShop` multi-agent graph used by the notebooks and CLI. A background thread drives the conversation (using the simulated Customer Agent), while the Panel UI polls for events every 100ms. Stream events from LangGraph are parsed into typed dashboard events (agent messages, tool calls, handoffs, etc.) and dispatched to the corresponding agent panel.
+
+The Metrics Observatory loads CSV event logs into an `ObjectCentricEventlog` and renders sections from those logs — it is read-only and does not write to disk.
 
 ---
 
