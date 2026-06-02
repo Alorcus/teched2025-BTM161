@@ -15,11 +15,12 @@ from src.trace_processing.eventlog_conversion import ObjectCentricEventlog
 from .overview_section import OverviewSection
 from .system_metrics import SystemMetricsSection
 from .time_metrics import TimeMetricsSection
+from .visualization_section import VisualizationSection
 
 
 def create_metrics_dashboard():
     """Create the Metrics Observatory page."""
-    pn.extension('plotly', sizing_mode="stretch_width")
+    pn.extension("plotly", sizing_mode="stretch_width")
 
     LOG_DIR = Path("generated_event_log")
     LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -49,6 +50,7 @@ def create_metrics_dashboard():
             OverviewSection(ocel, selected_file).panel(),
             SystemMetricsSection(ocel).panel(),
             TimeMetricsSection(ocel).panel(),
+            VisualizationSection(ocel).panel(),
             sizing_mode="stretch_width",
             styles={"padding": "4px 0"},
         )
@@ -60,7 +62,7 @@ def create_metrics_dashboard():
         ),
         pn.pane.HTML(
             f'<div style="font-size:11px;color:#999;margin-bottom:6px;">'
-            f'{len(csv_files)} event log(s) available</div>',
+            f"{len(csv_files)} event log(s) available</div>",
             sizing_mode="stretch_width",
         ),
         file_selector,
@@ -72,7 +74,7 @@ def create_metrics_dashboard():
         pn.pane.HTML(
             '<a href="/" style="display:inline-block;padding:6px 14px;background:rgba(255,255,255,0.15);color:white;'
             'border-radius:4px;text-decoration:none;font-weight:500;font-size:13px;margin-right:8px;">'
-            'Interaction Observatory</a>',
+            "Interaction Observatory</a>",
             sizing_mode="fixed",
         ),
         pn.pane.HTML(
@@ -97,11 +99,13 @@ def create_metrics_dashboard():
 def _empty_template(log_dir: Path) -> pn.template.FastListTemplate:
     return pn.template.FastListTemplate(
         title="Coffee Shop Metrics",
-        sidebar=[pn.pane.Alert(
-            f"No CSV event logs found in **{log_dir.resolve()}**. "
-            "Run a conversation in the Observatory and save it first.",
-            alert_type="warning",
-        )],
+        sidebar=[
+            pn.pane.Alert(
+                f"No CSV event logs found in **{log_dir.resolve()}**. "
+                "Run a conversation in the Observatory and save it first.",
+                alert_type="warning",
+            )
+        ],
         main=[],
         accent_base_color="#795548",
         header_background="#4E342E",
