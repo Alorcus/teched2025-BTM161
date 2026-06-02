@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 import uuid
 from pathlib import Path
 from typing import Callable
@@ -9,7 +10,7 @@ import mlflow
 from src.agents import reset_inventory
 from src.agents.customer_agent import CustomerAgent
 from src.agents.tray import get_tray, clear_tray
-from src.agents.order_store import load_recent_order, save_order
+from src.agents.order_store import load_recent_order
 from src.agents.shared_components import OrderStatus
 from src.agents.order_state_machine import state_machine, InvalidTransitionError
 from src.stream import extract_messages
@@ -84,8 +85,7 @@ class ConversationEngine:
 
         self._consume_tray(customer_agent)
 
-        order = load_recent_order()
-        order_id = order.order_id_str if order else None
+        order_id = _extract_order_id_from_history(customer_agent.history)
         feedback = customer_agent.get_feedback()
         self.feedback_log[thread_id] = {"thread_id": thread_id, "order_id": order_id, **feedback}
         self._save_feedback_store()
@@ -128,3 +128,14 @@ class ConversationEngine:
                 pass
 
         clear_tray(order_id)
+
+
+def _extract_order_id_from_history(history: list) -> str | None:
+    """Return the last order ID (e.g. ORD0001) mentioned in agent messages."""
+    order_id = None
+    for role, content in history:
+        if role == "agent":
+            match = re.search(r"ORD\d{4}", content)
+            if match:
+                order_id = match.group()
+    return order_id
