@@ -108,10 +108,10 @@ def main():
 
         feedback = shop.get_last_feedback()
         if feedback:
-            label = feedback["feedback_label"]
+            score = feedback["feedback_score"]
             reason = feedback["feedback_reason"]
             valid_marker = "" if feedback["valid"] else " (fallback)"
-            coffee_shop_logger.info(f"Customer feedback [{label}{valid_marker}]: {reason}")
+            coffee_shop_logger.info(f"Customer feedback [{score:.2f}{valid_marker}]: {reason}")
 
     coffee_shop_logger.info(f"=== Simulation complete: {len(all_trace_ids)} trace(s) generated ===")
 

@@ -5,11 +5,6 @@ from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 
 from ..llm import normalize_content
 
-FEEDBACK_OPTIONS = {
-    "excellent": 1.0,
-    "normal": 0.5,
-    "not_satisfied": 0.0,
-}
 
 CUSTOMER_SCENARIOS = [
     "You want to order a large latte and a croissant. Be friendly.",
@@ -76,20 +71,21 @@ Guidelines:
         messages = [
             SystemMessage(content=(
                 "You are a customer at a coffee shop. You just finished a conversation with the staff.\n"
-                "Evaluate the quality of service from your subjective customer perspective.\n"
-                "Use exactly one of these labels:\n"
-                "- excellent  (smooth and successful, received what you wanted or a well-communicated alternative)\n"
-                "- normal     (acceptable, minor issues or friction, still okay overall)\n"
-                "- not_satisfied (poor service: wrong item, no substitute communication, long wait, confusing interaction, or unresolved issue)\n"
+                "Rate the quality of service from your subjective customer perspective on a scale from 0.0 to 1.0.\n"
+                "Use these anchors to calibrate your score:\n"
+                "- 1.0: excellent — smooth and successful, received exactly what was requested or a well-communicated alternative\n"
+                "- 0.5: acceptable — minor issues, small substitutions, or slight friction, but still okay overall\n"
+                "- 0.0: poor — wrong item, no communication about substitution, long wait, confusing interaction, or unresolved complaint\n"
+                "You may use any value between 0.0 and 1.0, e.g. 0.7 for mostly good but one small issue.\n"
                 'Return only valid JSON in this exact format:\n'
-                '{"label": "excellent", "score": 1.0, "reason": "short explanation"}'
+                '{"score": 0.85, "reason": "short explanation"}'
             )),
             HumanMessage(content=f"Your conversation:\n{history_text}\n\nYour rating:"),
         ]
         response = self.llm.invoke(messages)
         raw = normalize_content(response.content).strip()
 
-        label = None
+        score = None
         reason = "No reason provided."
         try:
             text = re.sub(r"```(?:json)?\s*", "", raw).strip().rstrip("`").strip()
@@ -97,32 +93,20 @@ Guidelines:
             end = text.rfind("}")
             if start != -1 and end != -1 and end > start:
                 parsed = json.loads(text[start : end + 1])
-                label = str(parsed.get("label", "")).lower().strip()
+                score = float(parsed.get("score", -1))
                 reason = parsed.get("reason", "No reason provided.")
-        except (json.JSONDecodeError, AttributeError):
+        except (json.JSONDecodeError, AttributeError, ValueError, TypeError):
             pass
 
-        if label in FEEDBACK_OPTIONS:
+        if score is not None and 0.0 <= score <= 1.0:
             return {
-                "feedback_label": label,
-                "feedback_score": FEEDBACK_OPTIONS[label],
+                "feedback_score": round(score, 2),
                 "feedback_reason": reason,
                 "raw_feedback_response": raw,
                 "valid": True,
             }
 
-        for option in FEEDBACK_OPTIONS:
-            if option in raw.lower():
-                return {
-                    "feedback_label": option,
-                    "feedback_score": FEEDBACK_OPTIONS[option],
-                    "feedback_reason": reason,
-                    "raw_feedback_response": raw,
-                    "valid": False,
-                }
-
         return {
-            "feedback_label": "normal",
             "feedback_score": 0.5,
             "feedback_reason": "Fallback used because the model response was invalid.",
             "raw_feedback_response": raw,

@@ -69,10 +69,9 @@ LLM provider is configured via a `.env` file (see `.env.example`). Set `LLM_PROV
 
 After each conversation, `CustomerAgent.get_feedback()` invokes the LLM to rate service quality from the customer perspective. The result is a structured record with:
 
-- `feedback_label` — `excellent` / `normal` / `not_satisfied`
-- `feedback_score` — `1.0` / `0.5` / `0.0`
+- `feedback_score` — float `0.0–1.0` (anchors: `1.0` excellent, `0.5` acceptable, `0.0` poor)
 - `feedback_reason` — short free-text explanation
-- `valid` — whether the LLM response parsed cleanly (falls back to `normal` if not)
+- `valid` — whether the LLM response parsed cleanly (falls back to `0.5` if not)
 
 Feedback is persisted to `./feedback_store.json` keyed by `thread_id` (the conversation UUID, identical to `case_id` in the event log). During log export, `TraceProcessor` injects exactly one `customer_feedback` event at the end of each case. Both the headless `simulate` path and the `dashboard` runner capture feedback.
 

@@ -110,7 +110,7 @@ class ConversationRunner:
 
         feedback = self.shop.capture_feedback(thread_id, self._current_order_id)
         logger.info(
-            "Customer feedback [%s]: %s", feedback["feedback_label"], feedback["feedback_reason"]
+            "Customer feedback [%.2f]: %s", feedback["feedback_score"], feedback["feedback_reason"]
         )
 
         self.event_bus.publish(DashboardEvent(

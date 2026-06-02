@@ -90,7 +90,7 @@ class ConversationEngine:
         self.feedback_log[thread_id] = {"thread_id": thread_id, "order_id": order_id, **feedback}
         self._save_feedback_store()
         logger.info(
-            "Customer feedback [%s]: %s", feedback["feedback_label"], feedback["feedback_reason"]
+            "Customer feedback [%.2f]: %s", feedback["feedback_score"], feedback["feedback_reason"]
         )
 
         return self.traces_of_latest_conversations[trace_start:]
