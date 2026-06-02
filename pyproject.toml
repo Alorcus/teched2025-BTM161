@@ -23,6 +23,10 @@ dependencies = [
     "graphviz (>=0.21,<0.22)",
     "streamlit (>=1.57.0,<2.0.0)",
     "plotly (>=6.7.0,<7.0.0)"
+    "fastapi (>=0.118.0,<0.119.0)",
+    "uvicorn (>=0.37.0,<0.38.0)",
+    "pydantic (>=2.11.0,<3.0.0)",
+    "requests (>=2.32.0,<3.0.0)"
 ]
 
 [project.scripts]
