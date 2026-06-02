@@ -1,10 +1,3 @@
-"""Visualization section — process mining charts and OCEL visualizations.
-
-Integrates pm4py-based visualizations (Object-Centric Directly-Follows Graph,
-Object-Centric Petri Net, Event-to-Object Type chart) into the Observatory dashboard
-using the existing Visualizer class.
-"""
-
 from __future__ import annotations
 
 import uuid
@@ -15,24 +8,21 @@ import panel as pn
 from src.trace_processing.eventlog_conversion import ObjectCentricEventlog
 from src.visualization.visualizer import Visualizer, VisualizationConfig
 
-from .ui import COLOR_SCHEME, section_header, subsection_header
+from .styling_helpers import COLOR_SCHEME, AGENT_COLORS, section_header, subsection_header
 
 
-# Color mapping for object types in visualizations (matches coffee shop domain)
 _COLOR_MAP = {
-    "order_agent": "#F1AEB6",  # pastel pink
-    "barista_agent": "#A9DFBF",  # pastel green
-    "inventory_agent": "#FAD7A0",  # pastel orange
-    "customer_service_agent": "#D7BDE2",  # pastel purple
-    "user": "#D5D8DC",  # pastel grey
-    "prompt": "#B0A3E4",  # pastel teal
-    "response": "#F9E79F",  # pastel yellow
+    "order_agent": AGENT_COLORS["order_agent"],
+    "barista_agent": AGENT_COLORS["order_agent"],
+    "inventory_agent": AGENT_COLORS["order_agent"],
+    "customer_service_agent": AGENT_COLORS["order_agent"],
+    "user": COLOR_SCHEME["dark_red"],
+    "prompt": "#000000",
+    "response": COLOR_SCHEME["beige"],
 }
 
 
 class VisualizationSection:
-    """Process mining visualizations: OCDFG, OCPN, and object-type charts."""
-
     def __init__(self, ocel: ObjectCentricEventlog):
         self._ocel = ocel
         self._pane = self._build()

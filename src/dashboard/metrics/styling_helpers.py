@@ -1,11 +1,3 @@
-"""Shared UI helpers — color palette, formatters, and reusable HTML card snippets.
-
-These are intentionally string-returning helpers (not Panel objects), so each
-section can drop them into a single ``pn.pane.HTML`` and keep the DOM flat.
-"""
-
-from __future__ import annotations
-
 import panel as pn
 import polars as pl
 

@@ -1,11 +1,3 @@
-"""Overview section — log header line + the row of small KPI cards at the top.
-
-Counts that summarize the whole log: total events, distinct activities,
-handover count, total LLM input/response tokens. No charts.
-"""
-
-from __future__ import annotations
-
 from pathlib import Path
 
 import panel as pn
@@ -14,12 +6,10 @@ import polars as pl
 from src.trace_processing.eventlog_conversion import ObjectCentricEventlog
 
 from .eventlog_helpers import flat_event_table
-from .ui import small_kpi_card
+from .styling_helpers import small_kpi_card
 
 
 class OverviewSection:
-    """Top-of-page summary: log identity + headline counts."""
-
     def __init__(self, ocel: ObjectCentricEventlog, log_path: Path):
         self._ocel = ocel
         self._log_path = log_path
@@ -54,8 +44,8 @@ class OverviewSection:
 
         cards = [
             ("Total Events", f"{self._ocel.events.height:,}"),
-            ("Activities", f"{non_handover['ocel_type'].n_unique()}"),
-            ("Handovers", f"{handover.height:,}"),
+            ("Unique Event Types", f"{non_handover['ocel_type'].n_unique()}"),
+            ("Agent Handovers", f"{handover.height:,}"),
             ("Input Tokens", f"{input_tokens:,}" if input_tokens > 0 else "—"),
             ("Response Tokens", f"{response_tokens:,}" if response_tokens > 0 else "—"),
         ]

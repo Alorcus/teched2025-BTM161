@@ -1,23 +1,13 @@
-"""System Metrics section — system-level views of the agent ecosystem.
-
-Currently: an Agent Workload bar chart. Future additions (handover matrix,
-tool usage, etc.) belong here.
-"""
-
-from __future__ import annotations
-
 import panel as pn
 import plotly.express as px
 
 from src.trace_processing.eventlog_conversion import ObjectCentricEventlog
 
 from .eventlog_helpers import agent_event_counts
-from .ui import AGENT_COLORS, COLOR_SCHEME, section_header, subsection_header
+from .styling_helpers import AGENT_COLORS, COLOR_SCHEME, section_header, subsection_header
 
 
 class SystemMetricsSection:
-    """Charts that describe the overall agent system."""
-
     def __init__(self, ocel: ObjectCentricEventlog):
         self._ocel = ocel
         self._pane = self._build()

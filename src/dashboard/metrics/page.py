@@ -1,11 +1,3 @@
-"""Metrics Observatory page — top-level layout and routing.
-
-The actual section content lives in sibling modules under this package
-(``overview_section``, ``system_metrics``, ``time_metrics``). This file is
-intentionally thin: it owns the file selector, sidebar, header tabs, and
-the FastListTemplate, and delegates the body to the section classes.
-"""
-
 from pathlib import Path
 
 import panel as pn
@@ -13,8 +5,8 @@ import panel as pn
 from src.trace_processing.eventlog_conversion import ObjectCentricEventlog
 
 from .overview_section import OverviewSection
-from .system_metrics import SystemMetricsSection
-from .time_metrics import TimeMetricsSection
+from .system_metrics_section import SystemMetricsSection
+from .time_metrics_section import TimeMetricsSection
 from .visualization_section import VisualizationSection
 
 

@@ -1,10 +1,17 @@
-"""Pure data helpers — turn an OCEL into the small DataFrames each section needs."""
-
-from __future__ import annotations
-
 import polars as pl
 
 from src.trace_processing.eventlog_conversion import ObjectCentricEventlog
+
+
+_AGENT_OR_USER = ["order_agent", "inventory_agent", "barista_agent",
+                  "customer_service_agent", "user"]
+_PER_ORDER_SCHEMA = {
+    "order_id": pl.Utf8,
+    "full_duration_s": pl.Float64,
+    "pipeline_duration_s": pl.Float64,
+    "confirm_to_tray_s": pl.Float64,
+    "cs_resolution_s": pl.Float64,
+}
 
 
 def flat_event_table(ocel: ObjectCentricEventlog) -> pl.DataFrame:
@@ -67,19 +74,6 @@ def handover_matrix(ocel: ObjectCentricEventlog) -> pl.DataFrame:
     )
 
 
-# Object id pattern (eventlog_conversion.py:414-442): "{case_id}_<agent_or_user>".
-# We strip that suffix to recover the bare case_id and use it as the order_id.
-_AGENT_OR_USER = ["order_agent", "inventory_agent", "barista_agent",
-                  "customer_service_agent", "user"]
-_PER_ORDER_SCHEMA = {
-    "order_id": pl.Utf8,
-    "full_duration_s": pl.Float64,
-    "pipeline_duration_s": pl.Float64,
-    "confirm_to_tray_s": pl.Float64,
-    "cs_resolution_s": pl.Float64,
-}
-
-
 def per_order_durations(ocel: ObjectCentricEventlog) -> pl.DataFrame:
     """Compute per-order time windows in seconds.
 
@@ -94,9 +88,6 @@ def per_order_durations(ocel: ObjectCentricEventlog) -> pl.DataFrame:
     if case_objs.is_empty() or flat.is_empty():
         return pl.DataFrame(schema=_PER_ORDER_SCHEMA)
 
-    # Both agent objects and the user object have one row per case, so every
-    # event in the case (including user_prompts, which only link to user/prompt
-    # objects, not to agents) gets associated with the right case_id.
     suffix_re = "_(?:" + "|".join(_AGENT_OR_USER) + ")$"
     eo = (
         ocel.event_object
@@ -114,7 +105,6 @@ def per_order_durations(ocel: ObjectCentricEventlog) -> pl.DataFrame:
     is_handover_to_cs = pl.col("ocel_type").str.ends_with("_handover_customer_service_agent")
     is_handover_from_cs = pl.col("ocel_type").str.starts_with("customer_service_agent_handover_")
 
-    # One aggregation pass: collect all per-order boundary timestamps.
     t = pl.col("ocel_time")
     boundaries = events.group_by("order_id").agg(
         t.filter(pl.col("ocel_type") == "user_prompt").min().alias("first_user_prompt_t"),

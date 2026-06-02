@@ -1,7 +1,3 @@
-"""Time Metrics section — per-order duration KPIs and per-activity duration chart."""
-
-from __future__ import annotations
-
 import panel as pn
 import plotly.express as px
 import polars as pl
@@ -9,7 +5,7 @@ import polars as pl
 from src.trace_processing.eventlog_conversion import ObjectCentricEventlog
 
 from .eventlog_helpers import flat_event_table, per_order_durations
-from .ui import COLOR_SCHEME, per_order_kpi_card, section_header, subsection_header
+from .styling_helpers import COLOR_SCHEME, per_order_kpi_card, section_header, subsection_header
 
 
 # Per-order KPI configuration. (label, subtitle, column-in-per_order_durations, unit)
@@ -42,8 +38,6 @@ _PER_ORDER_CARDS: list[tuple[str, str, str, str]] = [
 
 
 class TimeMetricsSection:
-    """Time-related views: per-order durations and per-activity averages."""
-
     def __init__(self, ocel: ObjectCentricEventlog):
         self._ocel = ocel
         self._pane = self._build()
