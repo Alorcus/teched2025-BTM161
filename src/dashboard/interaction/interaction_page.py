@@ -3,8 +3,6 @@ import html as html_mod
 import json
 import logging
 import time
-from datetime import datetime
-from pathlib import Path
 
 import panel as pn
 
@@ -20,7 +18,6 @@ from .conversation_runner import ConversationRunner
 from .stock_panel import StockPanel
 from .coffee_machine_panel import CoffeeMachinePanel
 from .tray_panel import TrayPanel
-from .log_saver import DashboardLogSaver
 
 logger = logging.getLogger("coffee_shop.dashboard")
 
@@ -57,7 +54,6 @@ def create_observatory_dashboard():
     shop.open_shop()
     event_bus = EventBus()
     runner = ConversationRunner(shop, event_bus)
-    log_saver = DashboardLogSaver(event_bus)
 
     coffee_shop_logger = logging.getLogger("coffee_shop")
     coffee_shop_logger.setLevel(logging.DEBUG)
@@ -139,44 +135,12 @@ def create_observatory_dashboard():
         log_entries.clear()
         conversation_log.object = ""
         status_indicator.value = True
-        log_saver.reset()  # Reset log saver for new conversation
         runner.start(scenario_index=scenario_select.value, custom_prompt=prompt_textarea.value)
 
     run_button.on_click(on_run)
 
-    # Save as Event Log button
-    save_button = pn.widgets.Button(
-        name="Save as Event Log",
-        button_type="success",
-        sizing_mode="stretch_width",
-        disabled=True,  # Disabled until conversation completes
-    )
-
-    def on_save_log(event):
-        if not log_saver.events:
-            pn.state.notifications.error("No conversation data to save", duration=3000)
-            return
-
-        try:
-            timestamp = datetime.now().strftime("%Y%m%dT%H%M%S%f")[:-3]
-            filename = f"{timestamp}.eventlog.csv"
-            filepath = Path("generated_event_log") / filename
-
-            log_saver.save_to_csv(str(filepath))
-            pn.state.notifications.success(f"✓ Saved {filename}", duration=4000)
-        except Exception as e:
-            pn.state.notifications.error(f"Failed to save: {e}", duration=4000)
-
-    save_button.on_click(on_save_log)
-
-    def update_save_button_state():
-        """Enable save button when conversation is complete and has events."""
-        has_events = len(log_saver.events) > 0
-        is_idle = not runner.is_running
-        save_button.disabled = not (has_events and is_idle)
-
     def poll_events():
-        events = log_saver.capture_events()  # Capture events via log saver
+        events = event_bus.drain()
         for ev in events:
             _dispatch_event(ev, agent_panels, log_entries, conversation_log,
                             coffee_machine_panel, tray_panel, log_level_select.value)
@@ -184,7 +148,6 @@ def create_observatory_dashboard():
             status_indicator.value = False
         stock_panel.refresh()
         coffee_machine_panel.update_progress()
-        update_save_button_state()  # Update button state after processing events
 
     sidebar = pn.Column(
         pn.Row(
@@ -205,7 +168,6 @@ def create_observatory_dashboard():
         ),
         prompt_textarea,
         run_button,
-        save_button,
         pn.Row(status_indicator, pn.pane.Markdown("", width=10)),
         pn.layout.Divider(),
         pn.pane.HTML('<label style="font-size:14px;font-weight:600;margin-bottom:8px;display:block;">Conversation Log</label>',
