@@ -203,6 +203,7 @@ class TestTrayConsumption(unittest.TestCase):
         runner = ConversationRunner.__new__(ConversationRunner)
         runner._current_order_id = order_id
         runner.shop = MagicMock()
+        runner.event_bus = MagicMock()
 
         runner._consume_tray()
 
@@ -220,6 +221,7 @@ class TestTrayConsumption(unittest.TestCase):
         runner = ConversationRunner.__new__(ConversationRunner)
         runner._current_order_id = order_id
         runner.shop = MagicMock()
+        runner.event_bus = MagicMock()
 
         runner._consume_tray()
 
@@ -233,6 +235,7 @@ class TestTrayConsumption(unittest.TestCase):
         runner = ConversationRunner.__new__(ConversationRunner)
         runner._current_order_id = None
         runner.shop = MagicMock()
+        runner.event_bus = MagicMock()
         runner._consume_tray()  # should not raise
 
     def test_consume_empty_tray(self):
@@ -245,6 +248,7 @@ class TestTrayConsumption(unittest.TestCase):
         runner = ConversationRunner.__new__(ConversationRunner)
         runner._current_order_id = order_id
         runner.shop = MagicMock()
+        runner.event_bus = MagicMock()
 
         runner._consume_tray()
 
@@ -265,6 +269,7 @@ class TestTrayConsumption(unittest.TestCase):
         runner = ConversationRunner.__new__(ConversationRunner)
         runner._current_order_id = order_id
         runner.shop = MagicMock()
+        runner.event_bus = MagicMock()
 
         runner._consume_tray()
 
