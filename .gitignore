@@ -13,6 +13,7 @@ services/coffee_machine/logs/
 generated_visualizations/
 
 event_logs/
+process_log/
 
 # Python cache
 __pycache__/
