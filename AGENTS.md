@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-SAP TechEd 2025 hands-on session (BTM161): a multi-agent coffee shop system that demonstrates process mining of LLM-based agents using SAP Signavio Process Intelligence. Five specialized agents (Order, Inventory, Barista, Customer Service, Customer) collaborate via LangGraph Swarm, with interactions logged via MLflow for trace analysis.
+A multi-agent coffee shop system that demonstrates process mining of LLM-based agents. Five specialized agents (Order, Inventory, Barista, Customer Service, Customer) collaborate via LangGraph Swarm, with interactions logged via MLflow for trace analysis.
 
 ## Tech Stack
 

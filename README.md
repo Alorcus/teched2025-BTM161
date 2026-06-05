@@ -1,61 +1,56 @@
-# BTM161 - AI agent mining and governance with SAP Signavio solutions
+# Agentic Coffee Shop
 
-## Description
-
-This repository hosts the (self-contained but simplified) material for the SAP TechEd 2025 session "BTM161 - AI agent mining and governance with SAP Signavio solutions"
+A multi-agent coffee shop system for exploring the behavior of LLM-based agents. Specialized agents collaborate to take orders, manage stock, prepare drinks, and resolve customer issues. Their interactions are traced via MLflow and can be exported as event logs for process mining and analysis.
 
 ## Overview
 
-This SAP Sample introduces attendees to analyzing the behavior of LLM-based multi-agent systems with [SAP Signavio Process Intelligence](https://www.signavio.com/products/process-intelligence/). Within three Jupyter notebooks of an agentic coffee shop, specialized agents work together to provide a complete coffee shop experience. Each agent has specific tools and responsibilities, and they intelligently hand off to each other based on the situation to serve the "best" coffee for its customers. The interactions with the coffee shop and the actions taken by the agents are logged and, afterwards, can be analyzed by generating event logs suitable for process mining with SAP Signavio Process Intelligence.
+Five agents work together in a LangGraph Swarm:
 
-Please be aware that this repository includes a simplified version which generates CSV-files that can be easily consumed by your own SAP Signavio Process Intelligence. This will allow you to try this self-contained version on your own afterwards as well adapt it to your needs but it will not include all features that have been presented at TechEd.
+- **Order Agent** — takes and prices orders
+- **Inventory Agent** — checks stock and suggests alternatives
+- **Barista Agent** — prepares drinks (with a simulated 20% failure rate to create variants)
+- **Customer Service Agent** — handles complaints and refunds
+- **Customer Agent** — drives the conversation from outside the swarm, simulating a customer
 
-For the TechEd hands-on session, we will host a dedicated Jupyter notebook instance, offer access to SAP Signavio Process Intelligence, and several advanced agent mining features in a dedicated service.
+The repository contains three Jupyter notebooks for stepping through the system, a CLI for headless trace generation, and a Panel-based observatory dashboard for live exploration and metrics.
 
 ## Requirements
 
-This section covers the prerequisites and the installation process required for running the coffee shop MAS.
-
-### Prerequisites
-
 - [Python](https://www.python.org/downloads/) >= 3.13
-- (Recommended) [poetry](https://python-poetry.org/) is used for managing packages and the virtual environment and needs to be [installed](https://python-poetry.org/docs/#installing-with-pipx).
-  - Alternative: Use pip to install the dependencies based on the provided `requirements.txt`.
-- (Recommended) Use the [poetry-jupyter-plugin](https://pypi.org/project/poetry-jupyter-plugin/) to install the virtual environment created by Poetry as a Jupyter kernel:
+- (Recommended) [Poetry](https://python-poetry.org/) for dependency and virtualenv management.
+  - Alternative: pip with the provided `requirements.txt`.
+- (Recommended) [poetry-jupyter-plugin](https://pypi.org/project/poetry-jupyter-plugin/) to register the Poetry venv as a Jupyter kernel:
 
   ```
   $ poetry self add poetry-jupyter-plugin
   ```
 
-  - Alternative: Set up the Jupyter kernel manually.
+- An API key for an [LLM provider supported by LangChain](https://python.langchain.com/docs/integrations/chat/#featured-providers), or a local Ollama runtime.
 
-- You need an API key for an [LLM provider supported by LangChain](https://python.langchain.com/docs/integrations/chat/#featured-providers).
+## Installation
 
-### Installation
+1. Install dependencies: `poetry install`
+2. Install the Jupyter kernel: `poetry jupyter install`
+3. Activate the venv: run `poetry env activate` and use the printed command (or prefix commands with `poetry run`).
+4. Install the LangChain integration for your LLM provider, for example:
+   ```
+   pip install "langchain[openai]<1.0.0"
+   pip install "langchain[anthropic]<1.0.0"
+   ```
+5. Configure your LLM provider via a `.env` file (see `.env.example`). Set `LLM_PROVIDER=ollama` (default) or `LLM_PROVIDER=anthropic`.
+6. Start Jupyter: `jupyter notebook`
 
-1. Install the project by running `poetry install` in this directory.
-1. Install a Juypter kernel via poetry by running `poetry jupyter install`.
-1. Activate the virtual environment created by poetry. To obtain the appropriate activation command for this run `poetry env activate`. (Alternative: Prefix all subsequent commands with `poetry run`, which will execute the command in the virtual environment.)
-1. Install the appropriate langchain integration package fitting your supported LLM provider:
-   1. Identify the name of the package using the [documentation](https://github.com/langchain-ai/langgraph/blob/a10a66cbd151c92f89d6476fb70e5e405ce50b98/docs/docs/snippets/chat_model_tabs.md)), e.g., `langchain[openai]` or `langchain[anthropic]`.
-   2. Install the package _in the version fitting this repository_ by adjusting and running `pip install "langchain[PROVIDER]<1.0.0"`, e.g., `pip install "langchain[openai]<1.0.0"` or `pip install "langchain[anthropic]<1.0.0"`.
-1. Open `src/coffee_shop.py` and, starting line 20, configure access to the LLM, like credentials or API keys, according to the [documentation](https://github.com/langchain-ai/langgraph/blob/a10a66cbd151c92f89d6476fb70e5e405ce50b98/docs/docs/snippets/chat_model_tabs.md).
-1. Start the Jupyter server by running `jupyter notebook`.
-1. Now, you should be able to open and run the first notebook: `1_Standard_agentic_coffee_shop.ipynb`.
+## Notebooks
 
-## Exercises
+Three self-contained exercises:
 
-The session contains three exercises in the form of Juypter notebooks, which are self-contained and thus include the respective instructions for completing the exercise:
-
-1. Exercise: [`1_Standard_agentic_coffee_shop`](1_Standard_agentic_coffee_shop.ipynb). This exercise is for getting to know the overall setup and generate a first trace by interacting with the coffee shop, uploading a mapped CSV, and analyzing it with SAP Signavio Process Intelligence.
-2. Exercise [`2_Exceptions_agentic_coffee_shop`](2_Exceptions_agentic_coffee_shop.ipynb). This exercise is about exploring the behavior of the agents in case of errors and when experiencing edge cases. This will lead to several process variants by agents and shows how to analyze their differences over time.
-3. Exercise [`3_Extending_agentic_coffee_shop`](3_Extending_agentic_coffee_shop.ipynb). This exercise is for experimenting with the agents' definitions in order to change their behavior, for example, by changing their instructions and the available tools. With the help of SAP Signavio Process Intelligence, you will find out how this tool can support you in monitoring a multi-agent system during development.
+1. [`1_Standard_agentic_coffee_shop`](1_Standard_agentic_coffee_shop.ipynb) — get familiar with the setup and generate a first trace.
+2. [`2_Exceptions_agentic_coffee_shop`](2_Exceptions_agentic_coffee_shop.ipynb) — explore agent behavior under errors and edge cases, producing process variants.
+3. [`3_Extending_agentic_coffee_shop`](3_Extending_agentic_coffee_shop.ipynb) — experiment with agent definitions (instructions, tools) and observe how changes affect the multi-agent system.
 
 ## Headless Simulation
 
-You can generate traces in bulk without the Jupyter UI using the `simulate` CLI command. This runs the Customer Agent against the coffee shop swarm and captures MLflow traces for each conversation.
-
-### Usage
+Generate traces in bulk without the Jupyter UI using the `simulate` CLI. It runs the Customer Agent against the swarm and captures MLflow traces for each conversation.
 
 ```bash
 # Run a single trace with a random scenario
@@ -64,13 +59,13 @@ poetry run simulate
 # Run 10 traces cycling through all 4 scenarios
 poetry run simulate --traces 10 --scenario all
 
-# Run 5 traces with a specific scenario (index 0-3)
+# Run 5 traces with a specific scenario (index 0–3)
 poetry run simulate --traces 5 --scenario 2
 
-# Run with minimal output (no message content)
+# Minimal output
 poetry run simulate --traces 10 --quiet
 
-# Run with debug logging enabled
+# Debug logging
 poetry run simulate --traces 5 --log-level debug
 
 # Export event logs after simulation
@@ -100,10 +95,10 @@ poetry run simulate --traces 10 --scenario all --export-logs
 
 A two-page observability dashboard built with [Panel](https://panel.holoviz.org/):
 
-- **Interaction Observatory** (`/`) — a real-time view of all agents in a grid layout. Each panel displays system prompt, available tools, current status, handoff context, context-isolated message history, and tool call log, updating live as a conversation streams through the system.
+- **Interaction Observatory** (`/`) — a real-time view of all agents in a grid layout. Each panel displays the system prompt, available tools, current status, handoff context, context-isolated message history, and tool call log, updating live as a conversation streams through the system.
 - **Metrics Observatory** (`/metrics`) — analytics over previously-generated event logs (KPIs, per-agent workload, per-order timings, OCEL-based visualizations).
 
-Switch between the two pages via the tabs in the header.
+Switch between pages via the tabs in the header.
 
 ### Launch
 
@@ -131,7 +126,7 @@ panel serve src/dashboard/app.py --show --port 5006
 - **Event log selector**: choose any CSV in `generated_event_log/` (defaults to most recent)
 - **Overview**: KPI cards summarizing the selected log
 - **System Metrics**: per-agent workload and activity breakdown
-- **Time Metrics**: per-order durations (e.g. total order time) and timing distributions
+- **Time Metrics**: per-order durations and timing distributions
 - **Visualization**: OCEL-based diagrams (object-type mapping, OC-DFG, OC-PN) generated via the `Visualizer`
 
 ### Workflow
@@ -149,22 +144,20 @@ The dashboard runs the same `CoffeeShop` multi-agent graph used by the notebooks
 
 The Metrics Observatory loads CSV event logs into an `ObjectCentricEventlog` and renders sections from those logs — it is read-only and does not write to disk.
 
----
-
 ## Observing the Database
 
-Orders and inventory are persisted in a local SQLite database (`coffee_shop.db`). To inspect the database while the agents are running, install the [SQLite Viewer](https://marketplace.visualstudio.com/items?itemName=qwtel.sqlite-viewer) extension in VS Code. Once installed, simply open `coffee_shop.db` from the file explorer and the extension will display the tables in a browsable grid view. You can refresh the view at any time to see the latest orders and stock levels as they are updated by the agents during a simulation.
+Orders and inventory are persisted in a local SQLite database (`coffee_shop.db`). To inspect the database while the agents are running, install the [SQLite Viewer](https://marketplace.visualstudio.com/items?itemName=qwtel.sqlite-viewer) extension in VS Code. Open `coffee_shop.db` from the file explorer and the extension will display the tables in a browsable grid view. Refresh to see the latest orders and stock levels as they are updated.
 
 ## Agent Architecture
 
-### 🛒 Order Agent
+### Order Agent
 
 **Role**: Takes and processes customer orders
 **Tools**:
 
-- `process_order()` - Parse customer orders
-- `calculate_total()` - Calculate pricing with discount capabilities
-- `transfer_to_agent` - Handoff tool different agents
+- `process_order()` — Parse customer orders
+- `calculate_total()` — Calculate pricing with discount capabilities
+- `transfer_to_agent` — Handoff tool
 
 **Responsibilities**:
 
@@ -173,15 +166,15 @@ Orders and inventory are persisted in a local SQLite database (`coffee_shop.db`)
 - Calculate totals and apply discounts
 - Transfer to inventory for availability checks
 
-### 📦 Inventory Agent
+### Inventory Agent
 
 **Role**: Manages stock levels and availability
 **Tools**:
 
-- `check_inventory()` - Verify item availability for orders
-- `update_stock()` - Decrease inventory after confirmed orders
-- `get_alternatives()` - Find substitute items for out-of-stock products
-- `transfer_to_agent` - Handoff tool different agents
+- `check_inventory()` — Verify item availability for orders
+- `update_stock()` — Decrease inventory after confirmed orders
+- `get_alternatives()` — Find substitute items for out-of-stock products
+- `transfer_to_agent` — Handoff tool
 
 **Responsibilities**:
 
@@ -191,15 +184,15 @@ Orders and inventory are persisted in a local SQLite database (`coffee_shop.db`)
 - Transfer to barista when items are available
 - Escalate to customer service for stock issues
 
-### ☕ Barista Agent
+### Barista Agent
 
 **Role**: Handles order preparation and quality
 **Tools**:
 
-- `start_preparation()` - Start coffee preparation
-- `remake_order_item()` - Handle preparation errors and remakes
-- `estimate_prep_time()` - Provide accurate timing estimates
-- `transfer_to_agent` - Handoff tool different agents
+- `start_preparation()` — Start coffee preparation
+- `remake_order_item()` — Handle preparation errors and remakes
+- `estimate_prep_time()` — Provide accurate timing estimates
+- `transfer_to_agent` — Handoff tool
 
 **Responsibilities**:
 
@@ -208,7 +201,7 @@ Orders and inventory are persisted in a local SQLite database (`coffee_shop.db`)
 - Provide preparation time estimates
 - Quality control and remake capabilities
 
-### 🙋 Customer Agent
+### Customer Agent
 
 **Role**: Simulates a customer interacting with the coffee shop
 **Scenarios**:
@@ -224,16 +217,14 @@ Orders and inventory are persisted in a local SQLite database (`coffee_shop.db`)
 - Drives the conversation by sending an opening message and responding to agent replies
 - Ends the conversation after at most 8 turns, or when the goal is achieved (signals `DONE`)
 
----
-
-### 🤝 Customer Service Agent
+### Customer Service Agent
 
 **Role**: Manages customer satisfaction and issue resolution
 **Tools**:
 
-- `offer_refund()` - Process refunds when necessary
-- `offer_partial_refund()` - Process a partial refund when necessary
-- `transfer_to_agent` - Handoff tool different agents
+- `offer_refund()` — Process refunds when necessary
+- `offer_partial_refund()` — Process a partial refund when necessary
+- `transfer_to_agent` — Handoff tool
 
 **Responsibilities**:
 
@@ -242,53 +233,30 @@ Orders and inventory are persisted in a local SQLite database (`coffee_shop.db`)
 - Suggest alternatives with customer service touch
 - Coordinate with other agents for resolution
 
+## Visualization
+
+Visuals can be generated with the `Visualizer` class. Currently, an Object-Type Mapping, OC-DFGs, and OC-PNs are supported.
+
+**How to:**
+
+1. Create a `VisualizationConfig` with `ocel_path`, `out_dir`, and `export_format`.
+2. Create a new `Visualizer` instance and call `run`.
+3. The visuals will be saved at the specified output path. A dictionary of output paths is returned.
+
+Alternatively, edit the example parameters in `visualizer.py` and run the script directly.
+
+**Adding new visualizations:** create a private export method (e.g. using `pm4py` to discover the object from the OCEL event log, then `gviz` to render and save), and register it in the public `run` method of the visualizer.
+
 ## Running the Tests
 
 Use the Python interpreter from the Poetry virtual environment (`poetry env activate` first, or prefix with `poetry run python`).
-
 
 ```bash
 python -m unittest discover -s tests -v
 ```
 
-Individual test modules can be run directly, e.g.:
+Individual test modules can be run directly:
 
 ```bash
 python -m unittest tests/test_tools_order.py -v
 ```
-
----
-
-## Visualization
-
-Visuals can be generated witht the `Visualizer` class. Currently, an Object-Type Mapping, OC-DFGs and OC-PNs are supported.
-
-**How To:**
-
-1. Create a `VisualizationConfig` with the parameters `ocel_path`, `out_dir`, and `export_format`
-2. Create a new `Visualizer` instance and call the `run` method.
-3. The visuals will be saved at the specified output path. A dictionary of output paths will be returned.
-
-Alternitavely, you can go into the `visualizer.py` script, specify the parameters in the example and execute the script directly.
-
-**New Visualizations:**
-
-Add new visualizations by creating a private export method. Use, for exmaple, `pm4py` to discover the object from the ocel event log. After that, use gviz to create and save the visualizuation. Lastly, add the private method to the public `run` method of the visualizer.
-
----
-
-## Contributing
-
-Please read the [CONTRIBUTING.md](./CONTRIBUTING.md) to understand the contribution guidelines.
-
-## Code of Conduct
-
-Please read the [SAP Open Source Code of Conduct](https://github.com/SAP-samples/.github/blob/main/CODE_OF_CONDUCT.md).
-
-## How to obtain support
-
-Support for the content in this repository is available during the actual time of the online session for which this content has been designed. Otherwise, you may request support via the [Issues](../../issues) tab.
-
-## License
-
-Copyright (c) 2025 SAP SE or an SAP affiliate company. All rights reserved. This project is licensed under the Apache Software License, version 2.0 except as noted otherwise in the [LICENSE](LICENSES/Apache-2.0.txt) file.
