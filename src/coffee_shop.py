@@ -10,7 +10,7 @@ from src.agents import (
     init_db, reset_inventory, set_item_stock, get_all_inventory,
     CustomerAgent, CUSTOMER_SCENARIOS,
 )
-from src.control_plane import AgentRepo, Catalog, JsonlLogSink
+from src.control_plane import AgentRepo, Catalog, JsonlLogSink, ProcessSupervisor
 from src.graph import build_coffee_shop_graph
 from src.conversation import ConversationEngine
 from src.notebook_ui import NotebookUI, AGENT_CONFIG
@@ -52,6 +52,7 @@ class CoffeeShop:
         self.agent_repo: AgentRepo | None = None
         self.catalog: Catalog | None = None
         self.log_sink: JsonlLogSink | None = None
+        self.process_supervisor: ProcessSupervisor | None = None
 
     def open_shop(self, reset_inventory_first=True):
         """Start the coffee shop application after potentially updating agent definitions"""
@@ -84,6 +85,18 @@ class CoffeeShop:
         )
 
         self.app = build_coffee_shop_graph(llm, self.agent_repo, self.catalog, self.log_sink)
+
+        if self.config.process_supervisor_enabled:
+            self.process_supervisor = ProcessSupervisor(
+                process_model_path=self.config.process_model_path,
+                log_path=self.config.process_log_path,
+                llm=llm,
+            )
+            _coffee_shop_logger.info(
+                "process supervisor: model=%s | log=%s",
+                self.config.process_model_path,
+                self.config.process_log_path,
+            )
 
         self._conversation_engine = ConversationEngine(
             self.app, mlflow_enabled=self.config.mlflow_enabled

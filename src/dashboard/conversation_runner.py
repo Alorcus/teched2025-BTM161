@@ -261,6 +261,13 @@ class ConversationRunner:
         return last_agent_message
 
     def _process_message(self, msg, agent_name: str):
+        supervisor = getattr(self.shop, "process_supervisor", None)
+        if supervisor is not None:
+            try:
+                supervisor.observe(msg, agent_name)
+            except Exception:
+                logger.exception("process supervisor observe failed")
+
         if isinstance(msg, AIMessage):
             if msg.tool_calls:
                 for tc in msg.tool_calls:
