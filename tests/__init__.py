@@ -3,12 +3,17 @@ from pathlib import Path
 
 _DB_PATH = Path(__file__).resolve().parents[1] / "coffee_shop.db"
 
-if _DB_PATH.exists():
-    try:
-        _DB_PATH.unlink()
-    except OSError:
+# SQLite in WAL mode leaves -shm and -wal sidecars next to the main DB.
+# An interrupted run can leave these in a state that makes a later open
+# fail with "disk I/O error" even after the main file is recreated.
+for _path in (_DB_PATH, _DB_PATH.with_name(_DB_PATH.name + "-shm"),
+              _DB_PATH.with_name(_DB_PATH.name + "-wal")):
+    if _path.exists():
         try:
-            _DB_PATH.write_bytes(b"")
-            _DB_PATH.unlink()
+            _path.unlink()
         except OSError:
-            pass
+            try:
+                _path.write_bytes(b"")
+                _path.unlink()
+            except OSError:
+                pass
