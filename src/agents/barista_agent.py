@@ -1,7 +1,10 @@
 import requests
 import json
+import os
+import signal
 import subprocess
 import socket
+import sys
 import time
 import threading
 from typing import Dict
@@ -75,6 +78,20 @@ def start_coffee_machine() -> bool:
             return False
 
         try:
+            # Run the server in its own process group / session so we can
+            # signal the whole group on shutdown. We launch via `poetry run
+            # uvicorn`, so a plain terminate() would only signal the poetry
+            # wrapper and leave the uvicorn grandchild listening on the port.
+            popen_kwargs: dict = {
+                "cwd": str(COFFEE_MACHINE_PATH),
+                "stdout": subprocess.PIPE,
+                "stderr": subprocess.PIPE,
+            }
+            if sys.platform == "win32":
+                popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+            else:
+                popen_kwargs["start_new_session"] = True
+
             COFFEE_MACHINE_PROCESS = subprocess.Popen(
                 [
                     "poetry",
@@ -86,12 +103,7 @@ def start_coffee_machine() -> bool:
                     "--host",
                     "127.0.0.1",
                 ],
-                cwd=str(COFFEE_MACHINE_PATH),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
-                if hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP")
-                else 0,
+                **popen_kwargs,
             )
 
             for _ in range(10):
@@ -111,11 +123,29 @@ def stop_coffee_machine():
     global COFFEE_MACHINE_PROCESS
     with _MACHINE_LOCK:
         if COFFEE_MACHINE_PROCESS:
-            COFFEE_MACHINE_PROCESS.terminate()
+            proc = COFFEE_MACHINE_PROCESS
+            # Signal the whole process group so the uvicorn grandchild dies
+            # together with the `poetry run` wrapper.
             try:
-                COFFEE_MACHINE_PROCESS.wait(timeout=5)
+                if sys.platform == "win32":
+                    proc.send_signal(signal.CTRL_BREAK_EVENT)
+                else:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            except (ProcessLookupError, OSError):
+                # Group already gone; fall through to wait().
+                pass
+
+            try:
+                proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                COFFEE_MACHINE_PROCESS.kill()
+                try:
+                    if sys.platform == "win32":
+                        proc.kill()
+                    else:
+                        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                except (ProcessLookupError, OSError):
+                    pass
+                proc.wait(timeout=2)
             COFFEE_MACHINE_PROCESS = None
 
 
