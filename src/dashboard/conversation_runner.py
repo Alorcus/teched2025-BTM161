@@ -261,12 +261,23 @@ class ConversationRunner:
         return last_agent_message
 
     def _process_message(self, msg, agent_name: str):
+        # Ask the process supervisor for its verdict on THIS message and stamp
+        # the resulting line on the first DashboardEvent we emit for it. Sibling
+        # events (e.g. extra tool_calls in the same AIMessage) get None — the
+        # trace table renders that as "—".
+        supervisor_line: str | None = None
         supervisor = getattr(self.shop, "process_supervisor", None)
         if supervisor is not None:
             try:
-                supervisor.observe(msg, agent_name)
+                supervisor_line = supervisor.observe(msg, agent_name)
             except Exception:
                 logger.exception("process supervisor observe failed")
+                supervisor_line = None
+
+        def _take_supervisor_line() -> str | None:
+            nonlocal supervisor_line
+            line, supervisor_line = supervisor_line, None
+            return line
 
         if isinstance(msg, AIMessage):
             if msg.tool_calls:
@@ -276,12 +287,14 @@ class ConversationRunner:
                         agent_name=agent_name,
                         tool_name=tc["name"],
                         tool_args=tc.get("args", {}),
+                        supervisor_line=_take_supervisor_line(),
                     ))
             elif msg.content:
                 self.event_bus.publish(DashboardEvent(
                     event_type=EventType.AGENT_MESSAGE,
                     agent_name=agent_name,
                     content=msg.content,
+                    supervisor_line=_take_supervisor_line(),
                 ))
         elif isinstance(msg, ToolMessage):
             content = msg.content if isinstance(msg.content, str) else str(msg.content)
@@ -290,6 +303,7 @@ class ConversationRunner:
                 agent_name=agent_name,
                 tool_name=getattr(msg, "name", None),
                 tool_result=content,
+                supervisor_line=_take_supervisor_line(),
             ))
             self._track_order_id(getattr(msg, "name", None), content)
 

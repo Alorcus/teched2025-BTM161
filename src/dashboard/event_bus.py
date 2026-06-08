@@ -29,6 +29,7 @@ class DashboardEvent:
     handoff_context: dict | None = None
     target_agent: str | None = None
     log_level: int = 0
+    supervisor_line: str | None = None
 
 
 class EventBus:

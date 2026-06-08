@@ -1,0 +1,469 @@
+"""Trace Table panel.
+
+Renders one row per emitted message in global order. Each agent gets its own
+column; one extra column (Customer) for inbound user messages and one (Process
+Supervisor) for the supervisor's per-message verdict. Exactly one of the agent
+columns is non-blank per row — there is never any vertical overlap.
+
+The panel listens on the existing dashboard ``EventBus``. Events that don't
+correspond to a message (status pings, log lines, conversation lifecycle) are
+filtered out via ``ROW_CREATORS``.
+"""
+from __future__ import annotations
+
+import html
+
+import panel as pn
+
+from .event_bus import DashboardEvent, EventType
+
+
+# Column key MUST match the agent_name string the runner publishes.
+COLUMNS: list[tuple[str, str, str]] = [
+    ("order_agent", "Order Agent", "\U0001F4DD"),
+    ("inventory_agent", "Inventory Agent", "\U0001F4E6"),
+    ("barista_agent", "Barista Agent", "☕"),
+    ("customer_service_agent", "Customer Service", "\U0001F4AC"),
+    ("customer", "Customer", "\U0001F464"),
+]
+COLUMN_KEYS = [k for k, _, _ in COLUMNS]
+
+AGENT_ACCENT: dict[str, str] = {
+    "order_agent": "#2196F3",
+    "inventory_agent": "#FF9800",
+    "barista_agent": "#8BC34A",
+    "customer_service_agent": "#E91E63",
+    "customer": "#4E342E",
+}
+
+# Event types that produce a row. HANDOFF is intentionally skipped: the
+# transfer_to_* TOOL_CALL row already represents the transition and carries
+# the supervisor's Termination verdict.
+ROW_CREATORS: set[EventType] = {
+    EventType.CUSTOMER_MESSAGE,
+    EventType.AGENT_MESSAGE,
+    EventType.TOOL_CALL,
+    EventType.TOOL_RESULT,
+}
+
+
+_TABLE_CSS = """
+<style>
+.trace-wrap {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  background: linear-gradient(180deg, #fbfaf8 0%, #f5f1ec 100%);
+  border-radius: 12px;
+  padding: 18px 20px 22px 20px;
+  box-shadow: 0 1px 3px rgba(78, 52, 46, 0.06), 0 8px 24px rgba(78, 52, 46, 0.04);
+  border: 1px solid #ece4dc;
+}
+.trace-wrap h2 {
+  margin: 0 0 4px 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #4E342E;
+  letter-spacing: 0.2px;
+}
+.trace-wrap .subtitle {
+  margin: 0 0 14px 0;
+  font-size: 12px;
+  color: #8d7b6f;
+}
+.trace-scroll {
+  max-height: calc(100vh - 220px);
+  overflow: auto;
+  border-radius: 8px;
+  border: 1px solid #ece4dc;
+  background: #ffffff;
+}
+table.trace {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+  font-size: 12.5px;
+  color: #2b211d;
+  table-layout: fixed;
+}
+table.trace thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: saturate(140%) blur(6px);
+  -webkit-backdrop-filter: saturate(140%) blur(6px);
+  text-align: left;
+  font-weight: 600;
+  font-size: 11.5px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: #6b574c;
+  padding: 11px 14px 10px 14px;
+  border-bottom: 1px solid #e6dcd2;
+}
+table.trace thead th .accent {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 8px;
+  vertical-align: middle;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.85);
+}
+table.trace thead th .icon { margin-right: 6px; opacity: 0.85; }
+table.trace tbody tr { transition: background-color 120ms ease; }
+table.trace tbody tr:hover { background: #fbf6ef; }
+table.trace tbody tr + tr td { border-top: 1px solid #f1ebe4; }
+table.trace td {
+  padding: 10px 14px;
+  vertical-align: top;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.45;
+  color: #3a2f2a;
+}
+table.trace td.empty {
+  background:
+    repeating-linear-gradient(135deg,
+      rgba(120, 100, 90, 0.025) 0px,
+      rgba(120, 100, 90, 0.025) 6px,
+      transparent 6px, transparent 12px);
+}
+table.trace td.owned {
+  position: relative;
+  background: #ffffff;
+}
+table.trace td.owned::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 8px; bottom: 8px;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
+  background: var(--accent, #cccccc);
+}
+table.trace td.owned .meta {
+  display: block;
+  font-size: 10.5px;
+  color: #9b897c;
+  margin-bottom: 3px;
+  letter-spacing: 0.3px;
+}
+table.trace td.owned .meta .ts { font-variant-numeric: tabular-nums; }
+table.trace td.owned .meta .kind {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--accent-soft, #f3eee9);
+  color: var(--accent, #6b574c);
+  font-size: 10px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+table.trace td.owned .body { color: #2b211d; }
+table.trace td.owned .body code.tool {
+  font-family: ui-monospace, "SFMono-Regular", "JetBrains Mono", Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  color: #4E342E;
+  background: #f5efe8;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+table.trace td.owned .body .args {
+  font-family: ui-monospace, "SFMono-Regular", "JetBrains Mono", Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: #6b574c;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+table.trace td.owned .body .arrow { color: #9b897c; margin-right: 4px; }
+
+table.trace td.supervisor {
+  font-family: ui-monospace, "SFMono-Regular", "JetBrains Mono", Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: #8d7b6f;
+  background: #fcfaf7;
+  border-left: 1px solid #efe7de;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+table.trace td.supervisor .badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  margin-right: 6px;
+  vertical-align: 1px;
+}
+table.trace td.supervisor.execution   { color: #2e7d32; }
+table.trace td.supervisor.execution   .badge { background: #e8f3ea; color: #2e7d32; }
+table.trace td.supervisor.termination { color: #c25a00; }
+table.trace td.supervisor.termination .badge { background: #fdecdc; color: #c25a00; }
+table.trace td.supervisor.violation   { color: #b3261e; font-weight: 600; }
+table.trace td.supervisor.violation   .badge { background: #fde8e6; color: #b3261e; }
+table.trace td.supervisor.dash        { color: #b8a99c; }
+
+table.trace tbody:empty + .trace-empty,
+.trace-empty {
+  padding: 28px 14px;
+  text-align: center;
+  color: #a8978a;
+  font-size: 13px;
+  font-style: italic;
+}
+</style>
+"""
+
+
+# Inline scroll-preservation script. Re-emitted at the END of every
+# _render_html() output (after .trace-scroll exists in the DOM) so it can
+# locate and reposition the freshly-rendered scroller.
+_SCROLL_SCRIPT = """
+<script>
+(function () {
+  const NEAR = 32;
+  const KEY = '__traceScrollState';
+
+  function findScroller() {
+    // The script is appended at the end of .trace-wrap; walk upward until we
+    // find the wrap, then descend to .trace-scroll.
+    let s = document.currentScript;
+    let root = s ? s.parentNode : null;
+    while (root && root.querySelector && !root.querySelector('.trace-scroll')) {
+      root = root.parentNode;
+    }
+    return root && root.querySelector ? root.querySelector('.trace-scroll') : null;
+  }
+
+  function apply() {
+    const el = findScroller();
+    if (!el) return;
+    const prev = window[KEY];
+    if (prev && typeof prev.atBottom === 'boolean') {
+      if (prev.atBottom) {
+        el.scrollTop = el.scrollHeight;
+      } else if (typeof prev.top === 'number') {
+        el.scrollTop = prev.top;
+      }
+    } else {
+      // First render: park at bottom so newest messages are visible.
+      el.scrollTop = el.scrollHeight;
+      window[KEY] = { atBottom: true, top: el.scrollTop };
+    }
+
+    if (!el.__tracePersistInstalled) {
+      el.__tracePersistInstalled = true;
+      el.addEventListener('scroll', () => {
+        const slack = el.scrollHeight - el.scrollTop - el.clientHeight;
+        window[KEY] = {
+          atBottom: slack <= NEAR,
+          top: el.scrollTop,
+        };
+      }, { passive: true });
+    }
+  }
+
+  // Run after the current parse tick so the .trace-scroll element is in the
+  // DOM tree, then again on the next animation frame so layout has settled
+  // (scrollHeight reads correctly even with images / fonts mid-load).
+  apply();
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(apply);
+  } else {
+    setTimeout(apply, 0);
+  }
+})();
+</script>
+"""
+
+
+def _truncate(text: str, max_len: int = 600) -> str:
+    if len(text) <= max_len:
+        return text
+    return text[:max_len].rstrip() + "…"
+
+
+class TraceTablePanel:
+    """Append-only trace of (agent, content, supervisor_line) rows."""
+
+    def __init__(self) -> None:
+        self.rows: list[dict] = []
+        self._pane = pn.pane.HTML(self._render_html(), sizing_mode="stretch_both")
+        self._dirty = False
+
+    def panel(self) -> pn.pane.HTML:
+        return self._pane
+
+    def reset(self) -> None:
+        self.rows.clear()
+        self._dirty = False
+        self._pane.object = self._render_html()
+
+    def handle_event(self, ev: DashboardEvent) -> None:
+        """Append a row if the event is a row-creator. Caller must invoke flush()
+        once per poll tick to actually re-render the pane."""
+        if ev.event_type not in ROW_CREATORS:
+            return
+        agent, kind, content_html = self._classify(ev)
+        if agent not in COLUMN_KEYS:
+            return
+        ts = ""
+        try:
+            import time as _time
+            ts = _time.strftime("%H:%M:%S", _time.localtime(ev.timestamp))
+        except Exception:
+            ts = ""
+        self.rows.append({
+            "agent": agent,
+            "kind": kind,
+            "event_type": ev.event_type.name,
+            "content_html": content_html,
+            "supervisor_line": ev.supervisor_line,
+            "ts": ts,
+        })
+        self._dirty = True
+
+    def flush(self) -> None:
+        if not self._dirty:
+            return
+        self._pane.object = self._render_html()
+        self._dirty = False
+
+    # ----------------------------------------------------------------- helpers
+
+    def _classify(self, ev: DashboardEvent) -> tuple[str, str, str]:
+        agent = ev.agent_name or ""
+        et = ev.event_type
+        if et == EventType.CUSTOMER_MESSAGE:
+            return (agent or "customer"), "say", html.escape(_truncate(ev.content or ""))
+        if et == EventType.AGENT_MESSAGE:
+            return agent, "say", html.escape(_truncate(ev.content or ""))
+        if et == EventType.TOOL_CALL:
+            name = html.escape(ev.tool_name or "")
+            args_text = ""
+            if ev.tool_args:
+                try:
+                    import json as _json
+                    args_text = _json.dumps(ev.tool_args, ensure_ascii=False)
+                except (TypeError, ValueError):
+                    args_text = str(ev.tool_args)
+            args_text = html.escape(_truncate(args_text, 240))
+            return agent, "tool", (
+                f'<code class="tool">{name}</code>'
+                f'<span class="args"> {args_text}</span>'
+            )
+        if et == EventType.TOOL_RESULT:
+            name = html.escape(ev.tool_name or "")
+            result = html.escape(_truncate(str(ev.tool_result or ""), 320))
+            return agent, "result", (
+                f'<span class="arrow">↩</span>'
+                f'<code class="tool">{name}</code>'
+                f'<span class="args"> {result}</span>'
+            )
+        return agent, "say", html.escape(_truncate(ev.content or ""))
+
+    def _supervisor_cell(self, line: str | None) -> str:
+        if not line:
+            return '<td class="supervisor dash">&mdash;</td>'
+        # Strip the " | <serialized message>" suffix that the supervisor log
+        # appends — the trace table already shows the message in its own column.
+        verdict = line.split(" | ", 1)[0].strip()
+        if verdict.startswith("Violation:"):
+            return (
+                '<td class="supervisor violation">'
+                '<span class="badge">VIOL</span>'
+                f'{html.escape(verdict[len("Violation:"):])}'
+                '</td>'
+            )
+        if verdict.startswith("Execution:"):
+            return (
+                '<td class="supervisor execution">'
+                '<span class="badge">EXEC</span>'
+                f'{html.escape(verdict[len("Execution:"):])}'
+                '</td>'
+            )
+        if verdict.startswith("Termination:"):
+            return (
+                '<td class="supervisor termination">'
+                '<span class="badge">TERM</span>'
+                f'{html.escape(verdict[len("Termination:"):])}'
+                '</td>'
+            )
+        if verdict.startswith("NonAction:"):
+            return f'<td class="supervisor dash">{html.escape(verdict)}</td>'
+        return f'<td class="supervisor">{html.escape(verdict)}</td>'
+
+    def _render_html(self) -> str:
+        parts: list[str] = [_TABLE_CSS]
+        parts.append('<div class="trace-wrap">')
+        parts.append('<h2>Trace Table</h2>')
+        parts.append(
+            '<p class="subtitle">One row per message, in global order. '
+            'Each agent owns its own column; never two messages on the same row.</p>'
+        )
+        parts.append('<div class="trace-scroll">')
+        # Column widths (CSS table-layout: fixed) — equal-ish for agents,
+        # supervisor narrower.
+        col_count = len(COLUMNS) + 1
+        agent_pct = 88 / len(COLUMNS)
+        parts.append('<table class="trace"><colgroup>')
+        for _ in COLUMNS:
+            parts.append(f'<col style="width:{agent_pct:.2f}%">')
+        parts.append('<col style="width:12%">')
+        parts.append('</colgroup>')
+
+        parts.append('<thead><tr>')
+        for key, label, icon in COLUMNS:
+            color = AGENT_ACCENT.get(key, "#cccccc")
+            parts.append(
+                f'<th><span class="accent" style="background:{color}"></span>'
+                f'<span class="icon">{icon}</span>{html.escape(label)}</th>'
+            )
+        parts.append('<th>Process Supervisor</th></tr></thead>')
+
+        parts.append('<tbody>')
+        for row in self.rows:
+            owner = row["agent"]
+            accent = AGENT_ACCENT.get(owner, "#cccccc")
+            parts.append('<tr>')
+            for key, _label, _icon in COLUMNS:
+                if key == owner:
+                    style = (
+                        f'--accent:{accent};'
+                        f'--accent-soft:{accent}1f;'
+                    )
+                    title = html.escape(row.get("ts", ""))
+                    kind_label = {
+                        "say": "msg",
+                        "tool": "tool call",
+                        "result": "tool result",
+                    }.get(row["kind"], row["kind"])
+                    parts.append(
+                        f'<td class="owned" style="{style}" title="{title}">'
+                        f'<span class="meta">'
+                        f'<span class="ts">{title}</span>'
+                        f'<span class="kind">{kind_label}</span>'
+                        f'</span>'
+                        f'<span class="body">{row["content_html"]}</span>'
+                        f'</td>'
+                    )
+                else:
+                    parts.append('<td class="empty"></td>')
+            parts.append(self._supervisor_cell(row.get("supervisor_line")))
+            parts.append('</tr>')
+        parts.append('</tbody>')
+        parts.append('</table>')
+
+        if not self.rows:
+            parts.append(
+                f'<div class="trace-empty" style="grid-column: 1 / span {col_count};">'
+                'No messages yet — click "Run Conversation" to start a trace.'
+                '</div>'
+            )
+        parts.append('</div>')  # /trace-scroll
+        parts.append(_SCROLL_SCRIPT)
+        parts.append('</div>')  # /trace-wrap
+        return "".join(parts)

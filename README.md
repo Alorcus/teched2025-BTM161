@@ -123,6 +123,26 @@ panel serve src/dashboard/app.py --show --port 5006
 
 The dashboard runs the same `CoffeeShop` multi-agent graph used by the notebooks and CLI. A background thread drives the conversation (using the simulated Customer Agent), while the Panel UI polls for events every 100ms. Stream events from LangGraph are parsed into typed dashboard events (agent messages, tool calls, handoffs, etc.) and dispatched to the corresponding agent panel.
 
+## Trace Table Dashboard
+
+A second Panel app focused on the global message trace: one row per emitted message, with columns per agent plus a Process Supervisor column. It shares the same `CoffeeShop` graph and event bus as the Agent Observatory but presents the conversation as a single, globally ordered table next to the live tray, stock, and coffee machine status.
+
+### Launch
+
+```bash
+# Start the Trace Table dashboard (opens at http://localhost:5007)
+poetry run trace-dashboard
+```
+
+The Trace Table runs on port 5007, so it can be served alongside the Agent Observatory (port 5006) for side-by-side comparison.
+
+### Features
+
+- **Global trace table**: every agent message, tool call, tool result, and handoff as one row, in emission order
+- **Top status strip**: tray, stock, and coffee machine widgets shared with the Agent Observatory
+- **Sidebar controls**: scenario picker, log level, editable customer prompt, run button
+- **Conversation log**: chat-style log below the sidebar with smart auto-scroll (sticks to bottom only when already at the bottom)
+
 ---
 
 ## Observing the Database
