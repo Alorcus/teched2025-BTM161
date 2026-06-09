@@ -3,6 +3,8 @@ import logging
 import sys
 
 from .coffee_shop import CoffeeShop
+from .config import CoffeeShopConfig
+from .setups import list_setups, resolve_setup_name, setup_dir
 from .agents.customer_agent import CUSTOMER_SCENARIOS
 from .trace_processing import TraceProcessor
 
@@ -66,7 +68,27 @@ def main():
         choices=["debug", "info", "warning", "error"],
         help="Set the logging level for the coffee_shop logger (default: info). Note: levels above info will not show progress messages, and debug/info may produce output even with --quiet.",
     )
+    parser.add_argument(
+        "--setup", type=str, default=None,
+        help="Name of the setup under config/setups/ to load. The COFFEE_SHOP_SETUP env var supersedes this flag.",
+    )
+    parser.add_argument(
+        "--list-setups", action="store_true",
+        help="List available setups under config/setups/ and exit.",
+    )
     args = parser.parse_args()
+
+    if args.list_setups:
+        names = list_setups()
+        if not names:
+            print("(no setups found in config/setups/)")
+        else:
+            for name in names:
+                print(name)
+        return 0
+
+    setup_name = resolve_setup_name(args.setup)
+    setup_dir(setup_name)
 
     scenario_mode, scenario_index = parse_scenario(args.scenario)
 
@@ -78,8 +100,8 @@ def main():
 
     coffee_shop_logger.setLevel(getattr(logging, args.log_level.upper()))
 
-    coffee_shop_logger.info("Initializing coffee shop...")
-    shop = CoffeeShop()
+    coffee_shop_logger.info(f"Initializing coffee shop with setup '{setup_name}'...")
+    shop = CoffeeShop(CoffeeShopConfig(setup_name=setup_name))
     shop.open_shop(reset_inventory_first=args.reset_inventory)
     coffee_shop_logger.info(f"Coffee shop is open. Running {args.traces} trace(s).")
     coffee_shop_logger.info(f"Resetting inventory before each trace: {args.reset_inventory}")

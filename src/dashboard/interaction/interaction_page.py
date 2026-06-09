@@ -7,6 +7,7 @@ import time
 import panel as pn
 
 from src.coffee_shop import CoffeeShop
+from src.config import CoffeeShopConfig
 from src.agents import CUSTOMER_SCENARIOS, build_default_prompt
 from src.agents.barista_agent import start_coffee_machine, stop_coffee_machine
 from .event_bus import EventBus, EventType, DashboardEvent
@@ -50,11 +51,11 @@ def _agent_registry_from_repo(shop: CoffeeShop) -> dict[str, dict]:
     }
 
 
-def create_observatory_dashboard():
+def create_observatory_dashboard(setup_name: str):
     """Create the Agent Observatory dashboard page."""
     pn.extension(sizing_mode="stretch_both")
 
-    shop = CoffeeShop()
+    shop = CoffeeShop(CoffeeShopConfig(setup_name=setup_name))
     shop.open_shop()
     event_bus = EventBus()
     runner = ConversationRunner(shop, event_bus)
@@ -200,7 +201,7 @@ def create_observatory_dashboard():
     )
 
     template = pn.template.FastListTemplate(
-        title="Coffee Shop Agent Observatory",
+        title=f"Coffee Shop Agent Observatory — {setup_name}",
         sidebar=[sidebar],
         header=[nav_tabs],
         main=[pn.Column(

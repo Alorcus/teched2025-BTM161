@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 
@@ -6,14 +6,15 @@ from typing import Any
 class CoffeeShopConfig:
     """Configuration for the coffee shop system.
 
-    All fields are optional — None means "use default from environment".
+    `setup_name` selects which `config/setups/<name>/` directory to load.
+    There is no default — callers must pick one explicitly.
     """
     llm: Any = None
     db_url: str | None = None
     mlflow_experiment: str = "lg-coffee-mas"
     mlflow_enabled: bool = True
     coffee_machine_url: str = "http://127.0.0.1:8001"
-    control_plane_config_dir: str = "./config"
+    setup_name: str | None = None
     guardrail_log_path: str = "./guardrail_log/events.jsonl"
     process_model_path: str = "./config/process_model.yaml"
     process_log_path: str = "./process_log/process_meta.log"

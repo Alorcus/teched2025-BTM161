@@ -10,7 +10,7 @@ class Guardrail(ABC):
     """Base guardrail. Subclassed by evaluation mechanism."""
 
     name: str
-    version: str = "v1"
+    version: str = "unversioned"
     tools: list[str] = field(default_factory=list)
     effect: Effect = Effect.DENY
     description: str = ""
@@ -31,6 +31,7 @@ class HardGuardrail(Guardrail):
     """Deterministic rule, deterministic evaluation."""
 
     predicate: Callable[[GuardrailContext], Verdict] | None = None
+    predicate_args: dict | None = None
 
     def eval(self, context: GuardrailContext) -> Verdict:
         if self.predicate is None:
