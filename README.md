@@ -172,16 +172,17 @@ The Metrics Observatory loads CSV event logs into an `ObjectCentricEventlog` and
 
 ## Trace Table Dashboard
 
-A second Panel app focused on the global message trace: one row per emitted message, with columns per agent plus a Process Supervisor column. It shares the same `CoffeeShop` graph and event bus as the Agent Observatory but presents the conversation as a single, globally ordered table next to the live tray, stock, and coffee machine status.
+The Trace Table is the third page of the multi-page Agent Observatory dashboard, focused on the global message trace: one row per emitted message, with columns per agent plus a Process Supervisor column. It shares the same `CoffeeShop` graph and event bus as the Interaction Observatory but presents the conversation as a single, globally ordered table next to the live tray, stock, and coffee machine status.
 
 ### Launch
 
 ```bash
-# Start the Trace Table dashboard (opens at http://localhost:5007)
-poetry run trace-dashboard
+# The Trace Table is served by the regular dashboard command
+poetry run dashboard
+# Then open: http://localhost:5006/trace
 ```
 
-The Trace Table runs on port 5007, so it can be served alongside the Agent Observatory (port 5006) for side-by-side comparison.
+Use the header tabs to switch between the Interaction, Metrics, and Trace pages.
 
 ### Features
 

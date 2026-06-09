@@ -1,8 +1,8 @@
-"""Trace Table dashboard — a standalone Panel app.
+"""Trace Table dashboard page.
 
-Separate from the original 4-panel agent grid (``src.dashboard.app``). This
-app is focused on the global message trace: one row per message, columns per
-agent + a Process Supervisor column.
+Mounted as the ``/trace`` route of the multi-page ``dashboard`` server in
+``src.dashboard.app``. Focused on the global message trace: one row per
+message, columns per agent + a Process Supervisor column.
 
 The page is composed of four regions:
 
@@ -33,8 +33,9 @@ from .interaction.coffee_machine_panel import CoffeeMachinePanel
 from .interaction.conversation_runner import ConversationRunner
 from .interaction.event_bus import EventBus, EventType, DashboardEvent
 from .interaction.stock_panel import StockPanel
-from .trace_table_panel import TraceTablePanel
 from .interaction.tray_panel import TrayPanel
+from .nav import header_nav
+from .trace_table_panel import TraceTablePanel
 
 logger = logging.getLogger("coffee_shop.dashboard.trace")
 
@@ -313,7 +314,7 @@ def create_trace_dashboard():
     from src.config import CoffeeShopConfig
     # Start from the dataclass defaults; only OVERRIDE if env vars are set.
     # This keeps src/config.py as the single source of truth for the default.
-    cfg_kwargs = {}
+    cfg_kwargs = {"setup_name": os.getenv("SETUP_NAME", "baseline")}
     env_active = os.getenv("PROCESS_SUPERVISOR_ACTIVE")
     if env_active is not None:
         cfg_kwargs["process_supervisor_active"] = env_active.lower() in ("1", "true", "yes")
@@ -488,34 +489,14 @@ def create_trace_dashboard():
     )
 
     template = pn.template.FastListTemplate(
-        title="Coffee Shop · Trace Table",
+        title="Coffee Shop Agent Observatory",
         sidebar=[sidebar],
+        header=[header_nav(active="/trace")],
         main=[main_column],
-        accent_base_color="#4E342E",
+        accent_base_color="#795548",
         header_background="#4E342E",
         theme="default",
     )
 
     pn.state.add_periodic_callback(poll_events, period=100)
     return template
-
-
-def serve_trace():
-    """Standalone entry point: serve only the Trace Table app on port 5007.
-
-    Kept on a different port from the original dashboard so the two can run
-    concurrently for comparison.
-    """
-    logging.getLogger("bokeh.server.views.static_handler").setLevel(logging.WARNING)
-    logging.getLogger("tornado.access").setLevel(logging.WARNING)
-    print("Trace Table running at http://localhost:5007")
-    pn.serve(
-        create_trace_dashboard,
-        port=5007,
-        show=False,
-        title="Coffee Shop · Trace Table",
-    )
-
-
-if __name__ == "__main__":
-    serve_trace()

@@ -10,6 +10,7 @@ from src.coffee_shop import CoffeeShop
 from src.config import CoffeeShopConfig
 from src.agents import CUSTOMER_SCENARIOS, build_default_prompt
 from src.agents.barista_agent import start_coffee_machine, stop_coffee_machine
+from ..nav import header_nav
 from .event_bus import EventBus, EventType, DashboardEvent
 from .agent_panel import AgentPanel
 from .conversation_runner import ConversationRunner
@@ -185,20 +186,7 @@ def create_observatory_dashboard(setup_name: str):
     )
 
     # Navigation tabs for header
-    nav_tabs = pn.Row(
-        pn.pane.HTML(
-            '<div style="display:inline-block;padding:6px 14px;background:#6D4C41;color:white;'
-            'border-radius:4px;font-weight:600;margin-right:8px;font-size:13px;">Interaction Observatory</div>',
-            sizing_mode="fixed"
-        ),
-        pn.pane.HTML(
-            '<a href="/metrics" style="display:inline-block;padding:6px 14px;background:rgba(255,255,255,0.15);color:white;'
-            'border-radius:4px;text-decoration:none;font-weight:500;font-size:13px;">'
-            'Metrics Observatory</a>',
-            sizing_mode="fixed"
-        ),
-        margin=(0, 0, 0, 0),
-    )
+    nav_tabs = header_nav(active="/")
 
     template = pn.template.FastListTemplate(
         title=f"Coffee Shop Agent Observatory — {setup_name}",
@@ -297,7 +285,6 @@ def _dispatch_event(
         if panel:
             panel.set_status("idle")
             panel.set_tool_result(event.tool_name or "?", event.tool_result or "")
-            panel.add_message("tool", f"{event.tool_name}: {_truncate(event.tool_result or '', 100)}")
         if event.tool_name == "end_preparation" and event.tool_result:
             try:
                 result_data = json.loads(event.tool_result)
@@ -330,14 +317,6 @@ def _dispatch_event(
     elif event.event_type == EventType.HANDOFF:
         if panel:
             panel.set_status("handed_off")
-        target = agent_panels.get(event.target_agent or "")
-        if target and event.handoff_context:
-            target.set_handoff(event.handoff_context)
-            target.add_message(
-                "handoff",
-                f"[From {event.handoff_context.get('from_agent', '?')}] "
-                f"{event.handoff_context.get('context_summary', '')}",
-            )
         _log(log_entries, conversation_log,
              f'<span style="color:#9C27B0"><b>HANDOFF</b></span> '
              f'{event.agent_name} → {event.target_agent}')

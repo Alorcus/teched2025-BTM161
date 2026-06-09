@@ -233,6 +233,12 @@ class ConversationRunner:
         }
         last_agent_message = None
         seen: set[str] = set()
+        # `handoff_context` is set in the parent graph state by transfer_to_agent
+        # and is never cleared, so terminal/router updates can re-surface the
+        # same context after the destination agent has already worked. Dedup by
+        # signature so the global conversation log shows one HANDOFF per actual
+        # transfer.
+        last_handoff_sig: tuple | None = None
         current_agent: str | None = None
         # Outer retry loop: each iteration drives one stream() invocation. A
         # violation that triggers re-invocation breaks out of the inner loop
@@ -284,14 +290,21 @@ class ConversationRunner:
                             if "handoff_context" in node_data and node_data["handoff_context"]:
                                 hc = node_data["handoff_context"]
                                 target = node_data.get("active_agent")
-                                self.event_bus.publish(DashboardEvent(
-                                    event_type=EventType.HANDOFF,
-                                    agent_name=hc.get("from_agent", resolved_agent),
-                                    handoff_context=hc,
-                                    target_agent=target,
-                                ))
-                                if target:
-                                    self._active_agent = target
+                                sig = (
+                                    hc.get("from_agent"),
+                                    target,
+                                    hc.get("context_summary"),
+                                )
+                                if sig != last_handoff_sig:
+                                    last_handoff_sig = sig
+                                    self.event_bus.publish(DashboardEvent(
+                                        event_type=EventType.HANDOFF,
+                                        agent_name=hc.get("from_agent", resolved_agent),
+                                        handoff_context=hc,
+                                        target_agent=target,
+                                    ))
+                                    if target:
+                                        self._active_agent = target
 
                             msgs_key = next(
                                 (k for k in node_data if k == "messages"), None

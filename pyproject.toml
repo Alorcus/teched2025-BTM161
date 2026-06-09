@@ -32,7 +32,6 @@ dependencies = [
 [project.scripts]
 simulate = "src.simulate:main"
 dashboard = "src.dashboard.app:main"
-trace-dashboard = "src.dashboard.trace_app:serve_trace"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]

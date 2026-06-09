@@ -334,6 +334,110 @@ class TestUserVisibleFollowsHandoff(unittest.TestCase):
         self.assertEqual(user_visible[1].content, "Thanks, sounds good")
 
 
+class TestHandoffNotDuplicatedOnEcho(unittest.TestCase):
+    """A single transfer must produce one HANDOFF event even when the parent
+    graph re-surfaces the same handoff_context in a later state snapshot."""
+
+    def test_repeated_handoff_context_is_deduped(self):
+        shop = _make_mock_shop()
+
+        hc = {
+            "from_agent": "inventory_agent",
+            "context_summary": "Order ORD0048 verified",
+            "expectation": "Brew the latte",
+        }
+
+        call_count = [0]
+
+        def stream_with_echo(*a, **kw):
+            nonlocal call_count
+            call_count[0] += 1
+            if call_count[0] == 1:
+                # Real handoff from inventory to barista.
+                handoff_msg = AIMessage(
+                    content="Handing off",
+                    name="inventory_agent",
+                    id="msg-handoff",
+                )
+                yield (("inventory_agent:abc",), {"agent": {
+                    "messages": [handoff_msg],
+                    "active_agent": "barista_agent",
+                    "handoff_context": hc,
+                }})
+                # Barista produces its final reply.
+                final_msg = AIMessage(
+                    content="Order complete!",
+                    name="barista_agent",
+                    id="msg-final",
+                )
+                yield (("barista_agent:def",), {"agent": {"messages": [final_msg]}})
+                # Parent-level echo: the same handoff_context is still in state
+                # and gets re-emitted by a terminal/router update. This is the
+                # scenario that produced the duplicate HANDOFF in the global log.
+                yield ((), {"router": {
+                    "active_agent": "barista_agent",
+                    "handoff_context": hc,
+                }})
+            else:
+                yield (("barista_agent:def",), {"agent": {
+                    "messages": [AIMessage(content="bye", name="barista_agent", id="msg-bye")],
+                }})
+
+        shop.app.stream.side_effect = stream_with_echo
+        shop.customer_agent.get_initial_message.return_value = "I want a latte"
+        shop.customer_agent.respond_to.return_value = None
+
+        bus = EventBus()
+        runner = ConversationRunner(shop, bus)
+        runner.start(scenario_index=0)
+        runner._thread.join(timeout=5)
+
+        events = bus.drain()
+        handoffs = [e for e in events if e.event_type == EventType.HANDOFF]
+        self.assertEqual(len(handoffs), 1)
+        self.assertEqual(handoffs[0].agent_name, "inventory_agent")
+        self.assertEqual(handoffs[0].target_agent, "barista_agent")
+
+    def test_distinct_handoffs_are_not_deduped(self):
+        """Two genuinely different transfers in the same turn must both fire."""
+        shop = _make_mock_shop()
+
+        def stream_two_handoffs(*a, **kw):
+            yield (("order_agent:abc",), {"agent": {
+                "messages": [AIMessage(content="to inv", name="order_agent", id="m1")],
+                "active_agent": "inventory_agent",
+                "handoff_context": {
+                    "from_agent": "order_agent",
+                    "context_summary": "check stock",
+                    "expectation": "verify",
+                },
+            }})
+            yield (("inventory_agent:def",), {"agent": {
+                "messages": [AIMessage(content="to barista", name="inventory_agent", id="m2")],
+                "active_agent": "barista_agent",
+                "handoff_context": {
+                    "from_agent": "inventory_agent",
+                    "context_summary": "stock ok",
+                    "expectation": "brew",
+                },
+            }})
+
+        shop.app.stream.side_effect = stream_two_handoffs
+        shop.customer_agent.get_initial_message.return_value = "hi"
+        shop.customer_agent.respond_to.return_value = None
+
+        bus = EventBus()
+        runner = ConversationRunner(shop, bus)
+        runner.start(scenario_index=0)
+        runner._thread.join(timeout=5)
+
+        events = bus.drain()
+        handoffs = [e for e in events if e.event_type == EventType.HANDOFF]
+        self.assertEqual(len(handoffs), 2)
+        self.assertEqual(handoffs[0].target_agent, "inventory_agent")
+        self.assertEqual(handoffs[1].target_agent, "barista_agent")
+
+
 class TestActiveAgentResetsOnNewConversation(unittest.TestCase):
     """_active_agent resets to order_agent at the start of each conversation."""
 

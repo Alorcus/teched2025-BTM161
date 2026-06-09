@@ -53,7 +53,7 @@ def main():
         title=f"Coffee Shop Agent Observatory — {setup_name}",
     )
     print(f"Dashboard running at http://localhost:5006 (setup: {setup_name})")
-    print("  - Observatory: http://localhost:5006/")
+    print("  - Interaction: http://localhost:5006/")
     print("  - Metrics:     http://localhost:5006/metrics")
     print("  - Trace:       http://localhost:5006/trace")
     return 0
