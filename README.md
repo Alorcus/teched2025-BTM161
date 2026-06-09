@@ -50,7 +50,7 @@ Three self-contained exercises:
 
 ## Setups
 
-A **setup** is a self-contained configuration of agents, guardrails, and guidelines under `config/setups/<name>/`. Both `simulate` and `dashboard` require a setup to be selected.
+A **setup** is a self-contained configuration of agents, guardrails, and guidelines under `config/setups/<name>/` (subdirs: `agents/`, `guardrails/`, `guidelines/`). Both `simulate` and `dashboard` require a setup to be selected. Guardrail predicate *logic* lives in Python ([src/control_plane/predicates.py](src/control_plane/predicates.py)) and is referenced by name from the guardrail YAML — varying `predicate_args` (e.g. `max_pct: 10`) is a YAML-only change.
 
 **Selecting a setup** (env var supersedes the flag):
 
@@ -64,13 +64,15 @@ poetry run simulate --list-setups          # show available setups
 
 ```bash
 cp -r config/setups/baseline config/setups/my_setup
-# edit config/setups/my_setup/agents/*.yaml and guidelines/*.yaml
+# edit config/setups/my_setup/{agents,guardrails,guidelines}/*.yaml
 poetry run simulate --setup my_setup --traces 1
 ```
 
 ## Headless Simulation
 
-Generate traces in bulk without the Jupyter UI using the `simulate` CLI. It runs the Customer Agent against the swarm and captures MLflow traces for each conversation.
+You can generate traces in bulk without the jupyter UI using the `simulate` CLI command. This runs the Customer Agent against the coffee shop swarm and captures MLflow traces for each conversation.
+
+### Usage
 
 All examples below require `--setup <name>` (or `COFFEE_SHOP_SETUP=<name>`); see [Setups](#setups).
 

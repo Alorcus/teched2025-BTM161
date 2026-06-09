@@ -44,3 +44,9 @@ def discount_within_limit_predicate(max_pct: int):
         )
 
     return _eval
+
+
+PREDICATE_REGISTRY = {
+    "allowed_handover_targets": allowed_handover_targets_predicate,
+    "discount_within_limit": discount_within_limit_predicate,
+}
