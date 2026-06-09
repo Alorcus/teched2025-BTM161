@@ -24,7 +24,7 @@ guardrails:
     type: hard
     version: v2
     tools: [calculate_total]
-    effect: flag
+    enforce: false
     description: Flag big discounts.
     predicate: discount_within_limit
     predicate_args:
@@ -38,7 +38,7 @@ guardrails:
             self.assertIsInstance(gr, HardGuardrail)
             self.assertEqual(gr.name, "discount_within_10pct")
             self.assertEqual(gr.version, "v2")
-            self.assertEqual(gr.effect, Effect.FLAG)
+            self.assertEqual(gr.enforce, False)
             self.assertEqual(gr.predicate_args, {"max_pct": 10})
 
             ctx_under = GuardrailContext(
@@ -59,7 +59,7 @@ guardrails:
   - id: allowed_handover_targets
     type: hard
     tools: [transfer_to_agent]
-    effect: deny
+    enforce: true
     predicate: allowed_handover_targets
 """
         with tempfile.TemporaryDirectory() as d:
@@ -76,7 +76,7 @@ guardrails:
   - id: handover_appropriateness_soft_stub
     type: soft
     tools: [transfer_to_agent]
-    effect: allow
+    enforce: false
     judge_prompt: Is the proposed handover appropriate?
     state_dependencies: [conversation]
 """
@@ -95,7 +95,7 @@ guardrails:
   - id: bogus
     type: hard
     tools: [foo]
-    effect: deny
+    enforce: true
     predicate: does_not_exist
 """
         with tempfile.TemporaryDirectory() as d:
@@ -109,7 +109,7 @@ guardrails:
   - id: bogus
     type: medium
     tools: [foo]
-    effect: deny
+    enforce: true
 """
         with tempfile.TemporaryDirectory() as d:
             setup = _write_setup(Path(d), yaml_text)
@@ -122,7 +122,7 @@ guardrails:
   - id: known
     type: hard
     tools: [foo]
-    effect: deny
+    enforce: true
     predicate: allowed_handover_targets
 """
         with tempfile.TemporaryDirectory() as d:

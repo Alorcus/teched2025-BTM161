@@ -4,7 +4,6 @@ guardrails:
     version: v1
     tools:
       - transfer_to_agent
-    effect: deny
     description: Handover target must be in the calling agent's allowed_handovers list.
     predicate: allowed_handover_targets
 
@@ -13,7 +12,7 @@ guardrails:
     version: v1
     tools:
       - calculate_total
-    effect: flag
+    enforce: false
     description: Flag (do not block) calculate_total invocations with discount_percent above the configured limit.
     predicate: discount_within_limit
     predicate_args:
@@ -24,8 +23,18 @@ guardrails:
     version: v1
     tools:
       - transfer_to_agent
-    effect: allow
+    enforce: false
     description: Stub soft guardrail asking 'is this handover appropriate?' (always allow for MVP).
     judge_prompt: Is the proposed handover appropriate given conversation state and guidelines?
     state_dependencies:
       - conversation
+
+  - id: one_item_per_process_order
+    type: hard
+    version: v1
+    tools:
+      - process_order
+    description: Deny process_order calls with more than one item in the order.
+    predicate: max_number_items_per_process_order
+    predicate_args:
+      max_items: 1

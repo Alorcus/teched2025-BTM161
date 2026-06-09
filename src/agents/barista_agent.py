@@ -11,8 +11,6 @@ from typing import Dict
 import logging
 from pathlib import Path
 
-logger = logging.getLogger("coffee_shop.barista_agent")
-
 from langchain_core.tools import tool
 
 from .shared_components import (
@@ -21,6 +19,8 @@ from .shared_components import (
 )
 from .order_store import load_order
 from .order_state_machine import state_machine, InvalidTransitionError
+
+logger = logging.getLogger("coffee_shop.barista_agent")
 
 
 COFFEE_MACHINE_URL = "http://127.0.0.1:8001"
@@ -58,38 +58,23 @@ def check_port_in_use(port: int) -> bool:
 def start_coffee_machine() -> bool:
     """Start the coffee machine uvicorn server as a subprocess."""
     global COFFEE_MACHINE_PROCESS
-
     with _MACHINE_LOCK:
-        # Check if already running
         if is_machine_running():
             return True
-
-        # Check if port is in use but machine not responding (stuck process)
         if check_port_in_use(COFFEE_MACHINE_PORT):
             logger.warning(
                 f"Port {COFFEE_MACHINE_PORT} is in use but machine not responding"
             )
             return False
-
         try:
-            # Run the server in its own process group / session so we can
-            # signal the whole group on shutdown. We launch via `poetry run
-            # uvicorn`, so a plain terminate() would only signal the poetry
-            # wrapper and leave the uvicorn grandchild listening on the port.
-            popen_kwargs: dict = {
-                "cwd": str(COFFEE_MACHINE_PATH),
-                "stdout": subprocess.PIPE,
-                "stderr": subprocess.PIPE,
-            }
-            if sys.platform == "win32":
-                popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
-            else:
-                popen_kwargs["start_new_session"] = True
+            import sys
 
+            # Use the current Python interpreter directly
+            python_executable = sys.executable
             COFFEE_MACHINE_PROCESS = subprocess.Popen(
                 [
-                    "poetry",
-                    "run",
+                    python_executable,
+                    "-m",
                     "uvicorn",
                     "services.coffee_machine.main:app",
                     "--port",
@@ -97,16 +82,24 @@ def start_coffee_machine() -> bool:
                     "--host",
                     "127.0.0.1",
                 ],
-                **popen_kwargs,
+                cwd=str(COFFEE_MACHINE_PATH),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
+                if hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP")
+                else 0,
             )
-
+            # Wait for startup
             for _ in range(10):
                 time.sleep(1)
                 if is_machine_running():
+                    logger.info("Coffee machine started successfully")
                     return True
-
+            # Check if process failed
+            if COFFEE_MACHINE_PROCESS.poll() is not None:
+                stderr = COFFEE_MACHINE_PROCESS.stderr.read().decode()
+                logger.error(f"Coffee machine failed to start: {stderr}")
             return False
-
         except Exception as e:
             logger.error(f"Failed to start coffee machine: {e}")
             return False
@@ -227,7 +220,7 @@ def start_preparation(order_id: str) -> str:
         return tool_response("error", "Coffee machine unreachable", order_id)
 
     if response.status_code != 200:
-        return tool_response("error", f"Machine error", order_id)
+        return tool_response("error", "Machine error", order_id)
 
     try:
         data = response.json()
@@ -239,9 +232,13 @@ def start_preparation(order_id: str) -> str:
         return tool_response("error", "No job_id returned", order_id)
 
     try:
-        order = state_machine.transition(order, OrderStatus.IN_PREPARATION, context="prepare_order: starting")
+        order = state_machine.transition(
+            order, OrderStatus.IN_PREPARATION, context="prepare_order: starting"
+        )
     except InvalidTransitionError as e:
-        return json.dumps({"order_id": order_id, "error": f"Cannot start preparation: {e}"})
+        return json.dumps(
+            {"order_id": order_id, "error": f"Cannot start preparation: {e}"}
+        )
 
     # Increment attempt count
     attempt_count = ORDER_STATUS_CACHE.get(order_id, {}).get("attempt_count", 0) + 1
@@ -318,21 +315,25 @@ def end_preparation(order_id: str) -> str:
                     if is_contaminated:
                         return tool_response(
                             "contaminated",
-                            f"⚠️ Coffee is ready but the machine was dirty — the drink may be contaminated.",
+                            "⚠️ Coffee is ready but the machine was dirty — the drink may be contaminated.",
                             order_id,
                             {"attempt": attempt_count, "contaminated": True},
                         )
 
                     return tool_response(
                         "ready",
-                        f"✅ Your coffee is ready! ☕",
+                        "✅ Your coffee is ready! ☕",
                         order_id,
                         {"attempt": attempt_count},
                     )
 
                 elif status == "failed":
                     try:
-                        order = state_machine.transition(order, OrderStatus.PREPARATION_ERROR, context=f"brewing failed on attempt #{attempt_count}")
+                        order = state_machine.transition(
+                            order,
+                            OrderStatus.PREPARATION_ERROR,
+                            context=f"brewing failed on attempt #{attempt_count}",
+                        )
                     except InvalidTransitionError as e:
                         logger.warning(f"Cannot transition to PREPARATION_ERROR: {e}")
                     if order_id in ORDER_JOB_MAP:
@@ -349,7 +350,9 @@ def end_preparation(order_id: str) -> str:
                 logger.error(f"Status check error: {e}")
 
     try:
-        state_machine.transition(order, OrderStatus.PREPARATION_ERROR, context="brewing timed out")
+        state_machine.transition(
+            order, OrderStatus.PREPARATION_ERROR, context="brewing timed out"
+        )
     except InvalidTransitionError as e:
         logger.warning(f"Cannot transition to PREPARATION_ERROR: {e}")
     return tool_response("error", "Brewing timed out. Please try again.", order_id)
@@ -361,7 +364,7 @@ def estimate_prep_time(order_id: str) -> str:
     logger.debug("estimate_prep_time called for %s", order_id)
     order = load_order(order_id)
     if not order:
-        return tool_response("error", f"Order not found", order_id)
+        return tool_response("error", "Order not found", order_id)
 
     total_items = sum(item.quantity for item in order.items)
     base_time = 2
@@ -395,7 +398,9 @@ def clean_machine() -> str:
     logger.debug("clean_machine called")
 
     if not is_machine_running():
-        return json.dumps({"status": "error", "message": "Coffee machine is not available."})
+        return json.dumps(
+            {"status": "error", "message": "Coffee machine is not available."}
+        )
 
     response = safe_post(f"{COFFEE_MACHINE_URL}/clean", {})
     if response is None:
@@ -405,6 +410,6 @@ def clean_machine() -> str:
         data = response.json()
         return json.dumps(data)
     except Exception:
-        return json.dumps({"status": "error", "message": "Invalid response from machine."})
-
-
+        return json.dumps(
+            {"status": "error", "message": "Invalid response from machine."}
+        )

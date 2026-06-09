@@ -11,7 +11,6 @@ import yaml
 
 from .guardrails import Guardrail, HardGuardrail, SoftGuardrail
 from .predicates import PREDICATE_REGISTRY
-from .types import Effect
 
 
 @dataclass(frozen=True)
@@ -27,16 +26,11 @@ def _build_guardrail(entry: dict) -> Guardrail:
     if guardrail_type not in ("hard", "soft"):
         raise ValueError(f"Guardrail {guardrail_id!r}: type must be 'hard' or 'soft', got {guardrail_type!r}")
 
-    try:
-        effect = Effect(entry.get("effect", "flag"))
-    except ValueError as exc:
-        raise ValueError(f"Guardrail {guardrail_id!r}: invalid effect {entry.get('effect')!r}") from exc
-
     common = {
         "name": guardrail_id,
-        "version": entry.get("version", "v1"),
+        "version": entry.get("version", "unversioned"),
         "tools": list(entry.get("tools", [])),
-        "effect": effect,
+        "enforce": bool(entry.get("enforce", True)),
         "description": entry.get("description", ""),
     }
 
