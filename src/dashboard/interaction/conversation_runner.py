@@ -108,6 +108,11 @@ class ConversationRunner:
 
         self._consume_tray()
 
+        feedback = self.shop.capture_feedback(thread_id, self._current_order_id)
+        logger.info(
+            "Customer feedback [%.2f]: %s", feedback["feedback_score"], feedback["feedback_reason"]
+        )
+
         self.event_bus.publish(DashboardEvent(
             event_type=EventType.CONVERSATION_END,
             agent_name="system",
