@@ -343,6 +343,94 @@ class ProcessSupervisor:
             with self.log_path.open("a", encoding="utf-8") as f:
                 f.write(line + "\n")
 
+    def append_violation(self, reason: str) -> str:
+        """Append a synthetic Violation:* line. Used by the active-mode runner
+        to record events like supervisor_retry_exhausted that originate in
+        orchestration, not from observing a single message."""
+        clean = re.sub(r"\s+", "_", reason.strip()) or "unspecified"
+        line = f"Violation:{clean}"
+        self._append(line)
+        return line
+
     def lines(self) -> list[str]:
         with self._lock:
             return list(self._lines)
+
+    # ------------------------------------------------------------- active mode
+
+    def allowed_next_activities_for(self, agent: str) -> list[Activity]:
+        """Activities that `agent` may perform next, per the BPMN model.
+
+        Coarse implementation: every activity whose lane matches `agent`. The
+        BPMN sequence-flow edges are not yet surfaced as a successor map, so
+        this is a permissive superset — narrow it later if needed.
+        """
+        return [a for a in self.activities if a.agent == agent]
+
+    def critique(
+        self,
+        msg: BaseMessage,
+        agent_name: str,
+        violation_reason: str,
+    ) -> str:
+        """Second LLM call: produce a short corrective note for an agent whose
+        previous attempt violated the process model.
+
+        Returns prose suitable for embedding inside a quoted-critique
+        HumanMessage. Never returns Execution:/Termination:/Violation: lines —
+        those belong to the passive log, not to the agent-facing critique.
+        """
+        allowed = self.allowed_next_activities_for(agent_name)
+        if allowed:
+            allowed_str = "\n".join(
+                f"  - {a.id} {a.display_name or a.name} (slug={a.name},"
+                f" trigger={a.trigger}"
+                f"{', tool=' + a.tool if a.tool else ''})"
+                for a in allowed
+            )
+        else:
+            allowed_str = "  (none defined for this lane)"
+
+        prior_tail = "\n".join(self._lines[-self.recent_tail:]) or "(empty)"
+        message_brief = _serialize_input_message(msg, agent_name)
+
+        prompt = (
+            "You are the Process Supervisor for a multi-agent coffee shop. "
+            f"The agent `{agent_name}` just attempted an action that violates "
+            "the process model. Your job is to write a short corrective note "
+            "the agent will read and follow on its next attempt.\n\n"
+            "## Process you are enforcing\n"
+            f"{self.description}\n\n"
+            "## What the agent is allowed to do next\n"
+            f"These are the ONLY activities `{agent_name}` may perform from "
+            "its current process state. Refer to them by their snake_case slug.\n\n"
+            f"{allowed_str}\n\n"
+            "## What just happened\n"
+            f"Violation reason: {violation_reason}\n"
+            f"Recent process log (most recent last):\n{prior_tail}\n\n"
+            "The agent's rejected attempt was:\n"
+            ">>>\n"
+            f"{message_brief}\n"
+            ">>>\n\n"
+            "## Write your critique\n"
+            "In 2-4 sentences of plain prose:\n"
+            "1. Name what the agent attempted (paraphrasing the rejected text).\n"
+            "2. Explain which step of the process it skipped or contradicted.\n"
+            "3. Tell the agent which of the allowed-next-activities it should "
+            "perform instead, and what information it still needs.\n\n"
+            "Do NOT output `Execution:`, `Termination:`, or `Violation:` lines — "
+            "those are for the passive log, not for this critique. Do NOT quote "
+            "the rejected attempt verbatim (the runner already shows it). Speak "
+            "directly to the agent in the second person."
+        )
+
+        result = self.llm.invoke(prompt)
+        text = result.content if hasattr(result, "content") else str(result)
+        if isinstance(text, list):
+            text = next(
+                (c.get("text", "") for c in text if isinstance(c, dict) and c.get("type") == "text"),
+                "",
+            )
+        text = str(text or "").strip()
+        return text
+

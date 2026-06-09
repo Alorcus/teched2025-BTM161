@@ -42,6 +42,7 @@ AGENT_ACCENT: dict[str, str] = {
 ROW_CREATORS: set[EventType] = {
     EventType.CUSTOMER_MESSAGE,
     EventType.AGENT_MESSAGE,
+    EventType.AGENT_MESSAGE_REJECTED,
     EventType.TOOL_CALL,
     EventType.TOOL_RESULT,
 }
@@ -206,6 +207,25 @@ table.trace td.supervisor.violation   { color: #b3261e; font-weight: 600; }
 table.trace td.supervisor.violation   .badge { background: #fde8e6; color: #b3261e; }
 table.trace td.supervisor.dash        { color: #b8a99c; }
 
+table.trace td.owned.rejected {
+  color: #b3261e;
+  background: #fff7f6;
+}
+table.trace td.owned.rejected .body { color: #b3261e; opacity: 0.95; }
+table.trace td.owned.rejected .body .reason {
+  display: block;
+  margin-top: 4px;
+  font-style: italic;
+  color: #8a3a34;
+  opacity: 1;
+  font-size: 11.5px;
+}
+table.trace td.owned.rejected .meta .kind {
+  background: #fde8e6 !important;
+  color: #b3261e !important;
+}
+table.trace td.owned.rejected::before { background: #b3261e !important; }
+
 table.trace tbody:empty + .trace-empty,
 .trace-empty {
   padding: 28px 14px;
@@ -341,6 +361,16 @@ class TraceTablePanel:
             return (agent or "customer"), "say", html.escape(_truncate(ev.content or ""))
         if et == EventType.AGENT_MESSAGE:
             return agent, "say", html.escape(_truncate(ev.content or ""))
+        if et == EventType.AGENT_MESSAGE_REJECTED:
+            body = html.escape(_truncate(ev.content or ""))
+            reason = ev.rejection_reason or ""
+            if reason:
+                body += (
+                    '<span class="reason">'
+                    f'⚠ supervisor: {html.escape(_truncate(reason, 600))}'
+                    '</span>'
+                )
+            return agent, "rejected", body
         if et == EventType.TOOL_CALL:
             name = html.escape(ev.tool_name or "")
             args_text = ""
@@ -351,6 +381,18 @@ class TraceTablePanel:
                 except (TypeError, ValueError):
                     args_text = str(ev.tool_args)
             args_text = html.escape(_truncate(args_text, 240))
+            # Tool calls produced by a rejected AIMessage are emitted with a
+            # synthetic supervisor_line starting with "REJECTED" so the
+            # operator sees the structured args even though no execution
+            # happened. Render them in the rejected lane.
+            sup = ev.supervisor_line or ""
+            if sup.startswith("REJECTED"):
+                body = (
+                    f'<code class="tool">{name}</code>'
+                    f'<span class="args"> {args_text}</span>'
+                    f'<span class="reason">⚠ not executed (supervisor rejected)</span>'
+                )
+                return agent, "rejected", body
             return agent, "tool", (
                 f'<code class="tool">{name}</code>'
                 f'<span class="args"> {args_text}</span>'
@@ -440,9 +482,13 @@ class TraceTablePanel:
                         "say": "msg",
                         "tool": "tool call",
                         "result": "tool result",
+                        "rejected": "rejected",
                     }.get(row["kind"], row["kind"])
+                    cell_classes = "owned"
+                    if row["kind"] == "rejected":
+                        cell_classes += " rejected"
                     parts.append(
-                        f'<td class="owned" style="{style}" title="{title}">'
+                        f'<td class="{cell_classes}" style="{style}" title="{title}">'
                         f'<span class="meta">'
                         f'<span class="ts">{title}</span>'
                         f'<span class="kind">{kind_label}</span>'

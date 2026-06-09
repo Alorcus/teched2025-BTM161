@@ -235,8 +235,25 @@ def _dispatch_to_log(
              f'<span style="color:{color}"><b>{event.agent_name}</b></span>: '
              f'{_truncate(event.content)}')
 
+    elif event.event_type == EventType.AGENT_MESSAGE_REJECTED:
+        reason_short = ""
+        if event.rejection_reason:
+            reason_short = (
+                f' <span style="color:#8a3a34;font-style:italic;font-size:11px;">'
+                f'⚠ {_truncate(event.rejection_reason, 160)}</span>'
+            )
+        _log(log_entries, conversation_log,
+             f'<span style="color:#b3261e"><b>{event.agent_name} [REJECTED]</b></span>: '
+             f'<span style="color:#b3261e;">'
+             f'{_truncate(event.content)}</span>{reason_short}')
+
     elif event.event_type == EventType.TOOL_CALL:
-        if event.tool_name == "start_preparation":
+        # Render-only TOOL_CALL events for rejected attempts have a
+        # supervisor_line tagged "REJECTED"; do NOT trigger physical side
+        # effects (coffee machine, etc.) for those.
+        if (event.supervisor_line or "").startswith("REJECTED"):
+            pass
+        elif event.tool_name == "start_preparation":
             coffee_machine_panel.start_brewing("coffee")
 
     elif event.event_type == EventType.TOOL_RESULT:
@@ -292,7 +309,24 @@ def create_trace_dashboard():
     """Per-session factory. Each browser session gets its own runner + panel."""
     pn.extension(sizing_mode="stretch_both")
 
-    shop = CoffeeShop()
+    import os
+    from src.config import CoffeeShopConfig
+    # Start from the dataclass defaults; only OVERRIDE if env vars are set.
+    # This keeps src/config.py as the single source of truth for the default.
+    cfg_kwargs = {}
+    env_active = os.getenv("PROCESS_SUPERVISOR_ACTIVE")
+    if env_active is not None:
+        cfg_kwargs["process_supervisor_active"] = env_active.lower() in ("1", "true", "yes")
+    env_retries = os.getenv("PROCESS_SUPERVISOR_MAX_RETRIES")
+    if env_retries is not None:
+        cfg_kwargs["process_supervisor_max_retries"] = int(env_retries)
+    cfg = CoffeeShopConfig(**cfg_kwargs)
+    logger.info(
+        "active supervisor: %s (max_retries=%d)",
+        "ON" if cfg.process_supervisor_active else "OFF",
+        cfg.process_supervisor_max_retries,
+    )
+    shop = CoffeeShop(config=cfg)
     shop.open_shop()
     event_bus = EventBus()
     runner = ConversationRunner(shop, event_bus)

@@ -15,7 +15,7 @@ from src.dashboard.trace_table_panel import COLUMN_KEYS, TraceTablePanel
 
 def _ev(et, agent=None, content="", tool_name=None, tool_args=None,
         tool_result=None, target_agent=None, supervisor_line=None,
-        handoff_context=None):
+        handoff_context=None, rejection_reason=None):
     return DashboardEvent(
         event_type=et,
         agent_name=agent or "",
@@ -27,6 +27,7 @@ def _ev(et, agent=None, content="", tool_name=None, tool_args=None,
         handoff_context=handoff_context,
         target_agent=target_agent,
         supervisor_line=supervisor_line,
+        rejection_reason=rejection_reason,
     )
 
 
@@ -200,6 +201,34 @@ class DashboardEventSupervisorFieldTests(unittest.TestCase):
             supervisor_line="Execution:A01:identify_customer_request",
         )
         self.assertEqual(ev.supervisor_line, "Execution:A01:identify_customer_request")
+
+
+class RejectedRowTests(unittest.TestCase):
+    """AGENT_MESSAGE_REJECTED is a row-creator and renders as a 'rejected'
+    kind with the supervisor critique inlined."""
+
+    def test_rejected_event_creates_row(self):
+        p = TraceTablePanel()
+        p.handle_event(_ev(
+            EventType.AGENT_MESSAGE_REJECTED,
+            agent="order_agent",
+            content="off-topic chitchat",
+            supervisor_line="Violation:llm_unknown_activity_A99",
+            rejection_reason="You should call process_order instead.",
+        ))
+        p.flush()
+
+        self.assertEqual(len(p.rows), 1)
+        self.assertEqual(p.rows[0]["kind"], "rejected")
+        self.assertEqual(p.rows[0]["event_type"], "AGENT_MESSAGE_REJECTED")
+
+        html = p.panel().object
+        self.assertIn("owned rejected", html)  # CSS class set
+        self.assertIn("off-topic chitchat", html)
+        self.assertIn("supervisor:", html)  # critique caption
+        self.assertIn("call process_order instead", html)
+        # supervisor cell still classifies the line as Violation.
+        self.assertIn("supervisor violation", html)
 
 
 if __name__ == "__main__":

@@ -117,6 +117,49 @@ class TestProcessSupervisorLLM(unittest.TestCase):
                 f"expected Violation, got: {head!r}",
             )
 
+    def test_critique_returns_grounded_prose(self):
+        """supervisor.critique(off-model AIMessage, ...) returns natural-language
+        guidance grounded in the allowed activities and is NOT a verdict line."""
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as td:
+            sup = self._make_supervisor(Path(td))
+            off_msg = AIMessage(
+                content=(
+                    "I just finished writing a haiku about autumn leaves "
+                    "drifting through the park at sunset."
+                )
+            )
+            text = sup.critique(
+                off_msg,
+                agent_name="order_agent",
+                violation_reason="llm_unknown_activity_A99",
+            )
+
+            self.assertIsInstance(text, str)
+            self.assertGreater(len(text), 20, "critique should be more than a stub")
+            for prefix in ("Execution:", "Termination:", "Violation:"):
+                self.assertFalse(
+                    text.lstrip().startswith(prefix),
+                    f"critique must not look like a passive-log line, got: {text!r}",
+                )
+            # Either the slug or display name of one of the allowed activities
+            # for order_agent should appear, demonstrating BPMN grounding.
+            allowed = sup.allowed_next_activities_for("order_agent")
+            self.assertTrue(allowed, "model should expose order_agent activities")
+            tokens = []
+            for a in allowed:
+                tokens.append(a.name)
+                if a.display_name:
+                    tokens.append(a.display_name)
+                    tokens.append(a.display_name.lower())
+            self.assertTrue(
+                any(t in text or t.lower() in text.lower() for t in tokens),
+                f"critique should reference at least one allowed activity; "
+                f"got: {text!r}; tokens checked: {tokens}",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
