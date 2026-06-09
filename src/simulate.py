@@ -99,12 +99,19 @@ def main():
                 coffee_shop_logger.info(f"{prefix} {body}")
 
         trace_ids = shop.run_conversation(
-            scenario_index=idx, 
+            scenario_index=idx,
             on_message=on_message,
             reset_inventory_first=args.reset_inventory,
         )
         all_trace_ids.extend(trace_ids)
         coffee_shop_logger.info(f"Trace IDs: {trace_ids}")
+
+        feedback = shop.get_last_feedback()
+        if feedback:
+            score = feedback["feedback_score"]
+            reason = feedback["feedback_reason"]
+            valid_marker = "" if feedback["valid"] else " (fallback)"
+            coffee_shop_logger.info(f"Customer feedback [{score:.2f}{valid_marker}]: {reason}")
 
     coffee_shop_logger.info(f"=== Simulation complete: {len(all_trace_ids)} trace(s) generated ===")
 
