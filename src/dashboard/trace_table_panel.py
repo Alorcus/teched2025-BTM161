@@ -81,7 +81,7 @@ table.trace {
   border-collapse: separate;
   border-spacing: 0;
   width: 100%;
-  font-size: 12.5px;
+  font-size: 12px;
   color: #2b211d;
   table-layout: fixed;
 }
@@ -94,11 +94,11 @@ table.trace thead th {
   -webkit-backdrop-filter: saturate(140%) blur(6px);
   text-align: left;
   font-weight: 600;
-  font-size: 11.5px;
+  font-size: 11px;
   letter-spacing: 0.4px;
   text-transform: uppercase;
   color: #6b574c;
-  padding: 11px 14px 10px 14px;
+  padding: 8px 12px 7px 12px;
   border-bottom: 1px solid #e6dcd2;
 }
 table.trace thead th .accent {
@@ -115,11 +115,11 @@ table.trace tbody tr { transition: background-color 120ms ease; }
 table.trace tbody tr:hover { background: #fbf6ef; }
 table.trace tbody tr + tr td { border-top: 1px solid #f1ebe4; }
 table.trace td {
-  padding: 10px 14px;
+  padding: 4px 10px;
   vertical-align: top;
-  white-space: pre-wrap;
+  white-space: normal;
   word-break: break-word;
-  line-height: 1.45;
+  line-height: 1.3;
   color: #3a2f2a;
 }
 table.trace td.empty {
@@ -132,71 +132,98 @@ table.trace td.empty {
 table.trace td.owned {
   position: relative;
   background: #ffffff;
+  cursor: pointer;
 }
 table.trace td.owned::before {
   content: "";
   position: absolute;
-  left: 0; top: 8px; bottom: 8px;
+  left: 0; top: 4px; bottom: 4px;
   width: 3px;
   border-radius: 0 2px 2px 0;
   background: var(--accent, #cccccc);
 }
 table.trace td.owned .meta {
-  display: block;
-  font-size: 10.5px;
+  display: inline;
+  font-size: 10px;
   color: #9b897c;
-  margin-bottom: 3px;
+  margin-right: 6px;
   letter-spacing: 0.3px;
+  white-space: nowrap;
 }
 table.trace td.owned .meta .ts { font-variant-numeric: tabular-nums; }
 table.trace td.owned .meta .kind {
   display: inline-block;
-  margin-left: 6px;
-  padding: 1px 6px;
-  border-radius: 8px;
+  margin-left: 4px;
+  padding: 0 5px;
+  border-radius: 7px;
   background: var(--accent-soft, #f3eee9);
   color: var(--accent, #6b574c);
-  font-size: 10px;
+  font-size: 9px;
   letter-spacing: 0.3px;
   text-transform: uppercase;
   font-weight: 600;
+  vertical-align: 1px;
 }
-table.trace td.owned .body { color: #2b211d; }
+table.trace td.owned .body {
+  color: #2b211d;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+table.trace td.owned.expanded .body {
+  display: block;
+  -webkit-line-clamp: unset;
+  overflow: visible;
+  white-space: pre-wrap;
+}
 table.trace td.owned .body code.tool {
   font-family: ui-monospace, "SFMono-Regular", "JetBrains Mono", Menlo, Consolas, monospace;
-  font-size: 11.5px;
+  font-size: 11px;
   color: #4E342E;
   background: #f5efe8;
-  padding: 1px 5px;
-  border-radius: 4px;
+  padding: 0 4px;
+  border-radius: 3px;
 }
 table.trace td.owned .body .args {
   font-family: ui-monospace, "SFMono-Regular", "JetBrains Mono", Menlo, Consolas, monospace;
-  font-size: 11px;
+  font-size: 10.5px;
   color: #6b574c;
-  white-space: pre-wrap;
   word-break: break-all;
 }
-table.trace td.owned .body .arrow { color: #9b897c; margin-right: 4px; }
+table.trace td.owned.expanded .body .args { white-space: pre-wrap; }
+table.trace td.owned .body .arrow { color: #9b897c; margin-right: 3px; }
 
 table.trace td.supervisor {
   font-family: ui-monospace, "SFMono-Regular", "JetBrains Mono", Menlo, Consolas, monospace;
-  font-size: 11px;
+  font-size: 10.5px;
   color: #8d7b6f;
   background: #fcfaf7;
   border-left: 1px solid #efe7de;
-  white-space: pre-wrap;
+  white-space: normal;
   word-break: break-word;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  cursor: pointer;
+}
+table.trace td.supervisor.expanded {
+  display: table-cell;
+  -webkit-line-clamp: unset;
+  overflow: visible;
+  white-space: pre-wrap;
 }
 table.trace td.supervisor .badge {
   display: inline-block;
-  padding: 2px 8px;
+  padding: 1px 6px;
   border-radius: 999px;
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.5px;
   text-transform: uppercase;
-  margin-right: 6px;
+  margin-right: 5px;
   vertical-align: 1px;
 }
 table.trace td.supervisor.execution   { color: #2e7d32; }
@@ -305,6 +332,33 @@ _SCROLL_SCRIPT = """
     if (!el.__tracePersistInstalled) {
       el.__tracePersistInstalled = true;
       el.addEventListener('scroll', () => snapshot(el), { passive: true });
+    }
+
+    if (!el.__traceExpandInstalled) {
+      el.__traceExpandInstalled = true;
+      window.__traceExpanded = window.__traceExpanded || new Set();
+      el.addEventListener('click', (ev) => {
+        const cell = ev.target.closest('td.owned, td.supervisor');
+        if (!cell || !el.contains(cell)) return;
+        if (cell.classList.contains('dash')) return;
+        const key = cell.getAttribute('data-cell');
+        if (!key) return;
+        if (window.__traceExpanded.has(key)) {
+          window.__traceExpanded.delete(key);
+          cell.classList.remove('expanded');
+        } else {
+          window.__traceExpanded.add(key);
+          cell.classList.add('expanded');
+        }
+      });
+    }
+
+    // Re-apply expand state after every re-render.
+    if (window.__traceExpanded) {
+      for (const key of window.__traceExpanded) {
+        const cell = el.querySelector('td[data-cell="' + key + '"]');
+        if (cell) cell.classList.add('expanded');
+      }
     }
   }
 
@@ -428,36 +482,37 @@ class TraceTablePanel:
             )
         return agent, "say", html.escape(_truncate(ev.content or ""))
 
-    def _supervisor_cell(self, line: str | None) -> str:
+    def _supervisor_cell(self, line: str | None, idx: int) -> str:
         if not line:
             return '<td class="supervisor dash">&mdash;</td>'
         # Strip the " | <serialized message>" suffix that the supervisor log
         # appends — the trace table already shows the message in its own column.
         verdict = line.split(" | ", 1)[0].strip()
+        dc = f'data-cell="r{idx}-sup"'
         if verdict.startswith("Violation:"):
             return (
-                '<td class="supervisor violation">'
+                f'<td class="supervisor violation" {dc}>'
                 '<span class="badge">VIOL</span>'
                 f'{html.escape(verdict[len("Violation:"):])}'
                 '</td>'
             )
         if verdict.startswith("Execution:"):
             return (
-                '<td class="supervisor execution">'
+                f'<td class="supervisor execution" {dc}>'
                 '<span class="badge">EXEC</span>'
                 f'{html.escape(verdict[len("Execution:"):])}'
                 '</td>'
             )
         if verdict.startswith("Termination:"):
             return (
-                '<td class="supervisor termination">'
+                f'<td class="supervisor termination" {dc}>'
                 '<span class="badge">TERM</span>'
                 f'{html.escape(verdict[len("Termination:"):])}'
                 '</td>'
             )
         if verdict.startswith("NonAction:"):
             return f'<td class="supervisor dash">{html.escape(verdict)}</td>'
-        return f'<td class="supervisor">{html.escape(verdict)}</td>'
+        return f'<td class="supervisor" {dc}>{html.escape(verdict)}</td>'
 
     def _render_html(self) -> str:
         parts: list[str] = [_TABLE_CSS]
@@ -465,7 +520,7 @@ class TraceTablePanel:
         parts.append('<h2>Trace Table</h2>')
         parts.append(
             '<p class="subtitle">One row per message, in global order. '
-            'Each agent owns its own column; never two messages on the same row.</p>'
+            'Each agent owns its own column. Click a cell to expand truncated content.</p>'
         )
         parts.append('<div class="trace-scroll">')
         # Column widths (CSS table-layout: fixed) — equal-ish for agents,
@@ -488,7 +543,7 @@ class TraceTablePanel:
         parts.append('<th>Process Supervisor</th></tr></thead>')
 
         parts.append('<tbody>')
-        for row in self.rows:
+        for idx, row in enumerate(self.rows):
             owner = row["agent"]
             accent = AGENT_ACCENT.get(owner, "#cccccc")
             parts.append('<tr>')
@@ -509,7 +564,8 @@ class TraceTablePanel:
                     if row["kind"] == "rejected":
                         cell_classes += " rejected"
                     parts.append(
-                        f'<td class="{cell_classes}" style="{style}" title="{title}">'
+                        f'<td class="{cell_classes}" data-cell="r{idx}-body" '
+                        f'style="{style}" title="{title}">'
                         f'<span class="meta">'
                         f'<span class="ts">{title}</span>'
                         f'<span class="kind">{kind_label}</span>'
@@ -519,7 +575,7 @@ class TraceTablePanel:
                     )
                 else:
                     parts.append('<td class="empty"></td>')
-            parts.append(self._supervisor_cell(row.get("supervisor_line")))
+            parts.append(self._supervisor_cell(row.get("supervisor_line"), idx))
             parts.append('</tr>')
         parts.append('</tbody>')
         parts.append('</table>')
