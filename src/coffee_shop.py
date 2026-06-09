@@ -81,7 +81,7 @@ class CoffeeShop:
         config_dir = setup_dir(self.config.setup_name)
         self.agent_repo = AgentRepo(config_dir)
         self.catalog = Catalog(config_dir)
-        self.log_sink = JsonlLogSink(self.config.guardrail_log_path)
+        self.log_sink = JsonlLogSink(self.config.guardrail_log_path, setup_name=self.config.setup_name)
         _coffee_shop_logger.info(
             f"control plane: setup={self.config.setup_name} | agents={self.agent_repo.ids()} | log={self.config.guardrail_log_path}"
         )
