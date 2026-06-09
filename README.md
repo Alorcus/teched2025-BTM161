@@ -48,34 +48,58 @@ Three self-contained exercises:
 2. [`2_Exceptions_agentic_coffee_shop`](2_Exceptions_agentic_coffee_shop.ipynb) — explore agent behavior under errors and edge cases, producing process variants.
 3. [`3_Extending_agentic_coffee_shop`](3_Extending_agentic_coffee_shop.ipynb) — experiment with agent definitions (instructions, tools) and observe how changes affect the multi-agent system.
 
+## Setups
+
+A **setup** is a self-contained configuration of agents, guardrails, and guidelines under `config/setups/<name>/`. Both `simulate` and `dashboard` require a setup to be selected.
+
+**Selecting a setup** (env var supersedes the flag):
+
+```bash
+poetry run simulate --setup baseline --traces 1
+COFFEE_SHOP_SETUP=baseline poetry run dashboard
+poetry run simulate --list-setups          # show available setups
+```
+
+**Adding a new setup** — copy `baseline` and edit the YAMLs:
+
+```bash
+cp -r config/setups/baseline config/setups/my_setup
+# edit config/setups/my_setup/agents/*.yaml and guidelines/*.yaml
+poetry run simulate --setup my_setup --traces 1
+```
+
 ## Headless Simulation
 
 Generate traces in bulk without the Jupyter UI using the `simulate` CLI. It runs the Customer Agent against the swarm and captures MLflow traces for each conversation.
 
+All examples below require `--setup <name>` (or `COFFEE_SHOP_SETUP=<name>`); see [Setups](#setups).
+
 ```bash
 # Run a single trace with a random scenario
-poetry run simulate
+poetry run simulate --setup baseline
 
 # Run 10 traces cycling through all 4 scenarios
-poetry run simulate --traces 10 --scenario all
+poetry run simulate --setup baseline --traces 10 --scenario all
 
-# Run 5 traces with a specific scenario (index 0–3)
-poetry run simulate --traces 5 --scenario 2
+# Run 5 traces with a specific scenario (index 0-3)
+poetry run simulate --setup baseline --traces 5 --scenario 2
 
-# Minimal output
-poetry run simulate --traces 10 --quiet
+# Run with minimal output (no message content)
+poetry run simulate --setup baseline --traces 10 --quiet
 
-# Debug logging
-poetry run simulate --traces 5 --log-level debug
+# Run with debug logging enabled
+poetry run simulate --setup baseline --traces 5 --log-level debug
 
 # Export event logs after simulation
-poetry run simulate --traces 10 --scenario all --export-logs
+poetry run simulate --setup baseline --traces 10 --scenario all --export-logs
 ```
 
 ### Arguments
 
 | Argument        | Default   | Description                                                                       |
 | --------------- | --------- | --------------------------------------------------------------------------------- |
+| `--setup NAME`  | required  | Setup under `config/setups/` to load (env `COFFEE_SHOP_SETUP` supersedes)         |
+| `--list-setups` | off       | List available setups and exit                                                    |
 | `--traces N`    | `1`       | Number of conversation traces to run                                              |
 | `--scenario`    | `random`  | Scenario index (`0`–`3`), `all` (round-robin), or `random`                        |
 | `--export-logs` | off       | Generate event log CSV after simulation                                           |
@@ -104,10 +128,10 @@ Switch between pages via the tabs in the header.
 
 ```bash
 # Start the dashboard (opens browser at http://localhost:5006)
-poetry run dashboard
+poetry run dashboard --setup baseline
 
-# Or via Panel CLI
-panel serve src/dashboard/app.py --show --port 5006
+# Or via env var
+COFFEE_SHOP_SETUP=baseline poetry run dashboard
 ```
 
 ### Features

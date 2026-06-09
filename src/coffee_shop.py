@@ -1,10 +1,10 @@
 import logging
-from pathlib import Path
 
 import mlflow
 
 from src.llm import create_chat_llm
 from src.config import CoffeeShopConfig
+from src.setups import setup_dir
 from src.agents.order_store import create_order_store_engine, set_engine
 from src.agents import (
     init_db, reset_inventory, set_item_stock, get_all_inventory,
@@ -74,13 +74,16 @@ class CoffeeShop:
                 mlflow.create_experiment(self.config.mlflow_experiment)
             mlflow.set_experiment(self.config.mlflow_experiment)
 
-        config_dir = Path(self.config.control_plane_config_dir)
+        if not self.config.setup_name:
+            raise ValueError(
+                "CoffeeShopConfig.setup_name is required — pick a setup from config/setups/"
+            )
+        config_dir = setup_dir(self.config.setup_name)
         self.agent_repo = AgentRepo(config_dir)
         self.catalog = Catalog(config_dir)
         self.log_sink = JsonlLogSink(self.config.guardrail_log_path)
         _coffee_shop_logger.info(
-            "control plane: agents=%s | log=%s",
-            self.agent_repo.ids(), self.config.guardrail_log_path,
+            f"control plane: setup={self.config.setup_name} | agents={self.agent_repo.ids()} | log={self.config.guardrail_log_path}"
         )
 
         self.app = build_coffee_shop_graph(llm, self.agent_repo, self.catalog, self.log_sink)

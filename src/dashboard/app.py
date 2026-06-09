@@ -1,10 +1,18 @@
 import logging
+import argparse
+import atexit
+import html as html_mod
+import json
+import sys
+import time
 
 import panel as pn
 
 from .interaction import create_observatory_dashboard
 from .metrics import create_metrics_dashboard
 from src.coffee_shop import CoffeeShop
+from src.config import CoffeeShopConfig
+from src.setups import list_setups, resolve_setup_name, setup_dir
 from src.agents import CUSTOMER_SCENARIOS, build_default_prompt
 from src.agents.barista_agent import start_coffee_machine, stop_coffee_machine
 from .event_bus import EventBus, EventType, DashboardEvent
@@ -47,10 +55,10 @@ def _agent_registry_from_repo(shop: CoffeeShop) -> dict[str, dict]:
     }
 
 
-def create_dashboard():
+def create_dashboard(setup_name: str):
     pn.extension(sizing_mode="stretch_both")
 
-    shop = CoffeeShop()
+    shop = CoffeeShop(CoffeeShopConfig(setup_name=setup_name))
     shop.open_shop()
     event_bus = EventBus()
     runner = ConversationRunner(shop, event_bus)
@@ -180,7 +188,7 @@ def create_dashboard():
     )
 
     template = pn.template.FastListTemplate(
-        title="Coffee Shop Agent Observatory",
+        title=f"Coffee Shop Agent Observatory — {setup_name}",
         sidebar=[sidebar],
         main=[pn.Column(
             pn.Row(
@@ -338,6 +346,29 @@ def _truncate(text: str, max_len: int = 150) -> str:
 
 def main():
     """Start the multi-page Panel dashboard server."""
+    parser = argparse.ArgumentParser(description="Coffee Shop Agent Observatory dashboard")
+    parser.add_argument(
+        "--setup", type=str, default=None,
+        help="Name of the setup under config/setups/ to load. The COFFEE_SHOP_SETUP env var supersedes this flag.",
+    )
+    parser.add_argument(
+        "--list-setups", action="store_true",
+        help="List available setups under config/setups/ and exit.",
+    )
+    args = parser.parse_args()
+
+    if args.list_setups:
+        names = list_setups()
+        if not names:
+            print("(no setups found in config/setups/)")
+        else:
+            for name in names:
+                print(name)
+        return 0
+
+    setup_name = resolve_setup_name(args.setup)
+    setup_dir(setup_name)  # fail fast if the setup is missing or malformed
+
     logging.getLogger("bokeh.server.views.static_handler").setLevel(logging.WARNING)
     logging.getLogger("tornado.access").setLevel(logging.WARNING)
 
@@ -349,14 +380,17 @@ def main():
 
     pn.serve(
         routes,
+        lambda: create_dashboard(setup_name),
         port=5006,
         show=False,
-        title="Coffee Shop Agent Observatory",
+        title=f"Coffee Shop Agent Observatory — {setup_name}",
     )
     print("Dashboard running at http://localhost:5006")
     print("  - Observatory: http://localhost:5006/")
     print("  - Metrics:     http://localhost:5006/metrics")
+    print(f"Dashboard running at http://localhost:5006 (setup: {setup_name})")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
