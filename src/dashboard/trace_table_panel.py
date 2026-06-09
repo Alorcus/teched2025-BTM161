@@ -239,34 +239,62 @@ table.trace tbody:empty + .trace-empty,
 
 
 # Inline scroll-preservation script. Re-emitted at the END of every
-# _render_html() output (after .trace-scroll exists in the DOM) so it can
-# locate and reposition the freshly-rendered scroller.
+# _render_html() output. Each Panel re-render destroys and recreates
+# .trace-scroll via container.innerHTML, so we restore scrollTop from a
+# window-level cache (.__traceScrollState) on every render.
+#
+# Panel renders into a Bokeh shadow DOM, so document.querySelector(...) from
+# the outer document never finds .trace-scroll. We have to locate the
+# enclosing root (Document or ShadowRoot) the script is attached to and
+# query within that. document.currentScript is unreliable for scripts that
+# Panel re-injects via replaceChild, so we fall back to walking every
+# shadow root in the page.
 _SCROLL_SCRIPT = """
 <script>
 (function () {
   const NEAR = 32;
   const KEY = '__traceScrollState';
 
-  function findScroller() {
-    // The script is appended at the end of .trace-wrap; walk upward until we
-    // find the wrap, then descend to .trace-scroll.
-    let s = document.currentScript;
-    let root = s ? s.parentNode : null;
-    while (root && root.querySelector && !root.querySelector('.trace-scroll')) {
-      root = root.parentNode;
+  function findScrollerRoot() {
+    const cs = document.currentScript;
+    if (cs && cs.getRootNode) {
+      const r = cs.getRootNode();
+      if (r && r.querySelector && r.querySelector('.trace-scroll')) return r;
     }
-    return root && root.querySelector ? root.querySelector('.trace-scroll') : null;
+    const stack = [document];
+    while (stack.length) {
+      const node = stack.pop();
+      if (node.querySelector && node.querySelector('.trace-scroll')) return node;
+      const all = node.querySelectorAll ? node.querySelectorAll('*') : [];
+      for (const el of all) {
+        if (el.shadowRoot) stack.push(el.shadowRoot);
+      }
+    }
+    return null;
+  }
+
+  function snapshot(el) {
+    if (!el || !el.isConnected) return;
+    const slack = el.scrollHeight - el.scrollTop - el.clientHeight;
+    window[KEY] = {
+      atBottom: slack <= NEAR,
+      top: el.scrollTop,
+    };
   }
 
   function apply() {
-    const el = findScroller();
+    const root = findScrollerRoot();
+    if (!root) return;
+    const el = root.querySelector('.trace-scroll');
     if (!el) return;
+
     const prev = window[KEY];
     if (prev && typeof prev.atBottom === 'boolean') {
       if (prev.atBottom) {
         el.scrollTop = el.scrollHeight;
       } else if (typeof prev.top === 'number') {
-        el.scrollTop = prev.top;
+        const max = Math.max(0, el.scrollHeight - el.clientHeight);
+        el.scrollTop = Math.min(prev.top, max);
       }
     } else {
       // First render: park at bottom so newest messages are visible.
@@ -276,19 +304,12 @@ _SCROLL_SCRIPT = """
 
     if (!el.__tracePersistInstalled) {
       el.__tracePersistInstalled = true;
-      el.addEventListener('scroll', () => {
-        const slack = el.scrollHeight - el.scrollTop - el.clientHeight;
-        window[KEY] = {
-          atBottom: slack <= NEAR,
-          top: el.scrollTop,
-        };
-      }, { passive: true });
+      el.addEventListener('scroll', () => snapshot(el), { passive: true });
     }
   }
 
-  // Run after the current parse tick so the .trace-scroll element is in the
-  // DOM tree, then again on the next animation frame so layout has settled
-  // (scrollHeight reads correctly even with images / fonts mid-load).
+  // Run synchronously, then again on rAF so layout has settled and
+  // scrollHeight is accurate.
   apply();
   if (typeof requestAnimationFrame === 'function') {
     requestAnimationFrame(apply);
