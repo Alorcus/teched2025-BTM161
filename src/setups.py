@@ -4,6 +4,7 @@ A "setup" is a self-contained `config/setups/<name>/` directory containing
 `agents/*.yaml` and `guidelines/*.yaml`. Setups are not merged or composed —
 each one is a complete, independent configuration of the coffee shop.
 """
+
 import os
 from pathlib import Path
 

@@ -1,24 +1,24 @@
-import requests
 import json
+import logging
 import os
 import signal
-import subprocess
 import socket
+import subprocess
 import sys
-import time
 import threading
-from typing import Dict
-import logging
+import time
 from pathlib import Path
+from typing import Dict
 
+import requests
 from langchain_core.tools import tool
 
+from .order_state_machine import InvalidTransitionError, state_machine
+from .order_store import load_order
 from .shared_components import (
     OrderIdSchema,
     OrderStatus,
 )
-from .order_store import load_order
-from .order_state_machine import state_machine, InvalidTransitionError
 
 logger = logging.getLogger("coffee_shop.barista_agent")
 

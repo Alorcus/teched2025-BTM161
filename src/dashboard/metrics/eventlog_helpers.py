@@ -2,9 +2,13 @@ import polars as pl
 
 from src.trace_processing.eventlog_conversion import ObjectCentricEventlog
 
-
-_AGENT_OR_USER = ["order_agent", "inventory_agent", "barista_agent",
-                  "customer_service_agent", "user"]
+_AGENT_OR_USER = [
+    "order_agent",
+    "inventory_agent",
+    "barista_agent",
+    "customer_service_agent",
+    "user",
+]
 _PER_ORDER_SCHEMA = {
     "order_id": pl.Utf8,
     "full_duration_s": pl.Float64,
@@ -33,8 +37,19 @@ def flat_event_table(ocel: ObjectCentricEventlog) -> pl.DataFrame:
         df = df.with_columns(
             [pl.col(c).cast(t, strict=False) for c, t in target_schema.items()]
         ).with_columns(pl.lit(event_type).alias("ocel_type"))
-        frames.append(df.select(["ocel_id", "ocel_type", "ocel_time",
-                                 "duration", "input_tokens", "response_tokens", "model"]))
+        frames.append(
+            df.select(
+                [
+                    "ocel_id",
+                    "ocel_type",
+                    "ocel_time",
+                    "duration",
+                    "input_tokens",
+                    "response_tokens",
+                    "model",
+                ]
+            )
+        )
     if not frames:
         return pl.DataFrame(schema={**target_schema, "ocel_type": pl.Utf8})
     return pl.concat(frames)
@@ -44,8 +59,9 @@ def agent_event_counts(ocel: ObjectCentricEventlog) -> pl.DataFrame:
     """Count events handled by each agent."""
     agent_objects = ocel.objects.filter(pl.col("ocel_type").str.contains("agent"))
     return (
-        ocel.event_object
-        .join(agent_objects, left_on="ocel_object_id", right_on="ocel_id", how="inner")
+        ocel.event_object.join(
+            agent_objects, left_on="ocel_object_id", right_on="ocel_id", how="inner"
+        )
         .group_by("ocel_type")
         .agg(pl.len().alias("event_count"))
         .sort("event_count", descending=True)
@@ -62,9 +78,13 @@ def handover_matrix(ocel: ObjectCentricEventlog) -> pl.DataFrame:
     def _split(s: str):
         parts = s.split("_handover_")
         return (
-            parts[0].replace("_", " ").title(),
-            parts[1].replace("_", " ").title(),
-        ) if len(parts) == 2 else (s, "")
+            (
+                parts[0].replace("_", " ").title(),
+                parts[1].replace("_", " ").title(),
+            )
+            if len(parts) == 2
+            else (s, "")
+        )
 
     pairs = [_split(t) for t in handover_events["ocel_type"].to_list()]
     return (
@@ -90,8 +110,9 @@ def per_order_durations(ocel: ObjectCentricEventlog) -> pl.DataFrame:
 
     suffix_re = "_(?:" + "|".join(_AGENT_OR_USER) + ")$"
     eo = (
-        ocel.event_object
-        .join(case_objs, left_on="ocel_object_id", right_on="ocel_id", how="inner")
+        ocel.event_object.join(
+            case_objs, left_on="ocel_object_id", right_on="ocel_id", how="inner"
+        )
         .select(
             pl.col("ocel_event_id"),
             pl.col("ocel_object_id").str.replace(suffix_re, "").alias("order_id"),
@@ -102,12 +123,18 @@ def per_order_durations(ocel: ObjectCentricEventlog) -> pl.DataFrame:
     if events.is_empty():
         return pl.DataFrame(schema=_PER_ORDER_SCHEMA)
 
-    is_handover_to_cs = pl.col("ocel_type").str.ends_with("_handover_customer_service_agent")
-    is_handover_from_cs = pl.col("ocel_type").str.starts_with("customer_service_agent_handover_")
+    is_handover_to_cs = pl.col("ocel_type").str.ends_with(
+        "_handover_customer_service_agent"
+    )
+    is_handover_from_cs = pl.col("ocel_type").str.starts_with(
+        "customer_service_agent_handover_"
+    )
 
     t = pl.col("ocel_time")
     boundaries = events.group_by("order_id").agg(
-        t.filter(pl.col("ocel_type") == "user_prompt").min().alias("first_user_prompt_t"),
+        t.filter(pl.col("ocel_type") == "user_prompt")
+        .min()
+        .alias("first_user_prompt_t"),
         t.filter(pl.col("ocel_type") == "process_order").min().alias("process_order_t"),
         t.max().alias("last_event_t"),
         t.filter(pl.col("ocel_type") == "place_on_tray").max().alias("last_tray_t"),

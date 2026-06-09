@@ -59,7 +59,11 @@ class Gateway:
             allowed_handovers=list(self.allowed_handovers),
         )
 
-        applicable = [guardrail for guardrail in self.guardrails if guardrail.applies_to(tool_name)]
+        applicable = [
+            guardrail
+            for guardrail in self.guardrails
+            if guardrail.applies_to(tool_name)
+        ]
         applicable.sort(key=lambda g: 0 if g.type == "hard" else 1)
 
         verdicts: list[Verdict] = []
@@ -87,26 +91,28 @@ class Gateway:
         return decision
 
     def _log_decision(self, decision: CallDecision, thread_id: str | None) -> None:
-        self.log_sink.append({
-            "event_type": "gateway_decision",
-            "snapshot_id": self.snapshot_id,
-            "agent_id": self.agent_id,
-            "thread_id": thread_id,
-            "tool_name": decision.tool_name,
-            "tool_call_id": decision.tool_call_id,
-            "tool_args": decision.tool_args,
-            "final_decision": decision.final_decision.value,
-            "verdicts": [
-                {
-                    "guardrail_name": v.guardrail_name,
-                    "guardrail_type": v.guardrail_type,
-                    "effect": v.effect.value,
-                    "reason_internal": v.reason_internal,
-                    "reason_for_llm": v.reason_for_llm,
-                }
-                for v in decision.verdicts
-            ],
-        })
+        self.log_sink.append(
+            {
+                "event_type": "gateway_decision",
+                "snapshot_id": self.snapshot_id,
+                "agent_id": self.agent_id,
+                "thread_id": thread_id,
+                "tool_name": decision.tool_name,
+                "tool_call_id": decision.tool_call_id,
+                "tool_args": decision.tool_args,
+                "final_decision": decision.final_decision.value,
+                "verdicts": [
+                    {
+                        "guardrail_name": v.guardrail_name,
+                        "guardrail_type": v.guardrail_type,
+                        "effect": v.effect.value,
+                        "reason_internal": v.reason_internal,
+                        "reason_for_llm": v.reason_for_llm,
+                    }
+                    for v in decision.verdicts
+                ],
+            }
+        )
 
     def log_tool_execution(
         self,
@@ -116,13 +122,15 @@ class Gateway:
         result_preview: str,
         thread_id: str | None = None,
     ) -> None:
-        self.log_sink.append({
-            "event_type": "tool_execution",
-            "snapshot_id": self.snapshot_id,
-            "agent_id": self.agent_id,
-            "thread_id": thread_id,
-            "tool_call_id": tool_call_id,
-            "tool_name": tool_name,
-            "tool_args": tool_args,
-            "result_preview": result_preview[:500],
-        })
+        self.log_sink.append(
+            {
+                "event_type": "tool_execution",
+                "snapshot_id": self.snapshot_id,
+                "agent_id": self.agent_id,
+                "thread_id": thread_id,
+                "tool_call_id": tool_call_id,
+                "tool_name": tool_name,
+                "tool_args": tool_args,
+                "result_preview": result_preview[:500],
+            }
+        )

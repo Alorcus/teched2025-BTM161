@@ -36,9 +36,9 @@ class HardGuardrail(Guardrail):
     def eval(self, context: GuardrailContext) -> Verdict:
         if self.predicate is None:
             raise ValueError(f"HardGuardrail {self.name!r} has no predicate")
-        
+
         verdict = self.predicate(context)
-        
+
         if not self.enforce and verdict.effect == Effect.DENY:
             verdict.effect = Effect.FLAG
         if not verdict.guardrail_name:

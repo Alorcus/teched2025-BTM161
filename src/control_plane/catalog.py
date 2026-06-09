@@ -4,6 +4,7 @@ Guardrails and guidelines are both loaded from YAML at construction time.
 Predicate logic itself lives in `predicates.py` and is referenced by name
 through `PREDICATE_REGISTRY` so YAML stays declarative.
 """
+
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -24,7 +25,9 @@ def _build_guardrail(entry: dict) -> Guardrail:
     guardrail_id = entry["id"]
     guardrail_type = entry.get("type")
     if guardrail_type not in ("hard", "soft"):
-        raise ValueError(f"Guardrail {guardrail_id!r}: type must be 'hard' or 'soft', got {guardrail_type!r}")
+        raise ValueError(
+            f"Guardrail {guardrail_id!r}: type must be 'hard' or 'soft', got {guardrail_type!r}"
+        )
 
     common = {
         "name": guardrail_id,
@@ -44,7 +47,9 @@ def _build_guardrail(entry: dict) -> Guardrail:
         predicate_args = entry.get("predicate_args") or None
         callable_ = PREDICATE_REGISTRY[predicate_name]
         predicate = callable_(**predicate_args) if predicate_args else callable_
-        return HardGuardrail(predicate=predicate, predicate_args=predicate_args, **common)
+        return HardGuardrail(
+            predicate=predicate, predicate_args=predicate_args, **common
+        )
 
     return SoftGuardrail(
         judge_prompt=entry.get("judge_prompt", ""),

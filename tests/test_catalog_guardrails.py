@@ -1,4 +1,5 @@
 """Tests for YAML-driven guardrail loading in `Catalog`."""
+
 import tempfile
 import unittest
 from pathlib import Path
@@ -42,14 +43,20 @@ guardrails:
             self.assertEqual(gr.predicate_args, {"max_pct": 10})
 
             ctx_under = GuardrailContext(
-                agent_id="order_agent", tool_name="calculate_total",
-                tool_args={"discount_percent": 5}, state={}, allowed_handovers=[],
+                agent_id="order_agent",
+                tool_name="calculate_total",
+                tool_args={"discount_percent": 5},
+                state={},
+                allowed_handovers=[],
             )
             self.assertEqual(gr.eval(ctx_under).effect, Effect.ALLOW)
 
             ctx_over = GuardrailContext(
-                agent_id="order_agent", tool_name="calculate_total",
-                tool_args={"discount_percent": 25}, state={}, allowed_handovers=[],
+                agent_id="order_agent",
+                tool_name="calculate_total",
+                tool_args={"discount_percent": 25},
+                state={},
+                allowed_handovers=[],
             )
             self.assertEqual(gr.eval(ctx_over).effect, Effect.FLAG)
 
@@ -100,7 +107,9 @@ guardrails:
 """
         with tempfile.TemporaryDirectory() as d:
             setup = _write_setup(Path(d), yaml_text)
-            with self.assertRaisesRegex(ValueError, "unknown predicate 'does_not_exist'"):
+            with self.assertRaisesRegex(
+                ValueError, "unknown predicate 'does_not_exist'"
+            ):
                 Catalog(setup)
 
     def test_invalid_type_raises(self):

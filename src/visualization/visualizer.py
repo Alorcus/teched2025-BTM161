@@ -2,14 +2,15 @@ import re
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from pm4py.objects.ocel.importer.jsonocel import importer as jsonocel_importer
-from pm4py.algo.discovery.ocel.ocdfg import algorithm as ocdfg_discovery
-from pm4py.visualization.ocel.ocdfg import visualizer as ocdfg_visualizer
+
 import pm4py.visualization.ocel.ocdfg.variants.classic as _dfg_classic
 import pm4py.visualization.ocel.ocpn.variants.wo_decoration as _pn_classic
+from pm4py.algo.discovery.ocel.ocdfg import algorithm as ocdfg_discovery
 from pm4py.algo.discovery.ocel.ocpn import algorithm as ocpn_discovery
-from pm4py.visualization.ocel.ocpn import visualizer as ocpn_visualizer
+from pm4py.objects.ocel.importer.jsonocel import importer as jsonocel_importer
 from pm4py.visualization.ocel.eve_to_obj_types import visualizer as eto_visualizer
+from pm4py.visualization.ocel.ocdfg import visualizer as ocdfg_visualizer
+from pm4py.visualization.ocel.ocpn import visualizer as ocpn_visualizer
 
 
 def force_bw(gviz):
@@ -64,7 +65,7 @@ def force_translucent_nodes(gviz, alpha_hex="E6"):
 
 @contextmanager
 def _patched_colors(color_map: dict[str, str]):
-    """ Patch color in dfg and pn modules."""
+    """Patch color in dfg and pn modules."""
     original_dfg = _dfg_classic.ot_to_color
     original_pn = _pn_classic.ot_to_color
 
@@ -124,6 +125,7 @@ class VisualizationConfig:
             },
         )
     """
+
     ocel_path: Path
     out_dir: Path
     export_format: str = "svg"

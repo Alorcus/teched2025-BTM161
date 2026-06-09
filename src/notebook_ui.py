@@ -1,53 +1,55 @@
-import json
 import html
-import uuid
+import json
 import logging
+import uuid
 
-import mlflow
 import ipywidgets as widgets
-from IPython.display import display, clear_output, HTML
+import mlflow
+from IPython.display import HTML, clear_output, display
 
-from src.llm import normalize_content
-from src.styles import ENHANCED_CSS
-from src.stream import extract_messages
 from src.agents import (
-    reset_inventory, set_item_stock, get_all_inventory,
     CUSTOMER_SCENARIOS,
+    get_all_inventory,
+    reset_inventory,
+    set_item_stock,
 )
+from src.llm import normalize_content
+from src.stream import extract_messages
+from src.styles import ENHANCED_CSS
 
 logger = logging.getLogger("coffee_shop.notebook_ui")
 
 AGENT_CONFIG = {
-    'order_agent': {
-        'icon': '\U0001f4dd',
-        'name': 'Order Agent',
-        'color': '#2196F3',
-        'bg_color': '#E3F2FD'
+    "order_agent": {
+        "icon": "\U0001f4dd",
+        "name": "Order Agent",
+        "color": "#2196F3",
+        "bg_color": "#E3F2FD",
     },
-    'inventory_agent': {
-        'icon': '\U0001f4e6',
-        'name': 'Inventory Agent',
-        'color': '#FF9800',
-        'bg_color': '#FFF3E0'
+    "inventory_agent": {
+        "icon": "\U0001f4e6",
+        "name": "Inventory Agent",
+        "color": "#FF9800",
+        "bg_color": "#FFF3E0",
     },
-    'barista_agent': {
-        'icon': '☕',
-        'name': 'Barista Agent',
-        'color': '#8BC34A',
-        'bg_color': '#F1F8E9'
+    "barista_agent": {
+        "icon": "☕",
+        "name": "Barista Agent",
+        "color": "#8BC34A",
+        "bg_color": "#F1F8E9",
     },
-    'customer_service_agent': {
-        'icon': '\U0001f4ac',
-        'name': 'Customer Service',
-        'color': '#E91E63',
-        'bg_color': '#FCE4EC'
+    "customer_service_agent": {
+        "icon": "\U0001f4ac",
+        "name": "Customer Service",
+        "color": "#E91E63",
+        "bg_color": "#FCE4EC",
     },
-    'user': {
-        'icon': '\U0001f464',
-        'name': 'You',
-        'color': '#424242',
-        'bg_color': '#F5F5F5'
-    }
+    "user": {
+        "icon": "\U0001f464",
+        "name": "You",
+        "color": "#424242",
+        "bg_color": "#F5F5F5",
+    },
 }
 
 
@@ -80,16 +82,21 @@ class NotebookUI:
     def _should_show_message_in_silent_mode(self, agent_name, content):
         return agent_name in self.agent_config
 
-    def _format_message_bubble(self, agent_name, content, is_user=False, is_important=True):
+    def _format_message_bubble(
+        self, agent_name, content, is_user=False, is_important=True
+    ):
         if is_user:
-            config = self.agent_config.get('user')
+            config = self.agent_config.get("user")
         else:
-            config = self.agent_config.get(agent_name, {
-                'icon': '\U0001f916',
-                'name': "Uses tool: " + agent_name.replace('_', ' ').title(),
-                'color': '#666666',
-                'bg_color': '#F0F0F0'
-            })
+            config = self.agent_config.get(
+                agent_name,
+                {
+                    "icon": "\U0001f916",
+                    "name": "Uses tool: " + agent_name.replace("_", " ").title(),
+                    "color": "#666666",
+                    "bg_color": "#F0F0F0",
+                },
+            )
 
         formatted_content = self._format_content_for_display(content)
 
@@ -99,30 +106,30 @@ class NotebookUI:
             padding: 0;
             display: flex;
             align-items: flex-start;
-            {'justify-content: flex-end;' if is_user else 'justify-content: flex-start;'}
-        " class="chat-bubble {'chat-verbose-message' if not is_important else ''}" >
+            {"justify-content: flex-end;" if is_user else "justify-content: flex-start;"}
+        " class="chat-bubble {"chat-verbose-message" if not is_important else ""}" >
             <div style="
                 max-width: 70%;
-                background-color: {config['bg_color']};
-                background: linear-gradient(135deg, {config['bg_color']}44, {config['bg_color']}ff);
-                border: 2px solid {config['color']};
+                background-color: {config["bg_color"]};
+                background: linear-gradient(135deg, {config["bg_color"]}44, {config["bg_color"]}ff);
+                border: 2px solid {config["color"]};
                 border-radius: 15px;
                 padding: 12px 16px;
                 margin: 0 10px;
                 position: relative;
-                {'order: 1;' if is_user else ''}
+                {"order: 1;" if is_user else ""}
             ">
                 <div style="
                     font-weight: bold;
-                    color: {config['color']};
+                    color: {config["color"]};
                     font-size: 12px;
                     margin-bottom: 5px;
                     display: flex;
                     align-items: center;
                     gap: 5px;
                 ">
-                    <span style="font-size: 16px;">{config['icon']}</span>
-                    {config['name']}
+                    <span style="font-size: 16px;">{config["icon"]}</span>
+                    {config["name"]}
                 </div>
                 <div style="
                     color: #333;
@@ -169,18 +176,22 @@ class NotebookUI:
                 content = sm.content
                 if sm.is_agent_reply:
                     self._last_agent_message = content
-                is_important = self._should_show_message_in_silent_mode(agent_name, content)
-                bubble_html = self._format_message_bubble(agent_name, content, is_user=False, is_important=is_important)
+                is_important = self._should_show_message_in_silent_mode(
+                    agent_name, content
+                )
+                bubble_html = self._format_message_bubble(
+                    agent_name, content, is_user=False, is_important=is_important
+                )
                 display(HTML(bubble_html))
                 self._auto_scroll_to_bottom()
 
     def _set_processing_status(self, is_processing=True):
-        if hasattr(self, 'status_indicator'):
+        if hasattr(self, "status_indicator"):
             if is_processing:
                 self.status_indicator.value = "⏳ Agents are working on your request..."
                 self.text_input.disabled = True
                 self.send_button.disabled = True
-                if hasattr(self, 'restock_button'):
+                if hasattr(self, "restock_button"):
                     self.restock_button.disabled = True
                 for button in self.scenario_buttons.children:
                     button.disabled = True
@@ -190,7 +201,7 @@ class NotebookUI:
                     self.text_input.disabled = False
                     self.send_button.disabled = False
                     self.text_input.focus()
-                if hasattr(self, 'restock_button'):
+                if hasattr(self, "restock_button"):
                     self.restock_button.disabled = False
                 for button in self.scenario_buttons.children:
                     button.disabled = False
@@ -200,24 +211,30 @@ class NotebookUI:
         self._set_processing_status(True)
 
         with output_widget:
-            user_bubble = self._format_message_bubble('user', prompt, is_user=True, is_important=True)
+            user_bubble = self._format_message_bubble(
+                "user", prompt, is_user=True, is_important=True
+            )
             display(HTML(user_bubble))
 
         try:
             self._stream_to_output(
                 self.app.stream(
-                    {"messages": [{"role": "user", "content": prompt}], "handoff_context": None},
+                    {
+                        "messages": [{"role": "user", "content": prompt}],
+                        "handoff_context": None,
+                    },
                     config,
                     subgraphs=True,
                 ),
-                output_widget
+                output_widget,
             )
             if self.mlflow_enabled:
                 trace_id = mlflow.get_last_active_trace_id()
                 self.traces_of_latest_conversations.append(trace_id)
 
                 with output_widget:
-                    display(HTML(f"""
+                    display(
+                        HTML(f"""
                     <div style="
                         font-size: 10px;
                         color: #999;
@@ -228,7 +245,8 @@ class NotebookUI:
                     ">
                         Trace ID: {trace_id}
                     </div>
-                    """))
+                    """)
+                    )
 
         finally:
             self._set_processing_status(False)
@@ -237,10 +255,13 @@ class NotebookUI:
             next_msg = self.customer_agent.respond_to(self._last_agent_message)
             self._last_agent_message = None
             if next_msg:
-                self.continue_conversation_interactive(thread_id, next_msg, output_widget)
+                self.continue_conversation_interactive(
+                    thread_id, next_msg, output_widget
+                )
             else:
                 with output_widget:
-                    display(HTML("""
+                    display(
+                        HTML("""
                     <div style="
                         background: linear-gradient(45deg, #e8f5e9, #a5d6a7);
                         border: 1px solid #4caf50;
@@ -252,7 +273,8 @@ class NotebookUI:
                     ">
                         \U0001f916 Auto Customer conversation complete.
                     </div>
-                    """))
+                    """)
+                    )
 
     def _inject_enhanced_css(self):
         css_style = f"<style>\n{ENHANCED_CSS}\n</style>"
@@ -264,38 +286,41 @@ class NotebookUI:
         css_widget = self._inject_enhanced_css()
 
         self.output = widgets.Output()
-        self.output.add_class('chat-output')
+        self.output.add_class("chat-output")
 
         self.text_input = widgets.Text(
-            value='',
-            placeholder='Type your message to the coffee shop here...',
-            description='Your Message:',
-            style={'description_width': '100px'},
-            layout=widgets.Layout(width='100%', height='35px')
+            value="",
+            placeholder="Type your message to the coffee shop here...",
+            description="Your Message:",
+            style={"description_width": "100px"},
+            layout=widgets.Layout(width="100%", height="35px"),
         )
-        self.text_input.add_class('default-input')
+        self.text_input.add_class("default-input")
         self.text_input.on_submit(self._on_text_submit)
 
         self.send_button = widgets.Button(
-            description='Send \U0001f4e4',
-            button_style='primary',
-            layout=widgets.Layout(width="120px", height='35px'),
-            tooltip='Send your message'
+            description="Send \U0001f4e4",
+            button_style="primary",
+            layout=widgets.Layout(width="120px", height="35px"),
+            tooltip="Send your message",
         )
-        self.send_button.add_class('default-button')
+        self.send_button.add_class("default-button")
         self.send_button.on_click(self._on_send_button_clicked)
 
         self.status_indicator = widgets.HTML(value="")
-        self.status_indicator.add_class('status-indicator')
+        self.status_indicator.add_class("status-indicator")
 
         input_line = widgets.HBox([self.text_input, self.send_button])
-        input_line.add_class('input-line')
+        input_line.add_class("input-line")
 
-        input_area = widgets.HBox([
-            input_line,
-            self.status_indicator,
-        ], layout=widgets.Layout(justify_content='flex-start', align_items='center'))
-        input_area.add_class('input-area')
+        input_area = widgets.HBox(
+            [
+                input_line,
+                self.status_indicator,
+            ],
+            layout=widgets.Layout(justify_content="flex-start", align_items="center"),
+        )
+        input_area.add_class("input-area")
 
         controls_header = widgets.HTML("""
         <div>
@@ -305,77 +330,86 @@ class NotebookUI:
         """)
 
         self.new_conversation_button = widgets.Button(
-            description='\U0001f195 New Chat',
-            button_style='info',
-            tooltip='Start a new conversation'
+            description="\U0001f195 New Chat",
+            button_style="info",
+            tooltip="Start a new conversation",
         )
-        self.new_conversation_button.add_class('default-button')
+        self.new_conversation_button.add_class("default-button")
         self.new_conversation_button.on_click(self._on_new_conversation_clicked)
 
         self.customer_agent_toggle = widgets.ToggleButton(
             value=self.customer_agent_enabled,
-            description='\U0001f916 Auto Customer: Off',
+            description="\U0001f916 Auto Customer: Off",
             disabled=False,
-            button_style='',
-            tooltip='Toggle automatic customer agent that guides the conversation'
+            button_style="",
+            tooltip="Toggle automatic customer agent that guides the conversation",
         )
-        self.customer_agent_toggle.add_class('default-button')
-        self.customer_agent_toggle.observe(self._on_customer_agent_toggle_changed, names='value')
+        self.customer_agent_toggle.add_class("default-button")
+        self.customer_agent_toggle.observe(
+            self._on_customer_agent_toggle_changed, names="value"
+        )
 
         self.customer_scenario_dropdown = widgets.Dropdown(
-            options=[(f'Scenario {i+1}: {s[:40]}...', i) for i, s in enumerate(CUSTOMER_SCENARIOS)],
+            options=[
+                (f"Scenario {i + 1}: {s[:40]}...", i)
+                for i, s in enumerate(CUSTOMER_SCENARIOS)
+            ],
             value=0,
-            description='Scenario:',
-            style={'description_width': '65px'},
-            layout=widgets.Layout(width='320px'),
+            description="Scenario:",
+            style={"description_width": "65px"},
+            layout=widgets.Layout(width="320px"),
             disabled=True,
         )
-        self.customer_scenario_dropdown.observe(self._on_customer_scenario_changed, names='value')
+        self.customer_scenario_dropdown.observe(
+            self._on_customer_scenario_changed, names="value"
+        )
 
         self.verbose_toggle = widgets.ToggleButton(
             value=self.verbose_mode,
-            description='\U0001f50a Verbose: On',
+            description="\U0001f50a Verbose: On",
             disabled=False,
-            button_style='info',
-            tooltip='Toggle between verbose (show all messages) and silent (hide tool calls) modes'
+            button_style="info",
+            tooltip="Toggle between verbose (show all messages) and silent (hide tool calls) modes",
         )
-        self.verbose_toggle.add_class('default-button')
-        self.verbose_toggle.observe(self._on_verbose_toggle_changed, names='value')
+        self.verbose_toggle.add_class("default-button")
+        self.verbose_toggle.observe(self._on_verbose_toggle_changed, names="value")
 
         self.log_level_dropdown = widgets.Dropdown(
             options=[
-                ('Debug', logging.DEBUG),
-                ('Info', logging.INFO),
-                ('Warning', logging.WARNING),
-                ('Error', logging.ERROR),
+                ("Debug", logging.DEBUG),
+                ("Info", logging.INFO),
+                ("Warning", logging.WARNING),
+                ("Error", logging.ERROR),
             ],
             value=logging.INFO,
-            description='Log Level:',
-            style={'description_width': '65px'},
-            layout=widgets.Layout(width='180px'),
+            description="Log Level:",
+            style={"description_width": "65px"},
+            layout=widgets.Layout(width="180px"),
         )
-        self.log_level_dropdown.observe(self._on_log_level_changed, names='value')
+        self.log_level_dropdown.observe(self._on_log_level_changed, names="value")
 
         self.restock_button = widgets.Button(
-            description='\U0001f504 Restock All Items',
-            button_style='success',
-            tooltip='Restock all items to full inventory'
+            description="\U0001f504 Restock All Items",
+            button_style="success",
+            tooltip="Restock all items to full inventory",
         )
-        self.restock_button.add_class('default-button')
+        self.restock_button.add_class("default-button")
         self.restock_button.on_click(self._on_restock_clicked)
 
-        controls_buttons = widgets.HBox([
-            self.new_conversation_button,
-            self.verbose_toggle,
-            self.restock_button,
-            self.customer_agent_toggle,
-            self.log_level_dropdown,
-            self.customer_scenario_dropdown,
-        ])
-        controls_buttons.add_class('button-group')
+        controls_buttons = widgets.HBox(
+            [
+                self.new_conversation_button,
+                self.verbose_toggle,
+                self.restock_button,
+                self.customer_agent_toggle,
+                self.log_level_dropdown,
+                self.customer_scenario_dropdown,
+            ]
+        )
+        controls_buttons.add_class("button-group")
 
         controls_area = widgets.VBox([controls_header, controls_buttons])
-        controls_area.add_class('scenario-area')
+        controls_area.add_class("scenario-area")
 
         scenario_header = widgets.HTML("""
         <div>
@@ -386,54 +420,66 @@ class NotebookUI:
 
         scenario_buttons = []
         if success_only:
-            scenario_buttons.append(widgets.Button(
-                description='\U0001f6cd️ Successful Order',
-                button_style='success',
-                tooltip='Order 2 lattes and a croissant'
-            ))
+            scenario_buttons.append(
+                widgets.Button(
+                    description="\U0001f6cd️ Successful Order",
+                    button_style="success",
+                    tooltip="Order 2 lattes and a croissant",
+                )
+            )
         else:
-            scenario_buttons.append(widgets.Button(
-                description='❓ Menu Issue',
-                button_style='warning',
-                tooltip='Order item not on menu'
-            ))
-            scenario_buttons.append(widgets.Button(
-                description='\U0001f4e6 Inventory Issue',
-                button_style='danger',
-                tooltip='Order item out of stock'
-            ))
-            scenario_buttons.append(widgets.Button(
-                description='\U0001f61e Complaint',
-                button_style='info',
-                tooltip='Complain about a drink'
-            ))
+            scenario_buttons.append(
+                widgets.Button(
+                    description="❓ Menu Issue",
+                    button_style="warning",
+                    tooltip="Order item not on menu",
+                )
+            )
+            scenario_buttons.append(
+                widgets.Button(
+                    description="\U0001f4e6 Inventory Issue",
+                    button_style="danger",
+                    tooltip="Order item out of stock",
+                )
+            )
+            scenario_buttons.append(
+                widgets.Button(
+                    description="\U0001f61e Complaint",
+                    button_style="info",
+                    tooltip="Complain about a drink",
+                )
+            )
 
         for button in scenario_buttons:
-            button.add_class('scenario-button')
-            button.add_class('default-button')
+            button.add_class("scenario-button")
+            button.add_class("default-button")
 
         self.scenario_buttons = widgets.HBox(scenario_buttons)
-        self.scenario_buttons.add_class('button-group')
+        self.scenario_buttons.add_class("button-group")
 
         for i, button in enumerate(self.scenario_buttons.children):
-            button.on_click(lambda b, scenario=i: self._on_scenario_clicked(b, scenario))
+            button.on_click(
+                lambda b, scenario=i: self._on_scenario_clicked(b, scenario)
+            )
 
         scenario_area = widgets.VBox([scenario_header, self.scenario_buttons])
-        scenario_area.add_class('scenario-area')
+        scenario_area.add_class("scenario-area")
 
         controls = widgets.HBox([scenario_area, controls_area])
-        controls.add_class('controls-container')
+        controls.add_class("controls-container")
 
         chat_area = widgets.VBox([self.output, input_area])
-        chat_area.add_class('chat-area')
+        chat_area.add_class("chat-area")
 
-        interface = widgets.VBox([
-            css_widget,
-            widgets.HTML('<div style="margin: 5px 0;"></div>'),
-            chat_area,
-            controls
-        ])
-        interface.add_class('chat-container')
+        interface = widgets.VBox(
+            [
+                css_widget,
+                widgets.HTML('<div style="margin: 5px 0;"></div>'),
+                chat_area,
+                controls,
+            ]
+        )
+        interface.add_class("chat-container")
 
         self._start_new_conversation()
 
@@ -442,8 +488,10 @@ class NotebookUI:
     def _on_send_button_clicked(self, button):
         message = self.text_input.value.strip()
         if message:
-            self.continue_conversation_interactive(self.current_thread_id, message, self.output)
-            self.text_input.value = ''
+            self.continue_conversation_interactive(
+                self.current_thread_id, message, self.output
+            )
+            self.text_input.value = ""
 
     def _on_text_submit(self, text_widget):
         self._on_send_button_clicked(None)
@@ -476,7 +524,11 @@ class NotebookUI:
             display(HTML(welcome_html))
 
         if self.customer_agent_enabled and self.customer_agent:
-            scenario_idx = self.customer_scenario_dropdown.value if hasattr(self, 'customer_scenario_dropdown') else None
+            scenario_idx = (
+                self.customer_scenario_dropdown.value
+                if hasattr(self, "customer_scenario_dropdown")
+                else None
+            )
             self.customer_agent.reset(scenario_idx)
             first_msg = self.customer_agent.get_initial_message()
             self.text_input.value = first_msg
@@ -520,7 +572,7 @@ class NotebookUI:
                 </div>
                 """
 
-            inventory_html += '</div></div>'
+            inventory_html += "</div></div>"
             display(HTML(inventory_html))
 
     def _on_scenario_clicked(self, button, scenario):
@@ -535,10 +587,10 @@ class NotebookUI:
             scenarios = [
                 "I want 1 croissant and 1 piece of cheesecake",
                 "Can I get 2 muffins please?",
-                "I'm not happy with my latte, it tastes bitter and wrong"
+                "I'm not happy with my latte, it tastes bitter and wrong",
             ]
             if scenario == 1:
-                set_item_stock('muffin', 0)
+                set_item_stock("muffin", 0)
                 with self.output:
                     restock_html = """
                     <div class="chat-notification">
@@ -549,7 +601,7 @@ class NotebookUI:
                 self.display_current_inventory()
             else:
                 inventory = get_all_inventory()
-                if inventory.get('muffin') and inventory['muffin'].stock == 0:
+                if inventory.get("muffin") and inventory["muffin"].stock == 0:
                     with self.output:
                         restock_html = """
                         <div class="chat-notification">
@@ -557,37 +609,37 @@ class NotebookUI:
                         </div>
                         """
                         display(HTML(restock_html))
-                    set_item_stock('muffin', 12)
+                    set_item_stock("muffin", 12)
 
         self.text_input.value = scenarios[scenario]
         self._on_send_button_clicked(None)
 
     def _on_log_level_changed(self, change):
-        logging.getLogger("coffee_shop").setLevel(change['new'])
+        logging.getLogger("coffee_shop").setLevel(change["new"])
 
     def _on_verbose_toggle_changed(self, change):
-        self.verbose_mode = change['new']
+        self.verbose_mode = change["new"]
         if self.verbose_mode:
-            self.output.remove_class('chat-silent-mode')
-            self.verbose_toggle.description = '\U0001f50a Verbose: On'
-            self.verbose_toggle.button_style = 'info'
+            self.output.remove_class("chat-silent-mode")
+            self.verbose_toggle.description = "\U0001f50a Verbose: On"
+            self.verbose_toggle.button_style = "info"
         else:
-            self.verbose_toggle.description = '\U0001f507 Verbose: Off'
-            self.verbose_toggle.button_style = 'warning'
-            self.output.add_class('chat-silent-mode')
+            self.verbose_toggle.description = "\U0001f507 Verbose: Off"
+            self.verbose_toggle.button_style = "warning"
+            self.output.add_class("chat-silent-mode")
 
     def _on_customer_agent_toggle_changed(self, change):
-        self.customer_agent_enabled = change['new']
+        self.customer_agent_enabled = change["new"]
         if self.customer_agent_enabled:
-            self.customer_agent_toggle.description = '\U0001f916 Auto Customer: On'
-            self.customer_agent_toggle.button_style = 'success'
+            self.customer_agent_toggle.description = "\U0001f916 Auto Customer: On"
+            self.customer_agent_toggle.button_style = "success"
             self.customer_scenario_dropdown.disabled = False
             self.text_input.disabled = True
             self.send_button.disabled = True
             self._start_new_conversation()
         else:
-            self.customer_agent_toggle.description = '\U0001f916 Auto Customer: Off'
-            self.customer_agent_toggle.button_style = ''
+            self.customer_agent_toggle.description = "\U0001f916 Auto Customer: Off"
+            self.customer_agent_toggle.button_style = ""
             self.customer_scenario_dropdown.disabled = True
             self.text_input.disabled = False
             self.send_button.disabled = False

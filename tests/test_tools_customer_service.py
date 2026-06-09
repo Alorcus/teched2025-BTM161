@@ -2,15 +2,20 @@
 
 Validates offer_refund, offer_partial_refund, get_alternatives, and estimate_prep_time.
 """
+
 import json
 import unittest
 
-from src.agents.order_store import (
-    init_db, reset_inventory, save_order, load_order, set_item_stock,
-)
-from src.agents.customer_service_agent import offer_refund, offer_partial_refund
-from src.agents.inventory_agent import get_alternatives
 from src.agents.barista_agent import estimate_prep_time
+from src.agents.customer_service_agent import offer_partial_refund, offer_refund
+from src.agents.inventory_agent import get_alternatives
+from src.agents.order_store import (
+    init_db,
+    load_order,
+    reset_inventory,
+    save_order,
+    set_item_stock,
+)
 from src.agents.shared_components import Order, OrderItem, OrderStatus
 
 
@@ -54,10 +59,12 @@ class TestOfferPartialRefund(unittest.TestCase):
 
     def test_50_percent_refund(self):
         order_id = _create_order_with_total(20.00)
-        result = offer_partial_refund.invoke({
-            "order_id": order_id,
-            "refund_percent": 50,
-        })
+        result = offer_partial_refund.invoke(
+            {
+                "order_id": order_id,
+                "refund_percent": 50,
+            }
+        )
         data = json.loads(result)
 
         self.assertAlmostEqual(data["refund_amount"], 10.00, places=2)
@@ -69,10 +76,12 @@ class TestOfferPartialRefund(unittest.TestCase):
 
     def test_25_percent_refund(self):
         order_id = _create_order_with_total(8.00)
-        result = offer_partial_refund.invoke({
-            "order_id": order_id,
-            "refund_percent": 25,
-        })
+        result = offer_partial_refund.invoke(
+            {
+                "order_id": order_id,
+                "refund_percent": 25,
+            }
+        )
         data = json.loads(result)
 
         self.assertAlmostEqual(data["refund_amount"], 2.00, places=2)
@@ -126,7 +135,9 @@ class TestEstimatePrepTime(unittest.TestCase):
             customer="Test",
             status=OrderStatus.INVENTORY_CONFIRMED,
             total=4.0,
-            items=[OrderItem(name="latte", quantity=1, price=4.0, size=None, extras=[])],
+            items=[
+                OrderItem(name="latte", quantity=1, price=4.0, size=None, extras=[])
+            ],
         )
         save_order(order)
         result = estimate_prep_time.invoke({"order_id": order.order_id_str})
@@ -140,7 +151,9 @@ class TestEstimatePrepTime(unittest.TestCase):
             total=10.0,
             items=[
                 OrderItem(name="latte", quantity=2, price=8.0, size=None, extras=[]),
-                OrderItem(name="croissant", quantity=1, price=2.75, size=None, extras=[]),
+                OrderItem(
+                    name="croissant", quantity=1, price=2.75, size=None, extras=[]
+                ),
             ],
         )
         save_order(order)
@@ -154,7 +167,9 @@ class TestEstimatePrepTime(unittest.TestCase):
             status=OrderStatus.INVENTORY_CONFIRMED,
             total=20.0,
             items=[
-                OrderItem(name="espresso", quantity=5, price=12.5, size=None, extras=[]),
+                OrderItem(
+                    name="espresso", quantity=5, price=12.5, size=None, extras=[]
+                ),
             ],
         )
         save_order(order)

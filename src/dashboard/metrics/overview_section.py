@@ -25,9 +25,9 @@ class OverviewSection:
     def _build_header(self) -> pn.pane.HTML:
         return pn.pane.HTML(
             f'<div style="font-size:11px;color:#666;margin-bottom:4px;padding:2px 0;">'
-            f'<b>Log:</b> {self._log_path.name}  ·  '
-            f'{self._ocel.events.height:,} events  ·  '
-            f'{self._ocel.objects.height:,} objects</div>',
+            f"<b>Log:</b> {self._log_path.name}  ·  "
+            f"{self._ocel.events.height:,} events  ·  "
+            f"{self._ocel.objects.height:,} objects</div>",
             sizing_mode="stretch_width",
         )
 
@@ -37,10 +37,15 @@ class OverviewSection:
         non_handover = events_flat.filter(~is_handover)
         handover = events_flat.filter(is_handover)
         token_events = events_flat.filter(
-            pl.col("input_tokens").is_not_null() & pl.col("response_tokens").is_not_null()
+            pl.col("input_tokens").is_not_null()
+            & pl.col("response_tokens").is_not_null()
         )
-        input_tokens = int(token_events["input_tokens"].sum()) if token_events.height else 0
-        response_tokens = int(token_events["response_tokens"].sum()) if token_events.height else 0
+        input_tokens = (
+            int(token_events["input_tokens"].sum()) if token_events.height else 0
+        )
+        response_tokens = (
+            int(token_events["response_tokens"].sum()) if token_events.height else 0
+        )
 
         cards = [
             ("Total Events", f"{self._ocel.events.height:,}"),

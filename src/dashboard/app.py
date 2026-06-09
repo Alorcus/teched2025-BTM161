@@ -1,5 +1,5 @@
-import logging
 import argparse
+import logging
 import sys
 
 import panel as pn
@@ -13,13 +13,18 @@ from .trace_app import create_trace_dashboard
 
 def main():
     """Start the multi-page Panel dashboard server."""
-    parser = argparse.ArgumentParser(description="Coffee Shop Agent Observatory dashboard")
+    parser = argparse.ArgumentParser(
+        description="Coffee Shop Agent Observatory dashboard"
+    )
     parser.add_argument(
-        "--setup", type=str, default=None,
+        "--setup",
+        type=str,
+        default=None,
         help="Name of the setup under config/setups/ to load. The COFFEE_SHOP_SETUP env var supersedes this flag.",
     )
     parser.add_argument(
-        "--list-setups", action="store_true",
+        "--list-setups",
+        action="store_true",
         help="List available setups under config/setups/ and exit.",
     )
     args = parser.parse_args()
@@ -41,9 +46,9 @@ def main():
 
     # Multi-page routing
     routes = {
-        '/': lambda: create_observatory_dashboard(setup_name),
-        '/metrics': create_metrics_dashboard,
-        '/trace': create_trace_dashboard,
+        "/": lambda: create_observatory_dashboard(setup_name),
+        "/metrics": create_metrics_dashboard,
+        "/trace": create_trace_dashboard,
     }
 
     pn.serve(
