@@ -19,10 +19,10 @@ terminates the source agent's currently-running activity. The decision is
 written FIRST so the log reads as "what the supervisor decided | the
 evidence it saw".
 
-Decision engine: one small LLM call per message, given the process
-description (loaded from docs/order-process-flow.md when available), the
-recent log tail, and the new message. Output must match a strict regex;
-unparseable output is recorded as a Violation.
+Decision engine: one small LLM call per message, given the activity
+catalog (loaded from the process-model YAML), the recent log tail, and
+the new message. Output must match a strict regex; unparseable output is
+recorded as a Violation.
 
 Activities mirror docs/order-process-flow.md (BPMN model):
   A01 Identify Customer Request → A02 Create Order → A03 Check Stock →
@@ -67,12 +67,14 @@ class Activity:
 
 DEFAULT_PROMPT_TEMPLATE = (
     "You are the process supervisor for a multi-agent coffee shop.\n\n"
-    "Process description:\n{process_description}\n\n"
-    "Allowed activities:\n{activity_catalog}\n\n"
+    "Allowed activities (the to-be process model — the ONLY activities and IDs"
+    " you may use):\n{activity_catalog}\n\n"
     "Prior log tail:\n{prior_log_tail}\n\n"
     "New message: {message_brief}\n\n"
-    "Reply with exactly ONE line in one of these formats. Use the\n"
-    "activity's `slug` (snake_case) as <ActivityName>, not the display name:\n"
+    "Reply with exactly ONE line in one of these formats. Use the activity ID"
+    " from the catalog above (e.g. `A01`, `A05b`) — no other label is valid."
+    " Use the activity's `slug` (snake_case) as <ActivityName>, not the"
+    " display name:\n"
     "  Execution:<ActivityID>:<ActivityName>\n"
     "  Termination:<ActivityID>:<ActivityName>:terminal\n"
     "  Violation:<short_reason_without_spaces_or_with_underscores>\n"
@@ -82,33 +84,20 @@ DEFAULT_PROMPT_TEMPLATE = (
 
 def load_process_model(
     path: str | os.PathLike,
-) -> tuple[str, list[Activity], str]:
-    """Read the YAML process model. Returns (description, activities, prompt_template).
+) -> tuple[list[Activity], str]:
+    """Read the YAML process model. Returns (activities, prompt_template).
 
-    If the YAML sets `description_source: <relative path>`, the description is
-    loaded from that file (resolved relative to the YAML); the markdown is the
-    source of truth for the BPMN narrative. Otherwise the inline `description:`
-    field is used.
+    The YAML's `activities:` list is the single source of truth for the to-be
+    process model — activity IDs, slugs, lanes, triggers and tools all live
+    here. Any prose narrative belongs in human-facing docs, not in the
+    supervisor's prompt context.
 
     `prompt_template:` is an optional top-level YAML field. When absent, the
     built-in DEFAULT_PROMPT_TEMPLATE is used. Supported placeholders:
-    {process_description}, {activity_catalog}, {prior_log_tail}, {message_brief}.
+    {activity_catalog}, {prior_log_tail}, {message_brief}.
     """
     yaml_path = Path(path)
     data = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
-
-    description = ""
-    src = data.get("description_source")
-    if src:
-        candidate = (yaml_path.parent / src).resolve()
-        if not candidate.exists():
-            candidate = Path(src).resolve()
-        if candidate.exists():
-            description = candidate.read_text(encoding="utf-8").strip()
-        else:
-            logger.warning("description_source %s not found; using inline description", src)
-    if not description:
-        description = (data.get("description") or "").strip()
 
     activities = [
         Activity(
@@ -124,7 +113,7 @@ def load_process_model(
         for a in data.get("activities", [])
     ]
     prompt_template = (data.get("prompt_template") or DEFAULT_PROMPT_TEMPLATE).rstrip() + "\n"
-    return description, activities, prompt_template
+    return activities, prompt_template
 
 
 def _serialize_input_message(msg: BaseMessage, agent_name: str) -> str:
@@ -201,7 +190,7 @@ class ProcessSupervisor:
     ):
         if llm is None:
             raise ValueError("ProcessSupervisor requires an LLM instance")
-        self.description, self.activities, file_template = load_process_model(process_model_path)
+        self.activities, file_template = load_process_model(process_model_path)
         self.prompt_template = prompt_template_override if prompt_template_override is not None else file_template
         self.log_path = Path(log_path)
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -297,7 +286,6 @@ class ProcessSupervisor:
             f"content={_one_line(str(getattr(msg, 'content', '')))[:200]}"
         )
         prompt = self.prompt_template.format(
-            process_description=self.description,
             activity_catalog=catalog,
             prior_log_tail=prior_tail,
             message_brief=msg_brief,
@@ -399,8 +387,6 @@ class ProcessSupervisor:
             f"The agent `{agent_name}` just attempted an action that violates "
             "the process model. Your job is to write a short corrective note "
             "the agent will read and follow on its next attempt.\n\n"
-            "## Process you are enforcing\n"
-            f"{self.description}\n\n"
             "## What the agent is allowed to do next\n"
             f"These are the ONLY activities `{agent_name}` may perform from "
             "its current process state. Refer to them by their snake_case slug.\n\n"

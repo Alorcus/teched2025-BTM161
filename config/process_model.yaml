@@ -1,5 +1,4 @@
 name: coffee_shop_order_v3
-description_source: docs/order-process-flow.md
 # Activities mirror docs/order-process-w-compliant.bpmn (BPMN: Coffee Shop pool).
 # IDs A01..A07 follow the order-processing branch; A08..A10 cover the
 # complaint sub-process introduced by the XOR after Identify Customer Request.

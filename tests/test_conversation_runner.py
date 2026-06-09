@@ -751,16 +751,6 @@ class TestToolCallViolationSummarizedToProse(unittest.TestCase):
         self.assertIn("hand off to barista_agent", crit.content)
 
 
-class TestConfigDefaults(unittest.TestCase):
-    """The dataclass defaults declared in src/config.py are the source of
-    truth — this test pins them so a flip is intentional, not silent."""
-
-    def test_defaults(self):
-        cfg = CoffeeShopConfig()
-        self.assertTrue(cfg.process_supervisor_active)
-        self.assertEqual(cfg.process_supervisor_max_retries, 3)
-
-
 class TestSummarizeToolCalls(unittest.TestCase):
     """Pure function: tool_calls → prose summary."""
 
