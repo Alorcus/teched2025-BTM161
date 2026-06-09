@@ -15,7 +15,7 @@ import html
 
 import panel as pn
 
-from .event_bus import DashboardEvent, EventType
+from .interaction.event_bus import DashboardEvent, EventType
 
 
 # Column key MUST match the agent_name string the runner publishes.

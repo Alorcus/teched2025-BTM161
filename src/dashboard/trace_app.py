@@ -28,13 +28,13 @@ import panel as pn
 from src.coffee_shop import CoffeeShop
 from src.agents import CUSTOMER_SCENARIOS, build_default_prompt
 from src.agents.barista_agent import start_coffee_machine, stop_coffee_machine
-from .agent_panel import AgentPanel  # noqa: F401  (used indirectly by status colors)
-from .coffee_machine_panel import CoffeeMachinePanel
-from .conversation_runner import ConversationRunner
-from .event_bus import EventBus, EventType, DashboardEvent
-from .stock_panel import StockPanel
+from .interaction.agent_panel import AgentPanel  # noqa: F401  (used indirectly by status colors)
+from .interaction.coffee_machine_panel import CoffeeMachinePanel
+from .interaction.conversation_runner import ConversationRunner
+from .interaction.event_bus import EventBus, EventType, DashboardEvent
+from .interaction.stock_panel import StockPanel
 from .trace_table_panel import TraceTablePanel
-from .tray_panel import TrayPanel
+from .interaction.tray_panel import TrayPanel
 
 logger = logging.getLogger("coffee_shop.dashboard.trace")
 

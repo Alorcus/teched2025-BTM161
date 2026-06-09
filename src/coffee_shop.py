@@ -130,6 +130,22 @@ class CoffeeShop:
         self._ui.traces_of_latest_conversations = self.traces_of_latest_conversations
         return self._ui.create_interactive_interface(success_only=success_only)
 
+    def capture_feedback(self, thread_id: str, order_id: str | None = None) -> dict:
+        """Capture customer feedback for a completed conversation and persist it."""
+        feedback = self.customer_agent.get_feedback()
+        self._conversation_engine.feedback_log[thread_id] = {
+            "thread_id": thread_id,
+            "order_id": order_id,
+            **feedback,
+        }
+        self._conversation_engine._save_feedback_store()
+        return feedback
+
+    def get_last_feedback(self) -> dict | None:
+        """Return the most recently recorded customer feedback entry."""
+        log = self._conversation_engine.feedback_log
+        return next(reversed(log.values()), None) if log else None
+
     def display_current_inventory(self):
         if self._ui:
             self._ui.display_current_inventory()

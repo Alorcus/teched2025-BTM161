@@ -11,8 +11,8 @@ from unittest.mock import MagicMock, patch, PropertyMock
 from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage, ToolMessage
 
 from src.config import CoffeeShopConfig
-from src.dashboard.event_bus import EventBus, EventType
-from src.dashboard.conversation_runner import (
+from src.dashboard.interaction.event_bus import EventBus, EventType
+from src.dashboard.interaction.conversation_runner import (
     ConversationRunner,
     MAX_CONVERSATION_TURNS,
     _summarize_tool_calls,

@@ -9,7 +9,7 @@ from __future__ import annotations
 import time
 import unittest
 
-from src.dashboard.event_bus import DashboardEvent, EventType
+from src.dashboard.interaction.event_bus import DashboardEvent, EventType
 from src.dashboard.trace_table_panel import COLUMN_KEYS, TraceTablePanel
 
 

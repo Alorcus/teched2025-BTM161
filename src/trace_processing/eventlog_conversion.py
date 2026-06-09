@@ -24,6 +24,8 @@ EVENT_ATTRIBUTES = {
     "offer_partial_refund": ["ocel_time", "duration"],
     "get_alternatives": ["ocel_time", "duration"],
     "calculate_total": ["ocel_time", "duration"],
+    "prepare_order": ["ocel_time", "duration"],
+    "remake_order_item": ["ocel_time", "duration"],
     # handovers
     "order_agent_handover_inventory_agent": [
         "ocel_time",
