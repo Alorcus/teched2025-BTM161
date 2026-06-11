@@ -46,34 +46,7 @@ def discount_within_limit_predicate(max_pct: int):
     return _eval
 
 
-def max_number_items_per_process_order(max_items: int):
-    """Factory: FLAG verdict when process_order is called with number of items above max_items."""
-
-    def _eval(context: GuardrailContext) -> Verdict:
-        number_items = len(context.tool_args.get("order", []) or 0)
-        if number_items <= max_items:
-            return Verdict(
-                effect=Effect.ALLOW,
-                guardrail_name="",
-                guardrail_type="",
-                reason_internal=f"number_items={number_items} within limit {max_items}",
-            )
-        return Verdict(
-            effect=Effect.DENY,
-            guardrail_name="",
-            guardrail_type="",
-            reason_internal=f"number_items={number_items} exceeds limit {max_items}",
-            reason_for_llm=(
-                f"Orders with {number_items} items exceed the allowed limit of {max_items}. "
-                f"Please reduce the number of items in the order."
-            ),
-        )
-
-    return _eval
-
-
 PREDICATE_REGISTRY = {
     "allowed_handover_targets": allowed_handover_targets_predicate,
     "discount_within_limit": discount_within_limit_predicate,
-    "max_number_items_per_process_order": max_number_items_per_process_order,
 }

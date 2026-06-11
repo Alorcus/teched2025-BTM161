@@ -14,7 +14,7 @@ class CoffeeShopConfig:
     mlflow_experiment: str = "lg-coffee-mas"
     mlflow_enabled: bool = True
     coffee_machine_url: str = "http://127.0.0.1:8001"
-    setup_name: str | None = "baseline"
+    setup_name: str | None = None
     guardrail_log_path: str = "./guardrail_log/events.jsonl"
     process_model_path: str = "./config/process_model.yaml"
     process_log_path: str = "./process_log/process_meta.log"
