@@ -11,6 +11,7 @@ from src.control_plane.process_supervisor import ProcessSupervisor
 # Reuse the project's full process_model.yaml so the test exercises the same
 # activity catalogue the production code does.
 _REAL_MODEL = Path(__file__).resolve().parent.parent / "config" / "process_model.yaml"
+_DUMMY_PROMPT = "test prompt {activity_catalog} {prior_log_tail} {message_brief}"
 
 
 class TestAllowedNextActivities(unittest.TestCase):
@@ -25,6 +26,7 @@ class TestAllowedNextActivities(unittest.TestCase):
             process_model_path=_REAL_MODEL,
             log_path=log_path,
             llm=MagicMock(),
+            prompt_template=_DUMMY_PROMPT,
         )
 
     def test_initial_state_allows_a01(self):
@@ -95,6 +97,7 @@ class TestVerdictCacheRoundTrip(unittest.TestCase):
         llm.invoke.return_value = MagicMock(content="Violation:test_only")
         sup = ProcessSupervisor(
             process_model_path=_REAL_MODEL, log_path=log_path, llm=llm,
+            prompt_template=_DUMMY_PROMPT,
         )
         msg = AIMessage(content="some text", id="ai-test-1", name="order_agent")
         sup.observe(msg, agent_name="order_agent")
@@ -115,6 +118,7 @@ class TestVerdictCacheRoundTrip(unittest.TestCase):
         llm.invoke.return_value = MagicMock(content="Violation:foo")
         sup = ProcessSupervisor(
             process_model_path=_REAL_MODEL, log_path=log_path, llm=llm,
+            prompt_template=_DUMMY_PROMPT,
         )
         msg = AIMessage(content="x", id="ai-test-2", name="order_agent")
         self.assertIsNone(sup.last_verdict_for(msg))

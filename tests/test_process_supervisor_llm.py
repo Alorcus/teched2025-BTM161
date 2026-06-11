@@ -6,7 +6,9 @@ hardcoded order_agent message, and asserts the supervisor lands on either
 an Execution/Termination line (happy path) or a Violation line (off-model).
 """
 import unittest
+from pathlib import Path
 
+import yaml
 from langchain_core.messages import AIMessage
 
 from src.control_plane.process_supervisor import ProcessSupervisor
@@ -27,6 +29,14 @@ Activities:
 
 There is no other activity. Any other behaviour is a violation.
 """
+
+
+def _real_prompt() -> str:
+    yaml_path = (
+        Path(__file__).resolve().parent.parent
+        / "config" / "setups" / "baseline" / "agents" / "process_supervisor_agent.yaml"
+    )
+    return yaml.safe_load(yaml_path.read_text(encoding="utf-8"))["base_prompt"]
 
 
 def _write_minimal_model(tmp_path):
@@ -71,6 +81,7 @@ class TestProcessSupervisorLLM(unittest.TestCase):
             process_model_path=model_path,
             log_path=log_path,
             llm=self.llm,
+            prompt_template=_real_prompt(),
         )
 
     def test_happy_path_identifies_a01(self):

@@ -65,41 +65,18 @@ class Activity:
     display_name: str | None = None
 
 
-DEFAULT_PROMPT_TEMPLATE = (
-    "You are the process supervisor for a multi-agent coffee shop.\n\n"
-    "Allowed activities (the to-be process model — the ONLY activities and IDs"
-    " you may use):\n{activity_catalog}\n\n"
-    "Prior log tail:\n{prior_log_tail}\n\n"
-    "New message: {message_brief}\n\n"
-    "Reply with exactly ONE line in one of these formats. Use the activity ID"
-    " from the catalog above (e.g. `A01`, `A05b`) — no other label is valid."
-    " Use the activity's `slug` (snake_case) as <ActivityName>, not the"
-    " display name:\n"
-    "  Execution:<ActivityID>:<ActivityName>\n"
-    "  Termination:<ActivityID>:<ActivityName>:terminal\n"
-    "  Violation:<short_reason_without_spaces_or_with_underscores>\n"
-    "No prose, no quotes."
-)
-
-
-def load_process_model(
-    path: str | os.PathLike,
-) -> tuple[list[Activity], str]:
-    """Read the YAML process model. Returns (activities, prompt_template).
+def load_process_model(path: str | os.PathLike) -> list[Activity]:
+    """Read the YAML process model and return its activity list.
 
     The YAML's `activities:` list is the single source of truth for the to-be
     process model — activity IDs, slugs, lanes, triggers and tools all live
     here. Any prose narrative belongs in human-facing docs, not in the
     supervisor's prompt context.
-
-    `prompt_template:` is an optional top-level YAML field. When absent, the
-    built-in DEFAULT_PROMPT_TEMPLATE is used. Supported placeholders:
-    {activity_catalog}, {prior_log_tail}, {message_brief}.
     """
     yaml_path = Path(path)
     data = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
 
-    activities = [
+    return [
         Activity(
             id=a["id"],
             name=a["name"],
@@ -112,8 +89,6 @@ def load_process_model(
         )
         for a in data.get("activities", [])
     ]
-    prompt_template = (data.get("prompt_template") or DEFAULT_PROMPT_TEMPLATE).rstrip() + "\n"
-    return activities, prompt_template
 
 
 def _serialize_input_message(msg: BaseMessage, agent_name: str) -> str:
@@ -185,13 +160,13 @@ class ProcessSupervisor:
         process_model_path: str | os.PathLike,
         log_path: str | os.PathLike,
         llm: Any,
+        prompt_template: str,
         recent_tail: int = 20,
-        prompt_template_override: str | None = None,
     ):
         if llm is None:
             raise ValueError("ProcessSupervisor requires an LLM instance")
-        self.activities, file_template = load_process_model(process_model_path)
-        self.prompt_template = prompt_template_override if prompt_template_override is not None else file_template
+        self.activities = load_process_model(process_model_path)
+        self.prompt_template = prompt_template.rstrip() + "\n"
         self.log_path = Path(log_path)
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         self.llm = llm

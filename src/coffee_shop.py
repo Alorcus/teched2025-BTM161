@@ -95,6 +95,7 @@ class CoffeeShop:
                 process_model_path=self.config.process_model_path,
                 log_path=self.config.process_log_path,
                 llm=llm,
+                prompt_template=self.agent_repo.get("process_supervisor").base_prompt,
             )
             _coffee_shop_logger.info(
                 "process supervisor: model=%s | log=%s",

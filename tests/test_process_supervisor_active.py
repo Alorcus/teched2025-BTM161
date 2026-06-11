@@ -121,6 +121,7 @@ class TestActiveSupervisorRejectsAndRetries(unittest.TestCase):
             process_model_path=_REAL_MODEL,
             log_path=Path(self.tmp.name) / "process.log",
             llm=MagicMock(),
+            prompt_template="dummy {activity_catalog} {prior_log_tail} {message_brief}",
         )
         verdicts_iter = iter(decide_action_returns)
 
