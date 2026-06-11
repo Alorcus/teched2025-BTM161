@@ -1,10 +1,15 @@
 import json
 import uuid
 import pandas as pd
+import csv
+from pathlib import Path
+
+import logging
+logger = logging.getLogger(__name__)
 
 
 class LogGenerator:
-    def generate_event_log_df(self, trace_source) -> pd.DataFrame:
+    def generate_event_log_df(self, trace_source, coffee_machine_log_path=None) -> pd.DataFrame:
         self.process_events = []
         self.case_id = None
         self.spans = None
@@ -42,16 +47,70 @@ class LogGenerator:
             for agent_span in agent_spans:
                 self._process_agent_span(agent_span)
 
+        # Create DataFrame from agent events
         dataframe = pd.DataFrame(self.process_events).sort_values(["time:timestamp"], ascending=True)
-        dataframe['time_finished'] = ((dataframe['time:timestamp'] + dataframe['duration'].fillna(0))).apply(lambda t: pd.to_datetime(t).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3])
-        dataframe['time:timestamp'] = dataframe['time:timestamp'].apply(lambda t: pd.to_datetime(t).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3])
+        
+        # Load and merge coffee machine logs if provided
+        if coffee_machine_log_path:
+            coffee_machine_events = self._load_coffee_machine_logs(coffee_machine_log_path)
+            if coffee_machine_events:
+                # Convert coffee machine events to same format
+                coffee_df = pd.DataFrame(coffee_machine_events)
+                # Merge with main dataframe
+                dataframe = pd.concat([dataframe, coffee_df], ignore_index=True)
+                # Sort by timestamp again
+                dataframe = dataframe.sort_values(["time:timestamp"], ascending=True)
+        
+        # Format timestamps for output
+        dataframe['time_finished'] = ((dataframe['time:timestamp'] + dataframe['duration'].fillna(0))).apply(lambda t: pd.to_datetime(t, unit='ns').strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3])
+        dataframe['time:timestamp'] = dataframe['time:timestamp'].apply(lambda t: pd.to_datetime(t, unit='ns').strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3])
 
         return dataframe
 
+    def _load_coffee_machine_logs(self, log_path):
+        """Load coffee machine CSV logs and convert to event format."""
+        coffee_events = []
+        
+        try:
+            log_file = Path(log_path)
+            if not log_file.exists():
+                logger.warning(f"Coffee machine log file not found: {log_path}")
+                return coffee_events
+            
+            with open(log_file, 'r', newline='') as f:
+                reader = csv.DictReader(f)
+                
+                for row in reader:
+                    # Only include events for this case (thread)
+                    if row.get('case_id') != self.case_id:
+                        continue
+                    
+                    # Convert timestamp (assuming it's in seconds, convert to nanoseconds)
+                    timestamp_ns = int(float(row['ocel_time']) * 1_000_000_000) if row.get('ocel_time') else 0
+                    duration_ns = int(float(row.get('duration', 0)) * 1_000_000_000) if row.get('duration') else 0
+                    
+                    coffee_events.append({
+                        'case_id': self.case_id,
+                        'identity:id': str(uuid.uuid4()),
+                        'time:timestamp': timestamp_ns,
+                        'time_finished': timestamp_ns + duration_ns,
+                        'duration': duration_ns,
+                        'concept:instance': f'coffee_machine: {row.get("concept:name", "unknown")}',
+                        'concept:name': 'coffee_machine_event',
+                        'org:resource': row.get('org:resource', 'coffee_machine'),
+                        'activity': row.get('concept:name'),
+                        **{k: v for k, v in row.items() if k not in ['case_id', 'concept:name', 'ocel_time', 'duration', 'org:resource']}
+                    })
+            
+            logger.info(f"Loaded {len(coffee_events)} coffee machine events for case {self.case_id}")
+            
+        except Exception as e:
+            logger.error(f"Error loading coffee machine logs: {e}")
+        
+        return coffee_events
 
     def _get_span_metadata(self, span):
         return json.loads(span['attributes']['metadata'])
-
 
     def _is_agent_span(self, span):
         child_spans = [s for s in self.spans if s['parent_span_id'] == span['span_id']]
@@ -67,7 +126,6 @@ class LogGenerator:
                 return True
 
         return False
-
 
     def _process_llm_span(self, span, agent_name):
         call_model_child_spans = [s for s in self.spans if s['parent_span_id'] == span['span_id'] and s['name'].startswith('call_model')]
@@ -108,7 +166,6 @@ class LogGenerator:
             'message': response_message
         })
 
-
     def _process_tool_span(self, span, agent_name):
         tool_input = json.loads(span['attributes'].get('mlflow.spanInputs', '[]'))[0]
         tool_name = 'unknown_tool'
@@ -130,7 +187,6 @@ class LogGenerator:
             'org:resource': agent_name,
             'tool': tool_name,
         })
-
 
     def _process_agent_span(self, agent_span):
         agent_span_id = agent_span['span_id']
@@ -160,7 +216,6 @@ class LogGenerator:
             elif child_span['name'].startswith('tools'):
                 self._process_tool_span(child_span, agent_name)
 
-
     def _process_root_span(self):
         user_input = None
         span_inputs = json.loads(self.langgraph_root_span['attributes']['mlflow.spanInputs'])['messages']
@@ -172,7 +227,8 @@ class LogGenerator:
             'case_id': self.case_id,
             'identity:id': str(uuid.uuid4()),
             'time:timestamp': self.langgraph_root_span['start_time_unix_nano'],
-            'concept:instance': 'prompt',
+            'duration': 0,
+            'concept:instance': 'user_prompt',
             'concept:name': 'user_prompt',
             'org:resource': 'user',
             'message': user_input,

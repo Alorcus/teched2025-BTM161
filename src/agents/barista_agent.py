@@ -57,22 +57,22 @@ def start_coffee_machine() -> bool:
     global COFFEE_MACHINE_PROCESS
 
     with _MACHINE_LOCK:
-        # Check if already running
         if is_machine_running():
             return True
 
-        # Check if port is in use but machine not responding (stuck process)
         if check_port_in_use(COFFEE_MACHINE_PORT):
-            logger.warning(
-                f"Port {COFFEE_MACHINE_PORT} is in use but machine not responding"
-            )
+            logger.warning(f"Port {COFFEE_MACHINE_PORT} is in use but machine not responding")
             return False
 
         try:
+            import sys
+            # Use the current Python interpreter directly
+            python_executable = sys.executable
+            
             COFFEE_MACHINE_PROCESS = subprocess.Popen(
                 [
-                    "poetry",
-                    "run",
+                    python_executable,
+                    "-m",
                     "uvicorn",
                     "services.coffee_machine.main:app",
                     "--port",
@@ -88,11 +88,17 @@ def start_coffee_machine() -> bool:
                 else 0,
             )
 
+            # Wait for startup
             for _ in range(10):
                 time.sleep(1)
                 if is_machine_running():
+                    logger.info("Coffee machine started successfully")
                     return True
 
+            # Check if process failed
+            if COFFEE_MACHINE_PROCESS.poll() is not None:
+                stderr = COFFEE_MACHINE_PROCESS.stderr.read().decode()
+                logger.error(f"Coffee machine failed to start: {stderr}")
             return False
 
         except Exception as e:

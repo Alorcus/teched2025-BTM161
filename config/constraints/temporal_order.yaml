@@ -1,0 +1,53 @@
+# Temporal order constraints based on BPMN2Constraints
+# Defines valid execution order of tools/activities
+
+temporal_constraints:
+  # Order processing must happen before inventory check
+  - id: "order_before_inventory"
+    constraint_type: "sequence"
+    antecedent: "process_order"
+    consequent: "check_inventory"
+    description: "Must process order before checking inventory"
+  
+  # Inventory check must happen before stock update
+  - id: "inventory_before_stock"
+    constraint_type: "sequence"
+    antecedent: "check_inventory"
+    consequent: "update_stock"
+    description: "Must check inventory before updating stock"
+  
+  # Preparation must happen after inventory confirmation
+  - id: "inventory_before_preparation"
+    constraint_type: "precedence"
+    antecedent: "update_stock"
+    consequent: "start_preparation"
+    description: "Inventory must be confirmed before starting preparation"
+  
+  # Time-bound constraint: preparation must finish within 30 seconds of starting
+  - id: "preparation_timeout"
+    constraint_type: "time_bounded"
+    antecedent: "start_preparation"
+    consequent: "end_preparation"
+    time_bound_seconds: 30
+    description: "Preparation must complete within 30 seconds"
+  
+  # Chain response: proper order flow
+  - id: "full_order_flow"
+    constraint_type: "chain_response"
+    antecedent: "process_order"
+    consequent: "check_inventory"
+    description: "Complete order flow: process → check inventory → update stock → start preparation → end preparation"
+  
+  # Parallel: can check tray and check order concurrently (no constraint)
+  - id: "parallel_check"
+    constraint_type: "parallel"
+    antecedent: "check_tray"
+    consequent: "get_order"
+    description: "Can check tray and get order in any order"
+  
+  # Choice: either offer refund OR offer partial refund (exclusive)
+  - id: "refund_choice"
+    constraint_type: "choice"
+    antecedent: "offer_refund"
+    consequent: "offer_partial_refund"
+    description: "Cannot offer both full and partial refund"
