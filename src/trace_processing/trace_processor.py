@@ -1,3 +1,4 @@
+import csv
 import json
 import os
 import uuid
@@ -5,6 +6,56 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from .log_generator import LogGenerator
 import pandas as pd
+
+COFFEE_MACHINE_LOG = Path("services/coffee_machine/logs/coffee_machine.csv")
+
+
+def _load_coffee_machine_rows(path: Path) -> pd.DataFrame:
+    """Read the coffee machine's raw CSV and map it to the canonical schema.
+
+    Returns an empty DataFrame if the file is missing or contains only the
+    header. Optional canonical columns (message/model/tokens/tool/feedback_*)
+    are left absent so pandas → CSV writes them as empty cells, which polars
+    reads back as null. Do NOT fillna("") here — the OCEL converter checks
+    via is_not_null() and a literal empty string would slip past.
+    """
+    if not path.exists() or path.stat().st_size == 0:
+        return pd.DataFrame()
+    try:
+        raw = pd.read_csv(path)
+    except pd.errors.EmptyDataError:
+        return pd.DataFrame()
+    if raw.empty:
+        return pd.DataFrame()
+
+    # epoch float seconds → ISO-8601 ms strings
+    ts = pd.to_datetime(raw["ocel_time"], unit="s")
+    ts_str = ts.dt.strftime("%Y-%m-%dT%H:%M:%S.%f").str[:-3]
+
+    # duration may be NaN (header-only or instantaneous events) → 0
+    dur_seconds = raw["duration"].fillna(0.0)
+    finish = ts + pd.to_timedelta(dur_seconds, unit="s")
+    finish_str = finish.dt.strftime("%Y-%m-%dT%H:%M:%S.%f").str[:-3]
+
+    drink_safe = raw.get("drink", pd.Series([""] * len(raw))).fillna("")
+    instance = (
+        "coffee machine " + raw["concept:name"].astype(str)
+        + drink_safe.apply(lambda d: f" ({d})" if d else "")
+    )
+
+    return pd.DataFrame({
+        "case_id":          raw["case_id"].astype(str),
+        "identity:id":      [str(uuid.uuid4()) for _ in range(len(raw))],
+        "time:timestamp":   ts_str,
+        "time_finished":    finish_str,
+        "concept:name":     raw["concept:name"],
+        "concept:instance": instance,
+        "org:resource":     "coffee_machine",
+        "duration":         (dur_seconds * 1e9).astype("int64"),
+        "job_id":           raw.get("job_id", pd.Series([""] * len(raw))),
+        "drink":            drink_safe,
+    })
+
 
 class TraceProcessor:
     def __init__(self, base_path: str = "./mlruns"):
@@ -113,7 +164,36 @@ class TraceProcessor:
                 [combined_logs, pd.DataFrame(feedback_rows)], ignore_index=True
             ).sort_values(by="time:timestamp")
 
-        self._generate_log_file(combined_logs, "./generated_event_log", json_format=export_as_json)
+        # Merge coffee machine rows (stream 2). Same shape as the feedback
+        # injection above: read the source CSV, map to canonical columns,
+        # filter to known case_ids, concat, re-sort.
+        machine_rows = _load_coffee_machine_rows(COFFEE_MACHINE_LOG)
+        merged_machine_rows = False
+        if not machine_rows.empty:
+            valid_case_ids = set(combined_logs["case_id"].unique())
+            before = len(machine_rows)
+            machine_rows = machine_rows[machine_rows["case_id"].isin(valid_case_ids)]
+            dropped = before - len(machine_rows)
+            if dropped:
+                print(
+                    f"   ⚠️  Dropped {dropped} coffee-machine row(s) with "
+                    f"case_id not in agent log (stale or correlation_id mismatch)"
+                )
+            if not machine_rows.empty:
+                combined_logs = pd.concat(
+                    [combined_logs, machine_rows], ignore_index=True
+                ).sort_values(by="time:timestamp")
+                merged_machine_rows = True
+
+        written_path = self._generate_log_file(
+            combined_logs, "./generated_event_log", json_format=export_as_json
+        )
+
+        # Only truncate the source CSV if the merge actually pulled rows from
+        # it AND the unified log was written successfully. Otherwise a write
+        # failure would lose source data.
+        if merged_machine_rows and written_path:
+            self._truncate_coffee_machine_log(COFFEE_MACHINE_LOG)
 
         print("\n📈 Processing Summary:")
         print(f"   📊 Total traces processed: {len(traces)}")
@@ -131,10 +211,13 @@ class TraceProcessor:
     def _generate_log_file(self, dataframe: pd.DataFrame, output_path: str, json_format: bool = False):
         """
         Generate a log file from the given DataFrame.
-        
+
         Args:
             dataframe: The DataFrame containing event log data
             output_path: The path to save the generated log file
+
+        Returns:
+            The written file path on success, or None on failure.
         """
         if not os.path.exists(output_path):
             os.makedirs(output_path)
@@ -147,15 +230,38 @@ class TraceProcessor:
             filename += ".csv"
 
         file_path = os.path.join(output_path, filename)
-        
+
         try:
             if json_format:
                 dataframe.to_json(file_path, orient="index")
             else:
                 dataframe.to_csv(file_path, index=False)
             print(f"\n✅ Log file generated at {file_path}")
+            return file_path
         except Exception as e:
             print(f"\n″❌ Failed to generate log file at {file_path}: {e}")
+            return None
+
+    def _truncate_coffee_machine_log(self, path: Path) -> None:
+        """Reset the coffee machine CSV after a successful merge.
+
+        Writes only the header row so subsequent appends from the FastAPI
+        service are valid. The header MUST mirror logger.FIXED_HEADER in
+        services/coffee_machine/logger.py — keep the two in sync.
+
+        Assumes the FastAPI worker is not actively writing during this call
+        (true today: process_all_traces runs after the session ends).
+        """
+        header = [
+            "case_id", "concept:name", "ocel_time", "duration",
+            "org:resource", "job_id", "drink",
+        ]
+        try:
+            with open(path, "w", newline="") as f:
+                csv.writer(f).writerow(header)
+            print(f"   🧹 Truncated {path}")
+        except OSError as e:
+            print(f"   ⚠️  Failed to truncate {path}: {e}")
 
 
 def _extract_case_id(trace_dict: dict) -> str | None:

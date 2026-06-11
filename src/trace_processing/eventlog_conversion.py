@@ -30,6 +30,10 @@ EVENT_ATTRIBUTES = {
     "check_tray":    ["ocel_time", "duration"],
     "clean_machine": ["ocel_time", "duration"],
     "user_feedback": ["ocel_time", "feedback_score", "feedback_reason", "feedback_valid"],
+    # coffee machine
+    "job_created":   ["ocel_time"],
+    "brew_completed": ["ocel_time", "duration"],
+    "brew_failed":   ["ocel_time", "duration"],
     # handovers
     "order_agent_handover_inventory_agent": [
         "ocel_time",
@@ -127,6 +131,7 @@ OBJECT_ATTRIBUTES = {
     "inventory_agent": [],
     "customer_service_agent": [],
     "feedback": ["feedback_score", "feedback_reason", "feedback_valid"],
+    "coffee_machine": [],
 }
 
 

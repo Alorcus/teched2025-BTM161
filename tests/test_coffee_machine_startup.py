@@ -67,7 +67,11 @@ class TestCoffeeMachineStartup(unittest.TestCase):
         self.assertIn(resp.json()["status"], ("brewing", "ready", "failed"))
 
     def test_clean_endpoint(self):
-        resp = requests.post(f"{COFFEE_MACHINE_URL}/clean", json={}, timeout=3)
+        resp = requests.post(
+            f"{COFFEE_MACHINE_URL}/clean",
+            json={"correlation_id": "test-clean"},
+            timeout=3,
+        )
         self.assertEqual(resp.status_code, 200)
         self.assertIn(resp.json()["status"], ("cleaned", "already_clean"))
 
