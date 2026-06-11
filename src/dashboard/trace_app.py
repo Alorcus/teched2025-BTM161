@@ -15,7 +15,6 @@ The page is composed of four regions:
 The trace pane has smart auto-scroll: it sticks to the bottom only when the
 user is already at the bottom; otherwise it preserves their scroll position.
 """
-
 from __future__ import annotations
 
 import atexit
@@ -26,16 +25,13 @@ import time
 
 import panel as pn
 
+from src.coffee_shop import CoffeeShop
 from src.agents import CUSTOMER_SCENARIOS, build_default_prompt
 from src.agents.barista_agent import start_coffee_machine, stop_coffee_machine
-from src.coffee_shop import CoffeeShop
-
-from .interaction.agent_panel import (
-    AgentPanel,  # noqa: F401  (used indirectly by status colors)
-)
+from .interaction.agent_panel import AgentPanel  # noqa: F401  (used indirectly by status colors)
 from .interaction.coffee_machine_panel import CoffeeMachinePanel
 from .interaction.conversation_runner import ConversationRunner
-from .interaction.event_bus import DashboardEvent, EventBus, EventType
+from .interaction.event_bus import EventBus, EventType, DashboardEvent
 from .interaction.stock_panel import StockPanel
 from .interaction.tray_panel import TrayPanel
 from .nav import header_nav
@@ -160,9 +156,7 @@ def _scenario_options() -> dict[str, int]:
         "Complaint (cold cappuccino)",
         "Ask for a recommendation",
     ]
-    return {
-        f"{i}: {labels[i]}": i for i in range(min(len(labels), len(CUSTOMER_SCENARIOS)))
-    }
+    return {f"{i}: {labels[i]}": i for i in range(min(len(labels), len(CUSTOMER_SCENARIOS)))}
 
 
 def _truncate(text: str, max_len: int = 150) -> str:
@@ -188,26 +182,26 @@ def _log(entries: list[str], pane, html_line: str) -> None:
     entries.append(
         f'<div style="padding:3px 0;border-bottom:1px solid #f4ede4;font-size:12px;">'
         f'<span style="color:#9b897c;margin-right:6px;font-variant-numeric:tabular-nums;">'
-        f"{ts}</span>{html_line}</div>"
+        f'{ts}</span>{html_line}</div>'
     )
     body = "\n".join(entries[-200:])
     pane.object = (
         '<div class="tt-conversation-log">'
-        "<h4>Conversation Log</h4>"
+        '<h4>Conversation Log</h4>'
         f'<div class="tt-conv-body">{body}</div>'
-        f"{_CONV_SCROLL_SCRIPT}"
-        "</div>"
+        f'{_CONV_SCROLL_SCRIPT}'
+        '</div>'
     )
 
 
 def _empty_log_html() -> str:
     return (
         '<div class="tt-conversation-log">'
-        "<h4>Conversation Log</h4>"
+        '<h4>Conversation Log</h4>'
         '<div class="tt-conv-body" style="color:#a8978a;font-size:12px;'
         'font-style:italic;">No conversation yet.</div>'
-        f"{_CONV_SCROLL_SCRIPT}"
-        "</div>"
+        f'{_CONV_SCROLL_SCRIPT}'
+        '</div>'
     )
 
 
@@ -226,44 +220,33 @@ def _dispatch_to_log(
         if event.log_level >= min_log_level:
             level_name = logging.getLevelName(event.log_level)
             color = {
-                "DEBUG": "#9E9E9E",
-                "INFO": "#2196F3",
-                "WARNING": "#FF9800",
-                "ERROR": "#F44336",
+                "DEBUG": "#9E9E9E", "INFO": "#2196F3",
+                "WARNING": "#FF9800", "ERROR": "#F44336",
             }.get(level_name, "#666")
-            _log(
-                log_entries,
-                conversation_log,
-                f'<span style="font-family:ui-monospace,Menlo,monospace;'
-                f"font-size:11px;color:{color};border-left:3px solid {color};"
-                f'padding-left:6px;">[{level_name}] {event.agent_name}: '
-                f"{_truncate(event.content, 120)}</span>",
-            )
+            _log(log_entries, conversation_log,
+                 f'<span style="font-family:ui-monospace,Menlo,monospace;'
+                 f'font-size:11px;color:{color};border-left:3px solid {color};'
+                 f'padding-left:6px;">[{level_name}] {event.agent_name}: '
+                 f'{_truncate(event.content, 120)}</span>')
         return
 
     if event.event_type == EventType.AGENT_MESSAGE:
         color = _AGENT_COLORS.get(event.agent_name, "#3a2f2a")
-        _log(
-            log_entries,
-            conversation_log,
-            f'<span style="color:{color}"><b>{event.agent_name}</b></span>: '
-            f"{_truncate(event.content)}",
-        )
+        _log(log_entries, conversation_log,
+             f'<span style="color:{color}"><b>{event.agent_name}</b></span>: '
+             f'{_truncate(event.content)}')
 
     elif event.event_type == EventType.AGENT_MESSAGE_REJECTED:
         reason_short = ""
         if event.rejection_reason:
             reason_short = (
                 f' <span style="color:#8a3a34;font-style:italic;font-size:11px;">'
-                f"⚠ {_truncate(event.rejection_reason, 160)}</span>"
+                f'⚠ {_truncate(event.rejection_reason, 160)}</span>'
             )
-        _log(
-            log_entries,
-            conversation_log,
-            f'<span style="color:#b3261e"><b>{event.agent_name} [REJECTED]</b></span>: '
-            f'<span style="color:#b3261e;">'
-            f"{_truncate(event.content)}</span>{reason_short}",
-        )
+        _log(log_entries, conversation_log,
+             f'<span style="color:#b3261e"><b>{event.agent_name} [REJECTED]</b></span>: '
+             f'<span style="color:#b3261e;">'
+             f'{_truncate(event.content)}</span>{reason_short}')
 
     elif event.event_type == EventType.TOOL_CALL:
         # Render-only TOOL_CALL events for rejected attempts have a
@@ -303,35 +286,23 @@ def _dispatch_to_log(
                 pass
 
     elif event.event_type == EventType.HANDOFF:
-        _log(
-            log_entries,
-            conversation_log,
-            f'<span style="color:#9C27B0"><b>HANDOFF</b></span> '
-            f"{event.agent_name} → {event.target_agent}",
-        )
+        _log(log_entries, conversation_log,
+             f'<span style="color:#9C27B0"><b>HANDOFF</b></span> '
+             f'{event.agent_name} → {event.target_agent}')
 
     elif event.event_type == EventType.CUSTOMER_MESSAGE:
-        _log(
-            log_entries,
-            conversation_log,
-            f'<span style="color:#4E342E"><b>Customer</b></span>: '
-            f"{_truncate(event.content)}",
-        )
+        _log(log_entries, conversation_log,
+             f'<span style="color:#4E342E"><b>Customer</b></span>: '
+             f'{_truncate(event.content)}')
 
     elif event.event_type == EventType.CONVERSATION_START:
-        _log(
-            log_entries,
-            conversation_log,
-            f'<span style="color:#4CAF50"><b>START</b></span> '
-            f"{_truncate(event.content)}",
-        )
+        _log(log_entries, conversation_log,
+             f'<span style="color:#4CAF50"><b>START</b></span> '
+             f'{_truncate(event.content)}')
 
     elif event.event_type == EventType.CONVERSATION_END:
-        _log(
-            log_entries,
-            conversation_log,
-            '<span style="color:#F44336"><b>END</b></span> Conversation complete',
-        )
+        _log(log_entries, conversation_log,
+             '<span style="color:#F44336"><b>END</b></span> Conversation complete')
         tray_panel.clear()
 
 
@@ -340,19 +311,13 @@ def create_trace_dashboard():
     pn.extension(sizing_mode="stretch_both")
 
     import os
-
     from src.config import CoffeeShopConfig
-
     # Start from the dataclass defaults; only OVERRIDE if env vars are set.
     # This keeps src/config.py as the single source of truth for the default.
     cfg_kwargs = {"setup_name": os.getenv("SETUP_NAME", "baseline")}
     env_active = os.getenv("PROCESS_SUPERVISOR_ACTIVE")
     if env_active is not None:
-        cfg_kwargs["process_supervisor_active"] = env_active.lower() in (
-            "1",
-            "true",
-            "yes",
-        )
+        cfg_kwargs["process_supervisor_active"] = env_active.lower() in ("1", "true", "yes")
     env_retries = os.getenv("PROCESS_SUPERVISOR_MAX_RETRIES")
     if env_retries is not None:
         cfg_kwargs["process_supervisor_max_retries"] = int(env_retries)
@@ -377,18 +342,13 @@ def create_trace_dashboard():
 
     # ------------------------------------------------------------------ sidebar
     scenario_select = pn.widgets.Select(
-        name="",
-        options=_scenario_options(),
-        sizing_mode="stretch_width",
+        name="", options=_scenario_options(), sizing_mode="stretch_width",
         margin=(0, 0, 8, 0),
     )
     log_level_options = {"DEBUG": 10, "INFO": 20, "WARNING": 30, "ERROR": 40}
     log_level_select = pn.widgets.Select(
-        name="",
-        options=log_level_options,
-        value=20,
-        sizing_mode="stretch_width",
-        margin=(0, 0, 8, 0),
+        name="", options=log_level_options, value=20,
+        sizing_mode="stretch_width", margin=(0, 0, 8, 0),
     )
     prompt_textarea = pn.widgets.TextAreaInput(
         name="",
@@ -420,7 +380,7 @@ def create_trace_dashboard():
         if running:
             status_text.object = (
                 '<span style="font-size:12px;color:#4E342E;font-weight:600;">'
-                "Running…</span>"
+                'Running…</span>'
             )
         else:
             status_text.object = (
@@ -461,11 +421,8 @@ def create_trace_dashboard():
                 logger.exception("trace table handle_event failed")
             try:
                 _dispatch_to_log(
-                    ev,
-                    log_entries,
-                    conversation_log,
-                    coffee_machine_panel,
-                    tray_panel,
+                    ev, log_entries, conversation_log,
+                    coffee_machine_panel, tray_panel,
                     min_log_level=log_level_select.value,
                 )
             except Exception:
@@ -480,13 +437,14 @@ def create_trace_dashboard():
         coffee_machine_panel.update_progress()
 
     sidebar_top = pn.pane.HTML(
-        _PAGE_CSS + '<div class="tt-sidebar">'
-        "<h3>Coffee Shop · Trace Table</h3>"
-        '<p class="lead">Configure a scenario, then run a conversation. '
-        "Every emitted message will appear as a row in the table on the right, "
-        "in global order.</p>"
-        '<span class="tt-label">Scenario</span>'
-        "</div>",
+        _PAGE_CSS
+        + '<div class="tt-sidebar">'
+          '<h3>Coffee Shop · Trace Table</h3>'
+          '<p class="lead">Configure a scenario, then run a conversation. '
+          'Every emitted message will appear as a row in the table on the right, '
+          'in global order.</p>'
+          '<span class="tt-label">Scenario</span>'
+          '</div>',
         sizing_mode="stretch_width",
     )
 
@@ -498,12 +456,10 @@ def create_trace_dashboard():
         pn.pane.HTML('<span class="tt-label">Customer Prompt</span>'),
         prompt_textarea,
         run_button,
-        pn.Row(
-            status_indicator,
-            status_text,
-            margin=(12, 0, 0, 0),
-            styles={"align-items": "center", "gap": "10px", "flex": "0 0 auto"},
-        ),
+        pn.Row(status_indicator, status_text,
+               margin=(12, 0, 0, 0),
+               styles={"align-items": "center", "gap": "10px",
+                       "flex": "0 0 auto"}),
         conversation_log,
         width=360,
         sizing_mode="stretch_height",
@@ -518,14 +474,10 @@ def create_trace_dashboard():
     # -------------------------------------------------------------- main column
     top_status_row = pn.Row(
         pn.Column(tray_panel.panel(), width=170, height=170),
-        pn.Column(
-            stock_panel.panel(), sizing_mode="stretch_both", styles={"flex": "2"}
-        ),
-        pn.Column(
-            coffee_machine_panel.panel(),
-            sizing_mode="stretch_width",
-            styles={"flex": "1"},
-        ),
+        pn.Column(stock_panel.panel(),
+                  sizing_mode="stretch_both", styles={"flex": "2"}),
+        pn.Column(coffee_machine_panel.panel(),
+                  sizing_mode="stretch_width", styles={"flex": "1"}),
         sizing_mode="stretch_width",
         margin=(0, 0, 12, 0),
     )

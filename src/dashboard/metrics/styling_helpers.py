@@ -1,6 +1,7 @@
 import panel as pn
 import polars as pl
 
+
 COLOR_SCHEME = {
     "off-white": "#F8F4E8",
     "beige": "#EBDBCB",
@@ -34,8 +35,7 @@ def section_header(title: str) -> pn.Column:
     return pn.Column(
         pn.pane.HTML(
             f'<div style="font-size:13px;font-weight:600;margin:6px 0 2px;">{title}</div>',
-            height=22,
-            sizing_mode="stretch_width",
+            height=22, sizing_mode="stretch_width",
         ),
         pn.layout.Divider(margin=(0, 0, 2, 0), height=1),
         sizing_mode="stretch_width",
@@ -46,8 +46,7 @@ def subsection_header(title: str, top_margin: int = 8) -> pn.pane.HTML:
     """Smaller header used for sub-charts within a section (e.g. ``Agent Workload``)."""
     return pn.pane.HTML(
         f'<div style="font-size:11px;font-weight:500;margin:{top_margin}px 0 4px;">{title}</div>',
-        height=24,
-        sizing_mode="stretch_width",
+        height=24, sizing_mode="stretch_width",
     )
 
 
@@ -58,13 +57,12 @@ def small_kpi_card(label: str, value: str) -> str:
         'border:1px solid #e0e0e0;border-radius:5px;background:#fafafa;min-width:78px;">'
         f'<div style="font-size:10px;color:#666;margin-bottom:1px;">{label}</div>'
         f'<div style="font-weight:600;font-size:13px;color:#333;line-height:1.2;">{value}</div>'
-        "</div>"
+        '</div>'
     )
 
 
-def per_order_kpi_card(
-    title: str, subtitle: str, durations: pl.Series, unit: str = "orders"
-) -> str:
+def per_order_kpi_card(title: str, subtitle: str, durations: pl.Series,
+                       unit: str = "orders") -> str:
     """Per-order KPI card with title, human-readable subtitle, avg/med/n.
 
     Designed to live inside a CSS grid so the four cards distribute evenly
@@ -85,12 +83,12 @@ def per_order_kpi_card(
     footer_style = "font-size:10px;color:#999;margin-top:auto;padding-top:4px;"
     return (
         '<div style="padding:8px 10px;border:1px solid #e0e0e0;border-radius:6px;'
-        "background:#fafafa;display:flex;flex-direction:column;height:100%;"
+        'background:#fafafa;display:flex;flex-direction:column;height:100%;'
         'box-sizing:border-box;">'
         f'<div style="{title_style}">{title}</div>'
         f'<div style="{subtitle_style}">{subtitle}</div>'
         f'<div style="{avg_style}">avg {avg_str}</div>'
         f'<div style="{range_style}">min {min_str} &nbsp;·&nbsp; max {max_str}</div>'
         f'<div style="{footer_style}">n={n} {unit}</div>'
-        "</div>"
+        '</div>'
     )

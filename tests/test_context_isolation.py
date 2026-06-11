@@ -3,10 +3,9 @@
 Validates entry agent sees all messages, handoff boundary slicing,
 briefing prepend/absence, and defensive guards for non-dict handoff_context.
 """
-
 import unittest
 
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 
 from src.agents.context_isolation import create_context_isolation_hook
 
@@ -36,11 +35,7 @@ class TestHandoffAgentGetsOnlyPostBoundaryMessages(unittest.TestCase):
         messages = [
             HumanMessage(content="I want 2 espressos"),
             AIMessage(content="Processing...", name="order_agent"),
-            ToolMessage(
-                content="Successfully transferred to inventory_agent. Context: Order ORD0001",
-                name="transfer_to_agent",
-                tool_call_id="tc1",
-            ),
+            ToolMessage(content="Successfully transferred to inventory_agent. Context: Order ORD0001", name="transfer_to_agent", tool_call_id="tc1"),
             AIMessage(content="Checking stock for espresso", name="inventory_agent"),
             HumanMessage(content="extra message"),
         ]
@@ -68,11 +63,7 @@ class TestHandoffAgentGetsBriefingPrepended(unittest.TestCase):
     def test_briefing_structure(self):
         hook = create_context_isolation_hook("barista_agent")
         messages = [
-            ToolMessage(
-                content="Successfully transferred to barista_agent. Context: All items confirmed",
-                name="transfer_to_agent",
-                tool_call_id="tc2",
-            ),
+            ToolMessage(content="Successfully transferred to barista_agent. Context: All items confirmed", name="transfer_to_agent", tool_call_id="tc2"),
             AIMessage(content="Preparing order", name="barista_agent"),
         ]
         state = {
@@ -156,11 +147,7 @@ class TestOrphanedToolMessagesAreStripped(unittest.TestCase):
         messages = [
             HumanMessage(content="Ring it up"),
             # This ToolMessage has no preceding AIMessage with matching tool_use
-            ToolMessage(
-                content="Successfully transferred to inventory_agent. Context: test",
-                name="transfer_to_agent",
-                tool_call_id="tc-orphan",
-            ),
+            ToolMessage(content="Successfully transferred to inventory_agent. Context: test", name="transfer_to_agent", tool_call_id="tc-orphan"),
         ]
         state = {"messages": messages, "handoff_context": None}
         result = hook(state)
@@ -171,16 +158,8 @@ class TestOrphanedToolMessagesAreStripped(unittest.TestCase):
     def test_valid_tool_message_kept(self):
         hook = create_context_isolation_hook("inventory_agent")
         messages = [
-            ToolMessage(
-                content="Successfully transferred to inventory_agent. Context: test",
-                name="transfer_to_agent",
-                tool_call_id="tc-boundary",
-            ),
-            AIMessage(
-                content="",
-                name="inventory_agent",
-                tool_calls=[{"id": "tc-check", "name": "check_inventory", "args": {}}],
-            ),
+            ToolMessage(content="Successfully transferred to inventory_agent. Context: test", name="transfer_to_agent", tool_call_id="tc-boundary"),
+            AIMessage(content="", name="inventory_agent", tool_calls=[{"id": "tc-check", "name": "check_inventory", "args": {}}]),
             ToolMessage(content="All available", tool_call_id="tc-check"),
         ]
         state = {"messages": messages, "handoff_context": None}
@@ -196,11 +175,7 @@ class TestOrphanedToolMessagesAreStripped(unittest.TestCase):
         hook = create_context_isolation_hook("order_agent")
         messages = [
             HumanMessage(content="Go ahead"),
-            AIMessage(
-                content="",
-                name="order_agent",
-                tool_calls=[{"id": "tc-proc", "name": "process_order", "args": {}}],
-            ),
+            AIMessage(content="", name="order_agent", tool_calls=[{"id": "tc-proc", "name": "process_order", "args": {}}]),
             ToolMessage(content="Order created", tool_call_id="tc-proc"),
             # Orphaned: no AIMessage has tool_use with id="tc-ghost"
             ToolMessage(content="Ghost result", tool_call_id="tc-ghost"),
@@ -221,11 +196,7 @@ class TestEmptyMessagesAfterBoundaryNeverFalsy(unittest.TestCase):
         hook = create_context_isolation_hook("inventory_agent")
         messages = [
             HumanMessage(content="Order something"),
-            ToolMessage(
-                content="Successfully transferred to inventory_agent. Context: test",
-                name="transfer_to_agent",
-                tool_call_id="tc1",
-            ),
+            ToolMessage(content="Successfully transferred to inventory_agent. Context: test", name="transfer_to_agent", tool_call_id="tc1"),
         ]
         state = {"messages": messages, "handoff_context": None}
         result = hook(state)
@@ -238,11 +209,7 @@ class TestEmptyMessagesAfterBoundaryNeverFalsy(unittest.TestCase):
         hook = create_context_isolation_hook("inventory_agent")
         messages = [
             HumanMessage(content="Order something"),
-            ToolMessage(
-                content="Successfully transferred to inventory_agent. Context: test",
-                name="transfer_to_agent",
-                tool_call_id="tc1",
-            ),
+            ToolMessage(content="Successfully transferred to inventory_agent. Context: test", name="transfer_to_agent", tool_call_id="tc1"),
         ]
         state = {
             "messages": messages,
@@ -255,9 +222,7 @@ class TestEmptyMessagesAfterBoundaryNeverFalsy(unittest.TestCase):
         result = hook(state)
         # Should have briefing even with 0 own messages
         self.assertTrue(len(result["llm_input_messages"]) >= 1)
-        self.assertIn(
-            "[Handoff from order_agent]", result["llm_input_messages"][0].content
-        )
+        self.assertIn("[Handoff from order_agent]", result["llm_input_messages"][0].content)
 
 
 if __name__ == "__main__":

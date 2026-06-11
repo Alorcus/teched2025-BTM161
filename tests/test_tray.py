@@ -6,33 +6,24 @@ Validates:
 - check_tray tool (returns correct contents)
 - Tray consumption flow (contamination detection, order marked COMPLETED, tray cleared)
 """
-
 import json
 import unittest
 from unittest.mock import MagicMock, patch
 
-from src.agents.barista_agent import ORDER_STATUS_CACHE
-from src.agents.order_store import init_db, load_order, reset_inventory, save_order
+from src.agents.order_store import init_db, reset_inventory, save_order, load_order
 from src.agents.shared_components import Order, OrderItem, OrderStatus
 from src.agents.tray import (
-    TrayEntry,
-    _trays,
-    clear_tray,
-    get_tray,
-    tray_as_list,
+    _trays, TrayEntry, place_on_tray as tray_place,
+    get_tray, clear_tray, tray_as_list,
 )
-from src.agents.tray import (
-    place_on_tray as tray_place,
-)
-from src.agents.tray_tools import check_tray, place_on_tray
+from src.agents.tray_tools import place_on_tray, check_tray
+from src.agents.barista_agent import ORDER_STATUS_CACHE
 
 
 def _create_order(status=OrderStatus.PENDING, items=None):
     if items is None:
         items = [OrderItem(name="latte", quantity=1, price=4.0, size=None, extras=[])]
-    order = Order(
-        customer="Test", status=status, total=sum(i.price for i in items), items=items
-    )
+    order = Order(customer="Test", status=status, total=sum(i.price for i in items), items=items)
     save_order(order)
     return order.order_id_str
 
@@ -104,17 +95,10 @@ class TestPlaceOnTrayTool(unittest.TestCase):
         ORDER_STATUS_CACHE.clear()
 
     def test_place_food_item_success(self):
-        order_id = _create_order(
-            status=OrderStatus.INVENTORY_CONFIRMED,
-            items=[
-                OrderItem(
-                    name="croissant", quantity=2, price=5.50, size=None, extras=[]
-                ),
-            ],
-        )
-        result = place_on_tray.invoke(
-            {"order_id": order_id, "item_name": "croissant", "quantity": 2}
-        )
+        order_id = _create_order(status=OrderStatus.INVENTORY_CONFIRMED, items=[
+            OrderItem(name="croissant", quantity=2, price=5.50, size=None, extras=[]),
+        ])
+        result = place_on_tray.invoke({"order_id": order_id, "item_name": "croissant", "quantity": 2})
         data = json.loads(result)
         self.assertEqual(data["status"], "success")
         self.assertEqual(len(data["tray"]), 1)
@@ -123,95 +107,56 @@ class TestPlaceOnTrayTool(unittest.TestCase):
         self.assertFalse(data["tray"][0]["contaminated"])
 
     def test_place_food_wrong_status(self):
-        order_id = _create_order(
-            status=OrderStatus.PENDING,
-            items=[
-                OrderItem(
-                    name="croissant", quantity=1, price=2.75, size=None, extras=[]
-                ),
-            ],
-        )
-        result = place_on_tray.invoke(
-            {"order_id": order_id, "item_name": "croissant", "quantity": 1}
-        )
+        order_id = _create_order(status=OrderStatus.PENDING, items=[
+            OrderItem(name="croissant", quantity=1, price=2.75, size=None, extras=[]),
+        ])
+        result = place_on_tray.invoke({"order_id": order_id, "item_name": "croissant", "quantity": 1})
         data = json.loads(result)
         self.assertEqual(data["status"], "error")
         self.assertIn("Cannot place items", data["message"])
 
     def test_place_unknown_item(self):
-        result = place_on_tray.invoke(
-            {"order_id": "ORD0001", "item_name": "unicorn_frappuccino", "quantity": 1}
-        )
+        result = place_on_tray.invoke({"order_id": "ORD0001", "item_name": "unicorn_frappuccino", "quantity": 1})
         data = json.loads(result)
         self.assertEqual(data["status"], "error")
         self.assertIn("Unknown item", data["message"])
 
     def test_place_coffee_clean(self):
-        order_id = _create_order(
-            status=OrderStatus.IN_PREPARATION,
-            items=[
-                OrderItem(name="latte", quantity=1, price=4.0, size=None, extras=[]),
-            ],
-        )
-        ORDER_STATUS_CACHE[order_id] = {
-            "status": "ready",
-            "last_brew_contaminated": False,
-        }
-        result = place_on_tray.invoke(
-            {"order_id": order_id, "item_name": "latte", "quantity": 1}
-        )
+        order_id = _create_order(status=OrderStatus.IN_PREPARATION, items=[
+            OrderItem(name="latte", quantity=1, price=4.0, size=None, extras=[]),
+        ])
+        ORDER_STATUS_CACHE[order_id] = {"status": "ready", "last_brew_contaminated": False}
+        result = place_on_tray.invoke({"order_id": order_id, "item_name": "latte", "quantity": 1})
         data = json.loads(result)
         self.assertEqual(data["status"], "success")
         self.assertFalse(data["tray"][0]["contaminated"])
 
     def test_place_coffee_contaminated(self):
-        order_id = _create_order(
-            status=OrderStatus.IN_PREPARATION,
-            items=[
-                OrderItem(name="latte", quantity=1, price=4.0, size=None, extras=[]),
-            ],
-        )
-        ORDER_STATUS_CACHE[order_id] = {
-            "status": "ready",
-            "last_brew_contaminated": True,
-        }
-        result = place_on_tray.invoke(
-            {"order_id": order_id, "item_name": "latte", "quantity": 1}
-        )
+        order_id = _create_order(status=OrderStatus.IN_PREPARATION, items=[
+            OrderItem(name="latte", quantity=1, price=4.0, size=None, extras=[]),
+        ])
+        ORDER_STATUS_CACHE[order_id] = {"status": "ready", "last_brew_contaminated": True}
+        result = place_on_tray.invoke({"order_id": order_id, "item_name": "latte", "quantity": 1})
         data = json.loads(result)
         self.assertEqual(data["status"], "success")
         self.assertTrue(data["tray"][0]["contaminated"])
 
     def test_place_food_in_preparation_status(self):
         """Food can be placed when order is IN_PREPARATION (barista has started)."""
-        order_id = _create_order(
-            status=OrderStatus.IN_PREPARATION,
-            items=[
-                OrderItem(name="muffin", quantity=1, price=3.25, size=None, extras=[]),
-            ],
-        )
-        result = place_on_tray.invoke(
-            {"order_id": order_id, "item_name": "muffin", "quantity": 1}
-        )
+        order_id = _create_order(status=OrderStatus.IN_PREPARATION, items=[
+            OrderItem(name="muffin", quantity=1, price=3.25, size=None, extras=[]),
+        ])
+        result = place_on_tray.invoke({"order_id": order_id, "item_name": "muffin", "quantity": 1})
         data = json.loads(result)
         self.assertEqual(data["status"], "success")
 
     def test_place_multiple_items_accumulates(self):
-        order_id = _create_order(
-            status=OrderStatus.INVENTORY_CONFIRMED,
-            items=[
-                OrderItem(
-                    name="croissant", quantity=1, price=2.75, size=None, extras=[]
-                ),
-                OrderItem(name="muffin", quantity=1, price=3.25, size=None, extras=[]),
-            ],
-        )
-        place_on_tray.invoke(
-            {"order_id": order_id, "item_name": "croissant", "quantity": 1}
-        )
-        result = place_on_tray.invoke(
-            {"order_id": order_id, "item_name": "muffin", "quantity": 1}
-        )
+        order_id = _create_order(status=OrderStatus.INVENTORY_CONFIRMED, items=[
+            OrderItem(name="croissant", quantity=1, price=2.75, size=None, extras=[]),
+            OrderItem(name="muffin", quantity=1, price=3.25, size=None, extras=[]),
+        ])
+        place_on_tray.invoke({"order_id": order_id, "item_name": "croissant", "quantity": 1})
+        result = place_on_tray.invoke({"order_id": order_id, "item_name": "muffin", "quantity": 1})
         data = json.loads(result)
         self.assertEqual(len(data["tray"]), 2)
 
@@ -249,16 +194,12 @@ class TestTrayConsumption(unittest.TestCase):
         ORDER_STATUS_CACHE.clear()
 
     def test_consume_marks_order_completed(self):
-        order_id = _create_order(
-            status=OrderStatus.IN_PREPARATION,
-            items=[
-                OrderItem(name="latte", quantity=1, price=4.0, size=None, extras=[]),
-            ],
-        )
+        order_id = _create_order(status=OrderStatus.IN_PREPARATION, items=[
+            OrderItem(name="latte", quantity=1, price=4.0, size=None, extras=[]),
+        ])
         tray_place(order_id, "latte", 1, "coffee", contaminated=False)
 
         from src.dashboard.interaction.conversation_runner import ConversationRunner
-
         runner = ConversationRunner.__new__(ConversationRunner)
         runner._current_order_id = order_id
         runner.shop = MagicMock()
@@ -271,16 +212,12 @@ class TestTrayConsumption(unittest.TestCase):
         self.assertEqual(get_tray(order_id), [])
 
     def test_consume_injects_contamination_experience(self):
-        order_id = _create_order(
-            status=OrderStatus.IN_PREPARATION,
-            items=[
-                OrderItem(name="latte", quantity=1, price=4.0, size=None, extras=[]),
-            ],
-        )
+        order_id = _create_order(status=OrderStatus.IN_PREPARATION, items=[
+            OrderItem(name="latte", quantity=1, price=4.0, size=None, extras=[]),
+        ])
         tray_place(order_id, "latte", 1, "coffee", contaminated=True)
 
         from src.dashboard.interaction.conversation_runner import ConversationRunner
-
         runner = ConversationRunner.__new__(ConversationRunner)
         runner._current_order_id = order_id
         runner.shop = MagicMock()
@@ -295,7 +232,6 @@ class TestTrayConsumption(unittest.TestCase):
     def test_consume_no_order_id(self):
         """No crash when order_id is None."""
         from src.dashboard.interaction.conversation_runner import ConversationRunner
-
         runner = ConversationRunner.__new__(ConversationRunner)
         runner._current_order_id = None
         runner.shop = MagicMock()
@@ -304,15 +240,11 @@ class TestTrayConsumption(unittest.TestCase):
 
     def test_consume_empty_tray(self):
         """No state changes when tray is empty."""
-        order_id = _create_order(
-            status=OrderStatus.IN_PREPARATION,
-            items=[
-                OrderItem(name="latte", quantity=1, price=4.0, size=None, extras=[]),
-            ],
-        )
+        order_id = _create_order(status=OrderStatus.IN_PREPARATION, items=[
+            OrderItem(name="latte", quantity=1, price=4.0, size=None, extras=[]),
+        ])
 
         from src.dashboard.interaction.conversation_runner import ConversationRunner
-
         runner = ConversationRunner.__new__(ConversationRunner)
         runner._current_order_id = order_id
         runner.shop = MagicMock()
@@ -326,20 +258,14 @@ class TestTrayConsumption(unittest.TestCase):
 
     def test_consume_mixed_clean_and_contaminated(self):
         """Only contaminated items trigger the experience injection."""
-        order_id = _create_order(
-            status=OrderStatus.IN_PREPARATION,
-            items=[
-                OrderItem(name="latte", quantity=1, price=4.0, size=None, extras=[]),
-                OrderItem(
-                    name="croissant", quantity=1, price=2.75, size=None, extras=[]
-                ),
-            ],
-        )
+        order_id = _create_order(status=OrderStatus.IN_PREPARATION, items=[
+            OrderItem(name="latte", quantity=1, price=4.0, size=None, extras=[]),
+            OrderItem(name="croissant", quantity=1, price=2.75, size=None, extras=[]),
+        ])
         tray_place(order_id, "croissant", 1, "pastry", contaminated=False)
         tray_place(order_id, "latte", 1, "coffee", contaminated=True)
 
         from src.dashboard.interaction.conversation_runner import ConversationRunner
-
         runner = ConversationRunner.__new__(ConversationRunner)
         runner._current_order_id = order_id
         runner.shop = MagicMock()

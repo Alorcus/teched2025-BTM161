@@ -1,5 +1,6 @@
 import logging
-from dataclasses import asdict, dataclass
+
+from dataclasses import dataclass, asdict
 
 logger = logging.getLogger("coffee_shop.tray")
 
@@ -14,19 +15,8 @@ class TrayEntry:
     contaminated: bool = False
 
 
-def place_on_tray(
-    order_id: str,
-    item_name: str,
-    quantity: int,
-    category: str,
-    contaminated: bool = False,
-) -> list[dict]:
-    entry = TrayEntry(
-        item_name=item_name,
-        quantity=quantity,
-        category=category,
-        contaminated=contaminated,
-    )
+def place_on_tray(order_id: str, item_name: str, quantity: int, category: str, contaminated: bool = False) -> list[dict]:
+    entry = TrayEntry(item_name=item_name, quantity=quantity, category=category, contaminated=contaminated)
     if order_id not in _trays:
         _trays[order_id] = []
     _trays[order_id].append(entry)

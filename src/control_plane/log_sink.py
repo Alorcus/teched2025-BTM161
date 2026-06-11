@@ -29,13 +29,9 @@ class JsonlLogSink:
             with self.path.open("a", encoding="utf-8") as f:
                 f.write(line + "\n")
         if record.get("event_type") == "gateway_decision":
-            logger.debug(
-                f"logged {record.get('event_type')} - {record.get('final_decision')} - {record.get('tool_name')}: {record.get('tool_args')}",
-            )
+            logger.debug(f"logged {record.get('event_type')} - {record.get('final_decision')} - {record.get('tool_name')}: {record.get('tool_args')}", )
         elif record.get("event_type") == "tool_execution":
-            logger.debug(
-                f"logged {record.get('event_type')} - {record.get('tool_name')}: {record.get('tool_args')}",
-            )
+            logger.debug(f"logged {record.get('event_type')} - {record.get('tool_name')}: {record.get('tool_args')}", )
 
 
 class NullLogSink:

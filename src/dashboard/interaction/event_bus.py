@@ -1,7 +1,7 @@
-import time
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from queue import Empty, Queue
+from queue import Queue, Empty
+import time
 
 
 class EventType(Enum):

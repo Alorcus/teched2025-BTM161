@@ -14,13 +14,9 @@ from sqlalchemy import Engine, event
 from sqlalchemy.orm import make_transient
 from sqlmodel import Session, SQLModel, create_engine, select
 
-from .shared_components import MENU, MenuItem, Order
+from .shared_components import Order, MenuItem, MENU
 
-_DB_PATH = Path(
-    os.environ.get(
-        "COFFEE_SHOP_DB", Path(__file__).resolve().parents[2] / "coffee_shop.db"
-    )
-)
+_DB_PATH = Path(os.environ.get("COFFEE_SHOP_DB", Path(__file__).resolve().parents[2] / "coffee_shop.db"))
 _write_lock = threading.Lock()
 
 _engine_var: ContextVar[Engine] = ContextVar("coffee_shop_engine")
@@ -69,7 +65,6 @@ def get_engine() -> Engine:
 # Schema initialisation
 # ---------------------------------------------------------------------------
 
-
 def init_db() -> None:
     """Create tables if they don't exist and seed inventory from MENU."""
     SQLModel.metadata.create_all(get_engine())
@@ -93,7 +88,6 @@ def init_db() -> None:
 # Helpers
 # ---------------------------------------------------------------------------
 
-
 def _parse_order_id(order_id: str) -> Optional[int]:
     """Parse 'ORD0042' -> 42, or return None on bad format."""
     try:
@@ -105,7 +99,6 @@ def _parse_order_id(order_id: str) -> Optional[int]:
 # ---------------------------------------------------------------------------
 # Order CRUD
 # ---------------------------------------------------------------------------
-
 
 def save_order(order: Order) -> None:
     """Persist an Order (insert or update)."""
@@ -125,13 +118,9 @@ def save_order(order: Order) -> None:
                 session.commit()
                 session.refresh(order)
     if is_new:
-        logger.debug(
-            f"Order {order.order_id_str} created for {order.customer} — {len(order.items)} item(s), ${order.total:.2f}"
-        )
+        logger.debug(f"Order {order.order_id_str} created for {order.customer} — {len(order.items)} item(s), ${order.total:.2f}")
     else:
-        logger.debug(
-            f"Order {order.order_id_str} updated — status={order.status.value}, total=${order.total:.2f}"
-        )
+        logger.debug(f"Order {order.order_id_str} updated — status={order.status.value}, total=${order.total:.2f}")
 
 
 def load_order(order_id: str) -> Optional[Order]:
@@ -169,7 +158,6 @@ def load_recent_order() -> Optional[Order]:
 # Inventory operations
 # ---------------------------------------------------------------------------
 
-
 def check_inventory_availability(order: Order) -> dict:
     """Check stock levels for every item in the order (read-only)."""
     with Session(get_engine()) as session:
@@ -192,14 +180,12 @@ def check_inventory_availability(order: Order) -> dict:
                 status = "out_of_stock"
                 all_available = False
                 unavailable_items.append(oi.name)
-            details.append(
-                {
-                    "name": oi.name,
-                    "requested": oi.quantity,
-                    "available": avail,
-                    "status": status,
-                }
-            )
+            details.append({
+                "name": oi.name,
+                "requested": oi.quantity,
+                "available": avail,
+                "status": status,
+            })
 
         return {
             "all_available": all_available,
@@ -318,7 +304,6 @@ def get_alternatives_from_db(item_name: str) -> list[dict]:
 # Shared LangChain tool — all agents get this
 # ---------------------------------------------------------------------------
 
-
 class GetOrderSchema(BaseModel):
     order_id: str = Field(description="The order ID to look up (e.g. 'ORD0001')")
 
@@ -331,9 +316,7 @@ def get_order(order_id: str) -> str:
     if order is None:
         return f"Error: Order '{order_id}' not found."
 
-    summary = (
-        f"Order {order.order_id_str} ({order.status.value}) for {order.customer}:\n"
-    )
+    summary = f"Order {order.order_id_str} ({order.status.value}) for {order.customer}:\n"
     for item in order.items:
         extras_str = f" with {', '.join(item.extras)}" if item.extras else ""
         size_str = f" ({item.size.value})" if item.size else ""

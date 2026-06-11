@@ -1,9 +1,9 @@
-import html as html_mod
 import json
+import html as html_mod
 import time
 
-import panel as pn
 import param
+import panel as pn
 
 
 class AgentPanel(param.Parameterized):
@@ -51,7 +51,7 @@ class AgentPanel(param.Parameterized):
         prompt_card = pn.Card(
             pn.pane.HTML(
                 f'<pre style="font-size:11px;white-space:pre-wrap;margin:0;">'
-                f"{html_mod.escape(self.system_prompt)}</pre>",
+                f'{html_mod.escape(self.system_prompt)}</pre>',
                 sizing_mode="stretch_width",
             ),
             title="System Prompt",
@@ -77,9 +77,7 @@ class AgentPanel(param.Parameterized):
     def add_message(self, role: str, content: str, reason: str | None = None):
         ts = time.strftime("%H:%M:%S")
         msgs = list(self.messages)
-        msgs.append(
-            {"role": role, "content": content, "ts": ts, "reason": reason or ""}
-        )
+        msgs.append({"role": role, "content": content, "ts": ts, "reason": reason or ""})
         self.messages = msgs
         self._render_messages()
 
@@ -94,14 +92,7 @@ class AgentPanel(param.Parameterized):
             except (TypeError, ValueError):
                 args_str = "..."
         msgs = list(self.messages)
-        msgs.append(
-            {
-                "role": "tool_call",
-                "content": f"{name}({args_str})",
-                "ts": ts,
-                "tool_name": name,
-            }
-        )
+        msgs.append({"role": "tool_call", "content": f"{name}({args_str})", "ts": ts, "tool_name": name})
         self.messages = msgs
         self._render_messages()
 
@@ -109,14 +100,7 @@ class AgentPanel(param.Parameterized):
         ts = time.strftime("%H:%M:%S")
         result_short = result[:150] if len(result) > 150 else result
         msgs = list(self.messages)
-        msgs.append(
-            {
-                "role": "tool_result",
-                "content": f"{name} → {result_short}",
-                "ts": ts,
-                "tool_name": name,
-            }
-        )
+        msgs.append({"role": "tool_result", "content": f"{name} → {result_short}", "ts": ts, "tool_name": name})
         self.messages = msgs
         self._render_messages()
 
@@ -145,12 +129,14 @@ class AgentPanel(param.Parameterized):
             f'<strong style="color:{self.color};font-size:16px;">{html_mod.escape(self.display_name)}</strong>'
             f'<span style="background:{badge_color};color:white;padding:2px 8px;'
             f'border-radius:12px;font-size:11px;margin-left:auto;">'
-            f"{self.status.replace('_', ' ')}</span></div>"
+            f'{self.status.replace("_", " ")}</span></div>'
         )
 
     def _render_messages(self):
         if not self.messages:
-            self._messages_pane.object = '<div style="color:#999;font-size:12px;padding:8px;">No messages yet</div>'
+            self._messages_pane.object = (
+                '<div style="color:#999;font-size:12px;padding:8px;">No messages yet</div>'
+            )
             return
 
         html_parts = ['<div style="font-size:12px;max-height:300px;overflow-y:auto;">']
@@ -161,9 +147,7 @@ class AgentPanel(param.Parameterized):
             display_content = html_mod.escape(full_content[:500])
             ts = msg.get("ts", "")
             if role == "ai":
-                prefix = (
-                    f'<span style="color:{self.color};font-weight:bold;">AI:</span>'
-                )
+                prefix = f'<span style="color:{self.color};font-weight:bold;">AI:</span>'
             elif role == "ai_rejected":
                 prefix = '<span style="color:#b3261e;font-weight:bold;">AI&nbsp;[REJECTED]:</span>'
             elif role == "user":
@@ -175,16 +159,12 @@ class AgentPanel(param.Parameterized):
             elif role == "tool_result":
                 prefix = '<span style="color:#666;">→</span>'
             else:
-                prefix = (
-                    f'<span style="font-weight:bold;">{html_mod.escape(role)}:</span>'
-                )
+                prefix = f'<span style="font-weight:bold;">{html_mod.escape(role)}:</span>'
             reason = msg.get("reason") or ""
             reason_html = ""
             if reason:
                 reason_full = html_mod.escape(reason)
-                reason_short = html_mod.escape(reason[:300]) + (
-                    "…" if len(reason) > 300 else ""
-                )
+                reason_short = html_mod.escape(reason[:300]) + ("…" if len(reason) > 300 else "")
                 reason_html = (
                     f'<div style="margin-top:4px;font-size:11px;color:#8a3a34;'
                     f'font-style:italic;border-left:2px solid #b3261e;padding-left:6px;" '
@@ -197,7 +177,7 @@ class AgentPanel(param.Parameterized):
                 f'<div style="padding:4px 0;border-bottom:1px solid #eee;" title="{full_escaped}">'
                 f'<span style="color:#999;font-size:10px;margin-right:4px;">{ts}</span>'
                 f'{prefix} <span style="{body_style}">{display_content}</span>'
-                f"{reason_html}</div>"
+                f'{reason_html}</div>'
             )
         html_parts.append("</div>")
         self._messages_pane.object = "\n".join(html_parts)

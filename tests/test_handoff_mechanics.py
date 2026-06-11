@@ -3,18 +3,18 @@
 Validates handoff tools produce correct Command updates, resolve from_agent,
 clear handoff_context between turns, and don't duplicate messages.
 """
-
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch, MagicMock
 
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.prebuilt.tool_node import ToolNode
 from langgraph.types import Command
+from langchain_core.messages import AIMessage, ToolMessage, HumanMessage
 
 from src.agents.shared_components import (
+    transfer_to_agent, 
     _resolve_from_agent,
-    transfer_to_agent,
 )
+
 
 TOOLS_AND_TARGETS = [
     (transfer_to_agent, "inventory_agent"),
@@ -56,11 +56,8 @@ class TestHandoffToolReturnsOnlyNewMessage(unittest.TestCase):
             with self.subTest(tool=tool.name):
                 cmd = _invoke_handoff(tool, target=target)
                 msgs = cmd.update["messages"]
-                self.assertEqual(
-                    len(msgs),
-                    1,
-                    f"{tool.name} should emit exactly 1 message, got {len(msgs)}",
-                )
+                self.assertEqual(len(msgs), 1,
+                                 f"{tool.name} should emit exactly 1 message, got {len(msgs)}")
                 self.assertIsInstance(msgs[0], ToolMessage)
 
 
@@ -119,10 +116,9 @@ class TestHandoffContextClearedOnNewTurn(unittest.TestCase):
     """Test 7: handoff_context: None in stream input clears stale context."""
 
     def test_context_cleared_between_turns(self):
-        from langgraph.checkpoint.memory import InMemorySaver
         from langgraph.graph import StateGraph
         from langgraph_swarm import add_active_agent_router
-
+        from langgraph.checkpoint.memory import InMemorySaver
         from src.agents.shared_components import CoffeeShopState
 
         checkpointer = InMemorySaver()

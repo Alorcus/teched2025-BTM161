@@ -1,8 +1,8 @@
-import logging
-import os
-import random
 import time
 import uuid
+import random
+import os
+import logging
 from collections import defaultdict
 
 from .logger import log_event
@@ -40,10 +40,11 @@ def emit_event(job, activity: str, duration: float = None):
     timestamp = time.time()
 
     event = {
-        "case_id": job["correlation_id"],  # OCEL case (process instance)
-        "activity": activity,  # event type
-        "timestamp": timestamp,  # OCEL time
+        "case_id": job["correlation_id"],   # OCEL case (process instance)
+        "activity": activity,               # event type
+        "timestamp": timestamp,             # OCEL time
         "duration": duration,
+
         # optional object attributes (for OCEL enrichment)
         "job_id": job["job_id"],
         "drink": job["drink"],
@@ -52,12 +53,7 @@ def emit_event(job, activity: str, duration: float = None):
     log_event(**event)
 
     job_events[job["job_id"]].append(event)
-    logger.debug(
-        "Event emitted: %s for job %s (case %s)",
-        activity,
-        job["job_id"][:8],
-        job["correlation_id"],
-    )
+    logger.debug("Event emitted: %s for job %s (case %s)", activity, job["job_id"][:8], job["correlation_id"])
 
     return event
 
@@ -80,11 +76,14 @@ def create_job(drink: str, correlation_id: str):
         "job_id": job_id,
         "drink": drink,
         "correlation_id": correlation_id,
+
         "status": "created",
         "created_at": time.time(),
+
         "duration": duration,
         "will_fail": will_fail,
         "contaminated": machine_dirty and not will_fail,
+
         "started_at": None,
         "finished_at": None,
         "logged_finished": False,
@@ -94,13 +93,7 @@ def create_job(drink: str, correlation_id: str):
 
     # OCEL lifecycle start
     emit_event(job, "user_prompt")
-    logger.info(
-        "Job created: %s (drink=%s, duration=%.1fs, contaminated=%s)",
-        job_id[:8],
-        drink,
-        duration,
-        job["contaminated"],
-    )
+    logger.info("Job created: %s (drink=%s, duration=%.1fs, contaminated=%s)", job_id[:8], drink, duration, job["contaminated"])
 
     return job
 
@@ -148,7 +141,7 @@ def get_job(job_id: str):
         emit_event(
             job,
             "brew_completed" if status == "ready" else "brew_failed",
-            duration=job["duration"],
+            duration=job["duration"]
         )
 
         if status == "failed":

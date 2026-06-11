@@ -3,22 +3,21 @@
 Validates concurrency (lock, double-start, flag reset), error handling,
 deduplication, max turns, and messages key matching.
 """
-
 import threading
 import time
 import unittest
-from unittest.mock import MagicMock, PropertyMock, patch
+from unittest.mock import MagicMock, patch, PropertyMock
 
 from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage, ToolMessage
 
 from src.config import CoffeeShopConfig
-from src.dashboard.interaction.conversation_runner import (
-    MAX_CONVERSATION_TURNS,
-    ConversationRunner,
-    _rejected_content,
-    _summarize_tool_calls,
-)
 from src.dashboard.interaction.event_bus import EventBus, EventType
+from src.dashboard.interaction.conversation_runner import (
+    ConversationRunner,
+    MAX_CONVERSATION_TURNS,
+    _summarize_tool_calls,
+    _rejected_content,
+)
 
 
 def _make_mock_shop():
@@ -36,9 +35,7 @@ class TestRunnerStartSetsIsRunning(unittest.TestCase):
         shop = _make_mock_shop()
         # Make stream block until we release it
         block = threading.Event()
-        shop.app.stream.side_effect = lambda *a, **kw: (
-            iter([]) if block.wait(0.5) else iter([])
-        )
+        shop.app.stream.side_effect = lambda *a, **kw: iter([]) if block.wait(0.5) else iter([])
         shop.customer_agent.get_initial_message.return_value = "hello"
         shop.customer_agent.respond_to.return_value = None
 
@@ -124,10 +121,7 @@ class TestStreamErrorPublishesEventAndReturnsNone(unittest.TestCase):
 
         # Stream yields one item then raises
         def failing_stream(*a, **kw):
-            yield (
-                ("order_agent:abc",),
-                {"agent": {"messages": [AIMessage(content="hi", name="order_agent")]}},
-            )
+            yield (("order_agent:abc",), {"agent": {"messages": [AIMessage(content="hi", name="order_agent")]}})
             raise RuntimeError("API rate limit")
 
         shop.app.stream.side_effect = failing_stream
@@ -140,9 +134,7 @@ class TestStreamErrorPublishesEventAndReturnsNone(unittest.TestCase):
         runner._thread.join(timeout=5)
 
         events = bus.drain()
-        error_events = [
-            e for e in events if "stream error" in (e.content or "").lower()
-        ]
+        error_events = [e for e in events if "stream error" in (e.content or "").lower()]
         self.assertTrue(len(error_events) > 0)
 
 
@@ -169,12 +161,8 @@ class TestStreamDeduplicatesMessages(unittest.TestCase):
         runner._thread.join(timeout=5)
 
         events = bus.drain()
-        agent_msgs = [
-            e
-            for e in events
-            if e.event_type == EventType.AGENT_MESSAGE
-            and e.content == "Order received!"
-        ]
+        agent_msgs = [e for e in events if e.event_type == EventType.AGENT_MESSAGE
+                      and e.content == "Order received!"]
         self.assertEqual(len(agent_msgs), 1)
 
 
@@ -201,11 +189,8 @@ class TestSameContentDifferentIdNotDeduplicated(unittest.TestCase):
         runner._thread.join(timeout=5)
 
         events = bus.drain()
-        agent_msgs = [
-            e
-            for e in events
-            if e.event_type == EventType.AGENT_MESSAGE and e.content == "OK"
-        ]
+        agent_msgs = [e for e in events if e.event_type == EventType.AGENT_MESSAGE
+                      and e.content == "OK"]
         self.assertEqual(len(agent_msgs), 2)
 
 
@@ -219,11 +204,8 @@ class TestMaxTurnsLimit(unittest.TestCase):
 
         def stream_reply(*a, **kw):
             call_count[0] += 1
-            msg = AIMessage(
-                content=f"reply {call_count[0]}",
-                name="order_agent",
-                id=f"msg-{call_count[0]}",
-            )
+            msg = AIMessage(content=f"reply {call_count[0]}", name="order_agent",
+                            id=f"msg-{call_count[0]}")
             yield (("order_agent:abc",), {"agent": {"messages": [msg]}})
 
         shop.app.stream.side_effect = stream_reply
@@ -246,20 +228,13 @@ class TestMessagesKeyExactMatch(unittest.TestCase):
         shop = _make_mock_shop()
 
         real_msg = AIMessage(content="real", name="order_agent", id="msg-real")
-        fake_msg = AIMessage(
-            content="should be ignored", name="order_agent", id="msg-fake"
-        )
+        fake_msg = AIMessage(content="should be ignored", name="order_agent", id="msg-fake")
 
         def stream_with_bad_key(*a, **kw):
-            yield (
-                ("order_agent:abc",),
-                {
-                    "agent": {
-                        "messages": [real_msg],
-                        "error_messages": [fake_msg],
-                    }
-                },
-            )
+            yield (("order_agent:abc",), {"agent": {
+                "messages": [real_msg],
+                "error_messages": [fake_msg],
+            }})
 
         shop.app.stream.side_effect = stream_with_bad_key
         shop.customer_agent.get_initial_message.return_value = "hi"
@@ -317,28 +292,19 @@ class TestUserVisibleFollowsHandoff(unittest.TestCase):
             call_count[0] += 1
             if call_count[0] == 1:
                 # First turn: order_agent replies then hands off to barista
-                msg = AIMessage(
-                    content="Let me brew that", name="order_agent", id="msg-1"
-                )
-                yield (
-                    ("order_agent:abc",),
-                    {
-                        "agent": {
-                            "messages": [msg],
-                            "active_agent": "barista_agent",
-                            "handoff_context": {
-                                "from_agent": "order_agent",
-                                "context_summary": "Customer wants a latte",
-                                "expectation": "Brew the latte",
-                            },
-                        }
+                msg = AIMessage(content="Let me brew that", name="order_agent", id="msg-1")
+                yield (("order_agent:abc",), {"agent": {
+                    "messages": [msg],
+                    "active_agent": "barista_agent",
+                    "handoff_context": {
+                        "from_agent": "order_agent",
+                        "context_summary": "Customer wants a latte",
+                        "expectation": "Brew the latte",
                     },
-                )
+                }})
             else:
                 # Second turn: barista replies
-                msg = AIMessage(
-                    content="Coffee is ready!", name="barista_agent", id="msg-2"
-                )
+                msg = AIMessage(content="Coffee is ready!", name="barista_agent", id="msg-2")
                 yield (("barista_agent:def",), {"agent": {"messages": [msg]}})
 
         shop.app.stream.side_effect = stream_with_handoff
@@ -393,16 +359,11 @@ class TestHandoffNotDuplicatedOnEcho(unittest.TestCase):
                     name="inventory_agent",
                     id="msg-handoff",
                 )
-                yield (
-                    ("inventory_agent:abc",),
-                    {
-                        "agent": {
-                            "messages": [handoff_msg],
-                            "active_agent": "barista_agent",
-                            "handoff_context": hc,
-                        }
-                    },
-                )
+                yield (("inventory_agent:abc",), {"agent": {
+                    "messages": [handoff_msg],
+                    "active_agent": "barista_agent",
+                    "handoff_context": hc,
+                }})
                 # Barista produces its final reply.
                 final_msg = AIMessage(
                     content="Order complete!",
@@ -413,28 +374,14 @@ class TestHandoffNotDuplicatedOnEcho(unittest.TestCase):
                 # Parent-level echo: the same handoff_context is still in state
                 # and gets re-emitted by a terminal/router update. This is the
                 # scenario that produced the duplicate HANDOFF in the global log.
-                yield (
-                    (),
-                    {
-                        "router": {
-                            "active_agent": "barista_agent",
-                            "handoff_context": hc,
-                        }
-                    },
-                )
+                yield ((), {"router": {
+                    "active_agent": "barista_agent",
+                    "handoff_context": hc,
+                }})
             else:
-                yield (
-                    ("barista_agent:def",),
-                    {
-                        "agent": {
-                            "messages": [
-                                AIMessage(
-                                    content="bye", name="barista_agent", id="msg-bye"
-                                )
-                            ],
-                        }
-                    },
-                )
+                yield (("barista_agent:def",), {"agent": {
+                    "messages": [AIMessage(content="bye", name="barista_agent", id="msg-bye")],
+                }})
 
         shop.app.stream.side_effect = stream_with_echo
         shop.customer_agent.get_initial_message.return_value = "I want a latte"
@@ -456,40 +403,24 @@ class TestHandoffNotDuplicatedOnEcho(unittest.TestCase):
         shop = _make_mock_shop()
 
         def stream_two_handoffs(*a, **kw):
-            yield (
-                ("order_agent:abc",),
-                {
-                    "agent": {
-                        "messages": [
-                            AIMessage(content="to inv", name="order_agent", id="m1")
-                        ],
-                        "active_agent": "inventory_agent",
-                        "handoff_context": {
-                            "from_agent": "order_agent",
-                            "context_summary": "check stock",
-                            "expectation": "verify",
-                        },
-                    }
+            yield (("order_agent:abc",), {"agent": {
+                "messages": [AIMessage(content="to inv", name="order_agent", id="m1")],
+                "active_agent": "inventory_agent",
+                "handoff_context": {
+                    "from_agent": "order_agent",
+                    "context_summary": "check stock",
+                    "expectation": "verify",
                 },
-            )
-            yield (
-                ("inventory_agent:def",),
-                {
-                    "agent": {
-                        "messages": [
-                            AIMessage(
-                                content="to barista", name="inventory_agent", id="m2"
-                            )
-                        ],
-                        "active_agent": "barista_agent",
-                        "handoff_context": {
-                            "from_agent": "inventory_agent",
-                            "context_summary": "stock ok",
-                            "expectation": "brew",
-                        },
-                    }
+            }})
+            yield (("inventory_agent:def",), {"agent": {
+                "messages": [AIMessage(content="to barista", name="inventory_agent", id="m2")],
+                "active_agent": "barista_agent",
+                "handoff_context": {
+                    "from_agent": "inventory_agent",
+                    "context_summary": "stock ok",
+                    "expectation": "brew",
                 },
-            )
+            }})
 
         shop.app.stream.side_effect = stream_two_handoffs
         shop.customer_agent.get_initial_message.return_value = "hi"
@@ -519,30 +450,19 @@ class TestActiveAgentResetsOnNewConversation(unittest.TestCase):
             call_count[0] += 1
             if call_count[0] == 1:
                 # Handoff to barista on first conversation
-                msg = AIMessage(
-                    content="Handing off",
-                    name="order_agent",
-                    id=f"msg-h{call_count[0]}",
-                )
-                yield (
-                    ("order_agent:abc",),
-                    {
-                        "agent": {
-                            "messages": [msg],
-                            "active_agent": "barista_agent",
-                            "handoff_context": {
-                                "from_agent": "order_agent",
-                                "context_summary": "ctx",
-                                "expectation": "brew",
-                            },
-                        }
+                msg = AIMessage(content="Handing off", name="order_agent", id=f"msg-h{call_count[0]}")
+                yield (("order_agent:abc",), {"agent": {
+                    "messages": [msg],
+                    "active_agent": "barista_agent",
+                    "handoff_context": {
+                        "from_agent": "order_agent",
+                        "context_summary": "ctx",
+                        "expectation": "brew",
                     },
-                )
+                }})
             else:
                 # Simple reply
-                msg = AIMessage(
-                    content="Hello!", name="order_agent", id=f"msg-s{call_count[0]}"
-                )
+                msg = AIMessage(content="Hello!", name="order_agent", id=f"msg-s{call_count[0]}")
                 yield (("order_agent:abc",), {"agent": {"messages": [msg]}})
 
         shop.app.stream.side_effect = stream_handoff
@@ -609,27 +529,19 @@ class TestActiveSupervisorSuppressesViolation(unittest.TestCase):
 
     def test_suppress_publish_and_resume(self):
         shop = _active_shop()
-        bad_msg = AIMessage(
-            content="off-topic chitchat", name="order_agent", id="bad-1"
-        )
-        good_msg = AIMessage(
-            content="Got it: one latte!", name="order_agent", id="good-1"
-        )
+        bad_msg = AIMessage(content="off-topic chitchat", name="order_agent", id="bad-1")
+        good_msg = AIMessage(content="Got it: one latte!", name="order_agent", id="good-1")
         # Simulate the parent-graph checkpoint storing the offending AIMessage
         # under a different id (typical when streaming through subgraphs).
-        bad_in_state = AIMessage(
-            content="off-topic chitchat", name="order_agent", id="state-bad-1"
-        )
+        bad_in_state = AIMessage(content="off-topic chitchat", name="order_agent", id="state-bad-1")
         snap = MagicMock()
         snap.values = {"messages": [bad_in_state]}
         shop.app.get_state.return_value = snap
 
-        verdicts = iter(
-            [
-                "Violation:llm_unknown_activity_A99 | AIMessage[order_agent] text=off-topic",
-                "Execution:A01:identify_customer_request | AIMessage[order_agent] text=Got it",
-            ]
-        )
+        verdicts = iter([
+            "Violation:llm_unknown_activity_A99 | AIMessage[order_agent] text=off-topic",
+            "Execution:A01:identify_customer_request | AIMessage[order_agent] text=Got it",
+        ])
         shop.process_supervisor.observe.side_effect = lambda *_a, **_k: next(verdicts)
 
         call_count = [0]
@@ -651,14 +563,9 @@ class TestActiveSupervisorSuppressesViolation(unittest.TestCase):
         runner._thread.join(timeout=5)
 
         events = bus.drain()
-        agent_msgs = [
-            e
-            for e in events
-            if e.event_type == EventType.AGENT_MESSAGE and e.agent_name == "order_agent"
-        ]
-        rejected = [
-            e for e in events if e.event_type == EventType.AGENT_MESSAGE_REJECTED
-        ]
+        agent_msgs = [e for e in events if e.event_type == EventType.AGENT_MESSAGE
+                      and e.agent_name == "order_agent"]
+        rejected = [e for e in events if e.event_type == EventType.AGENT_MESSAGE_REJECTED]
 
         self.assertEqual(len(rejected), 1, f"want 1 rejection, got {len(rejected)}")
         self.assertEqual(rejected[0].content, "off-topic chitchat")
@@ -676,12 +583,7 @@ class TestActiveSupervisorSuppressesViolation(unittest.TestCase):
         self.assertEqual(shop.app.update_state.call_count, 1)
         patch_dict = shop.app.update_state.call_args[0][1]
         patch_msgs = patch_dict["messages"]
-        self.assertTrue(
-            any(
-                isinstance(m, RemoveMessage) and m.id == "state-bad-1"
-                for m in patch_msgs
-            )
-        )
+        self.assertTrue(any(isinstance(m, RemoveMessage) and m.id == "state-bad-1" for m in patch_msgs))
         # The second stream() call was invoked with the critique HumanMessage
         # as fresh input.
         self.assertEqual(shop.app.stream.call_count, 2)
@@ -705,13 +607,11 @@ class TestCritiqueAccumulatesInSingleHumanMessage(unittest.TestCase):
             AIMessage(content="haiku about leaves", name="order_agent", id="a-2"),
             AIMessage(content="One latte coming up!", name="order_agent", id="a-3"),
         ]
-        verdicts = iter(
-            [
-                "Violation:r1 | x",
-                "Violation:r2 | y",
-                "Execution:A01:identify_customer_request | z",
-            ]
-        )
+        verdicts = iter([
+            "Violation:r1 | x",
+            "Violation:r2 | y",
+            "Execution:A01:identify_customer_request | z",
+        ])
         critiques = iter(["crit-1", "crit-2"])
         shop.process_supervisor.observe.side_effect = lambda *_a, **_k: next(verdicts)
         shop.process_supervisor.critique.side_effect = lambda *_a, **_k: next(critiques)
@@ -734,9 +634,7 @@ class TestCritiqueAccumulatesInSingleHumanMessage(unittest.TestCase):
 
         # Two rejections were published.
         events = bus.drain()
-        rejected = [
-            e for e in events if e.event_type == EventType.AGENT_MESSAGE_REJECTED
-        ]
+        rejected = [e for e in events if e.event_type == EventType.AGENT_MESSAGE_REJECTED]
         self.assertEqual(len(rejected), 2)
 
         # Each rejection should have produced a stream() invocation whose
@@ -745,12 +643,8 @@ class TestCritiqueAccumulatesInSingleHumanMessage(unittest.TestCase):
         self.assertEqual(shop.app.stream.call_count, 3)  # initial + 2 retries
         second_input = shop.app.stream.call_args_list[1][0][0]
         third_input = shop.app.stream.call_args_list[2][0][0]
-        first_crit = next(
-            m for m in second_input["messages"] if isinstance(m, HumanMessage)
-        )
-        second_crit = next(
-            m for m in third_input["messages"] if isinstance(m, HumanMessage)
-        )
+        first_crit = next(m for m in second_input["messages"] if isinstance(m, HumanMessage))
+        second_crit = next(m for m in third_input["messages"] if isinstance(m, HumanMessage))
 
         self.assertEqual(first_crit.id, second_crit.id)  # same HumanMessage
         self.assertIn("weather report", second_crit.content)
@@ -801,20 +695,11 @@ class TestRetryCapDeadlocksInsteadOfBypass(unittest.TestCase):
         runner._thread.join(timeout=5)
 
         events = bus.drain()
-        rejected = [
-            e for e in events if e.event_type == EventType.AGENT_MESSAGE_REJECTED
-        ]
-        agent_msgs = [
-            e
-            for e in events
-            if e.event_type == EventType.AGENT_MESSAGE and e.agent_name == "order_agent"
-        ]
+        rejected = [e for e in events if e.event_type == EventType.AGENT_MESSAGE_REJECTED]
+        agent_msgs = [e for e in events if e.event_type == EventType.AGENT_MESSAGE
+                      and e.agent_name == "order_agent"]
 
-        self.assertEqual(
-            len(rejected),
-            4,
-            f"want 4 rejections (3 retries + 1 cap-hit), got {len(rejected)}",
-        )
+        self.assertEqual(len(rejected), 4, f"want 4 rejections (3 retries + 1 cap-hit), got {len(rejected)}")
         self.assertEqual(len(agent_msgs), 0, "no normal AGENT_MESSAGE after cap")
         # supervisor_retry_exhausted was logged.
         shop.process_supervisor.append_violation.assert_called_once_with(
@@ -831,9 +716,7 @@ class TestInactiveFlagPreservesPassiveBehavior(unittest.TestCase):
         shop = _make_mock_shop()
         shop.config = CoffeeShopConfig(process_supervisor_active=False)
         shop.process_supervisor = MagicMock()
-        shop.process_supervisor.observe.return_value = (
-            "Violation:llm_unknown_activity_A99 | x"
-        )
+        shop.process_supervisor.observe.return_value = "Violation:llm_unknown_activity_A99 | x"
 
         msg = AIMessage(content="off-topic", name="order_agent", id="x")
 
@@ -850,19 +733,16 @@ class TestInactiveFlagPreservesPassiveBehavior(unittest.TestCase):
         runner._thread.join(timeout=5)
 
         events = bus.drain()
-        rejected = [
-            e for e in events if e.event_type == EventType.AGENT_MESSAGE_REJECTED
-        ]
-        agent_msgs = [
-            e
-            for e in events
-            if e.event_type == EventType.AGENT_MESSAGE and e.agent_name == "order_agent"
-        ]
+        rejected = [e for e in events if e.event_type == EventType.AGENT_MESSAGE_REJECTED]
+        agent_msgs = [e for e in events if e.event_type == EventType.AGENT_MESSAGE
+                      and e.agent_name == "order_agent"]
 
         self.assertEqual(len(rejected), 0)
         self.assertEqual(len(agent_msgs), 1)
         self.assertEqual(agent_msgs[0].content, "off-topic")
-        self.assertTrue((agent_msgs[0].supervisor_line or "").startswith("Violation:"))
+        self.assertTrue(
+            (agent_msgs[0].supervisor_line or "").startswith("Violation:")
+        )
         shop.app.update_state.assert_not_called()
         shop.process_supervisor.critique.assert_not_called()
 
@@ -879,10 +759,8 @@ class TestViolationOnUserOrToolResultIgnored(unittest.TestCase):
         shop.process_supervisor.observe.return_value = "Violation:weird | x"
 
         tool_msg = ToolMessage(
-            content='{"ok": true}',
-            name="check_inventory",
-            tool_call_id="tc-1",
-            id="tm-1",
+            content='{"ok": true}', name="check_inventory",
+            tool_call_id="tc-1", id="tm-1",
         )
 
         def stream(*_a, **_kw):
@@ -898,9 +776,7 @@ class TestViolationOnUserOrToolResultIgnored(unittest.TestCase):
         runner._thread.join(timeout=5)
 
         events = bus.drain()
-        rejected = [
-            e for e in events if e.event_type == EventType.AGENT_MESSAGE_REJECTED
-        ]
+        rejected = [e for e in events if e.event_type == EventType.AGENT_MESSAGE_REJECTED]
         tool_results = [e for e in events if e.event_type == EventType.TOOL_RESULT]
         self.assertEqual(len(rejected), 0)
         self.assertEqual(len(tool_results), 1)
@@ -918,33 +794,28 @@ class TestToolCallViolationSummarizedToProse(unittest.TestCase):
             content="",
             name="order_agent",
             id="bad-tc",
-            tool_calls=[
-                {
-                    "name": "transfer_to_barista",
-                    "args": {
-                        "target_agent": "barista_agent",
-                        "context_summary": "premature handoff",
-                        "expectation": "brew",
-                    },
-                    "id": "tc-1",
-                }
-            ],
+            tool_calls=[{
+                "name": "transfer_to_barista",
+                "args": {
+                    "target_agent": "barista_agent",
+                    "context_summary": "premature handoff",
+                    "expectation": "brew",
+                },
+                "id": "tc-1",
+            }],
         )
         good = AIMessage(content="Sure thing!", name="order_agent", id="good-tc")
-        verdicts = iter(
-            [
-                "Violation:premature_handoff | AIMessage[order_agent] tool_calls=[...]",
-                "Execution:A01:identify_customer_request | x",
-            ]
-        )
+        verdicts = iter([
+            "Violation:premature_handoff | AIMessage[order_agent] tool_calls=[...]",
+            "Execution:A01:identify_customer_request | x",
+        ])
         shop.process_supervisor.observe.side_effect = lambda *_a, **_k: next(verdicts)
 
         idx = [0]
         msgs = [bad, good]
 
         def stream(*_a, **_kw):
-            i = idx[0]
-            idx[0] += 1
+            i = idx[0]; idx[0] += 1
             yield (("order_agent:abc",), {"agent": {"messages": [msgs[i]]}})
 
         shop.app.stream.side_effect = stream
@@ -957,34 +828,25 @@ class TestToolCallViolationSummarizedToProse(unittest.TestCase):
         runner._thread.join(timeout=5)
 
         events = bus.drain()
-        rejected = [
-            e for e in events if e.event_type == EventType.AGENT_MESSAGE_REJECTED
-        ]
-        tool_calls = [
-            e
-            for e in events
-            if e.event_type == EventType.TOOL_CALL and e.agent_name == "order_agent"
-        ]
+        rejected = [e for e in events if e.event_type == EventType.AGENT_MESSAGE_REJECTED]
+        tool_calls = [e for e in events if e.event_type == EventType.TOOL_CALL
+                      and e.agent_name == "order_agent"]
         executed_tool_calls = [
-            e
-            for e in tool_calls
+            e for e in tool_calls
             if not (e.supervisor_line or "").startswith("REJECTED")
         ]
         rejected_tool_calls = [
-            e for e in tool_calls if (e.supervisor_line or "").startswith("REJECTED")
+            e for e in tool_calls
+            if (e.supervisor_line or "").startswith("REJECTED")
         ]
 
         self.assertEqual(len(rejected), 1)
         self.assertIn("hand off to barista_agent", rejected[0].content)
         self.assertNotIn("{", rejected[0].content[:5])  # not raw JSON
-        self.assertEqual(
-            len(executed_tool_calls), 0, "no executed tool_call for rejected attempt"
-        )
-        self.assertEqual(
-            len(rejected_tool_calls),
-            1,
-            "exactly one render-only TOOL_CALL row for the rejected tool_call",
-        )
+        self.assertEqual(len(executed_tool_calls), 0,
+                         "no executed tool_call for rejected attempt")
+        self.assertEqual(len(rejected_tool_calls), 1,
+                         "exactly one render-only TOOL_CALL row for the rejected tool_call")
         self.assertEqual(rejected_tool_calls[0].tool_name, "transfer_to_barista")
 
         # Critique HumanMessage rides in the resume input, not the state patch.
@@ -997,39 +859,26 @@ class TestSummarizeToolCalls(unittest.TestCase):
     """Pure function: tool_calls → prose summary."""
 
     def test_handoff(self):
-        s = _summarize_tool_calls(
-            [
-                {
-                    "name": "transfer_to_barista",
-                    "args": {
-                        "target_agent": "barista_agent",
-                        "context_summary": "one latte",
-                    },
-                }
-            ]
-        )
+        s = _summarize_tool_calls([{
+            "name": "transfer_to_barista",
+            "args": {"target_agent": "barista_agent", "context_summary": "one latte"},
+        }])
         self.assertIn("hand off to barista_agent", s)
         self.assertIn("one latte", s)
 
     def test_regular_tool(self):
-        s = _summarize_tool_calls(
-            [
-                {
-                    "name": "process_order",
-                    "args": {"item": "latte"},
-                }
-            ]
-        )
+        s = _summarize_tool_calls([{
+            "name": "process_order",
+            "args": {"item": "latte"},
+        }])
         self.assertIn("process_order", s)
         self.assertIn('"item"', s)
 
     def test_multi(self):
-        s = _summarize_tool_calls(
-            [
-                {"name": "a", "args": {}},
-                {"name": "b", "args": {}},
-            ]
-        )
+        s = _summarize_tool_calls([
+            {"name": "a", "args": {}},
+            {"name": "b", "args": {}},
+        ])
         self.assertIn(";", s)
         self.assertIn("call a", s)
         self.assertIn("call b", s)

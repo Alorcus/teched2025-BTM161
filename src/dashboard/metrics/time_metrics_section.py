@@ -5,12 +5,8 @@ import polars as pl
 from src.trace_processing.eventlog_conversion import ObjectCentricEventlog
 
 from .eventlog_helpers import flat_event_table, per_order_durations
-from .styling_helpers import (
-    COLOR_SCHEME,
-    per_order_kpi_card,
-    section_header,
-    subsection_header,
-)
+from .styling_helpers import COLOR_SCHEME, per_order_kpi_card, section_header, subsection_header
+
 
 # Per-order KPI configuration. (label, subtitle, column-in-per_order_durations, unit)
 _PER_ORDER_CARDS: list[tuple[str, str, str, str]] = [
@@ -74,9 +70,7 @@ class TimeMetricsSection:
 
     def _avg_activity_chart(self) -> pn.viewable.Viewable:
         events_flat = flat_event_table(self._ocel)
-        non_handover = events_flat.filter(
-            ~pl.col("ocel_type").str.contains("_handover_")
-        )
+        non_handover = events_flat.filter(~pl.col("ocel_type").str.contains("_handover_"))
         duration_stats = (
             non_handover.drop_nulls("duration")
             .group_by("ocel_type")
@@ -92,11 +86,8 @@ class TimeMetricsSection:
 
         fig = px.bar(
             duration_stats.to_pandas().head(15),
-            x="avg_duration",
-            y="ocel_type",
-            orientation="h",
-            color="avg_duration",
-            color_continuous_scale="Oranges",
+            x="avg_duration", y="ocel_type", orientation="h",
+            color="avg_duration", color_continuous_scale="Oranges",
             labels={"ocel_type": "Activity", "avg_duration": "Avg Duration (s)"},
             hover_data={"median_duration": True, "max_duration": True},
         )

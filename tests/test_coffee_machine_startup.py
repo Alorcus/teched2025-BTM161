@@ -1,15 +1,10 @@
 """Test that start_coffee_machine() launches a working server with all endpoints."""
-
 import time
 import unittest
 
 import requests
 
-from src.agents.barista_agent import (
-    COFFEE_MACHINE_URL,
-    start_coffee_machine,
-    stop_coffee_machine,
-)
+from src.agents.barista_agent import start_coffee_machine, stop_coffee_machine, COFFEE_MACHINE_URL
 
 
 class TestCoffeeMachineStartup(unittest.TestCase):

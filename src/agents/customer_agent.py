@@ -1,10 +1,10 @@
 import json
-import random
 import re
-
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+import random
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 
 from ..llm import normalize_content
+
 
 CUSTOMER_SCENARIOS = [
     "You want to order a large latte and a croissant. Be friendly.",
@@ -16,11 +16,7 @@ CUSTOMER_SCENARIOS = [
 
 def build_default_prompt(scenario_index: int = 0) -> str:
     """Build the full default system prompt for a given scenario index."""
-    scenario = (
-        CUSTOMER_SCENARIOS[scenario_index]
-        if 0 <= scenario_index < len(CUSTOMER_SCENARIOS)
-        else CUSTOMER_SCENARIOS[0]
-    )
+    scenario = CUSTOMER_SCENARIOS[scenario_index] if 0 <= scenario_index < len(CUSTOMER_SCENARIOS) else CUSTOMER_SCENARIOS[0]
     return f"""You are a customer at an AI-powered coffee shop chatting with the staff.
 
 Your goal: {scenario}
@@ -73,19 +69,17 @@ Guidelines:
             if r in ("customer", "agent")
         )
         messages = [
-            SystemMessage(
-                content=(
-                    "You are a customer at a coffee shop. You just finished a conversation with the staff.\n"
-                    "Rate the quality of service from your subjective customer perspective on a scale from 0.0 to 1.0.\n"
-                    "Use these anchors to calibrate your score:\n"
-                    "- 1.0: excellent — smooth and successful, received exactly what was requested or a well-communicated alternative\n"
-                    "- 0.5: acceptable — minor issues, small substitutions, or slight friction, but still okay overall\n"
-                    "- 0.0: poor — wrong item, no communication about substitution, long wait, confusing interaction, or unresolved complaint\n"
-                    "You may use any value between 0.0 and 1.0, e.g. 0.7 for mostly good but one small issue.\n"
-                    "Return only valid JSON in this exact format:\n"
-                    '{"score": 0.85, "reason": "short explanation"}'
-                )
-            ),
+            SystemMessage(content=(
+                "You are a customer at a coffee shop. You just finished a conversation with the staff.\n"
+                "Rate the quality of service from your subjective customer perspective on a scale from 0.0 to 1.0.\n"
+                "Use these anchors to calibrate your score:\n"
+                "- 1.0: excellent — smooth and successful, received exactly what was requested or a well-communicated alternative\n"
+                "- 0.5: acceptable — minor issues, small substitutions, or slight friction, but still okay overall\n"
+                "- 0.0: poor — wrong item, no communication about substitution, long wait, confusing interaction, or unresolved complaint\n"
+                "You may use any value between 0.0 and 1.0, e.g. 0.7 for mostly good but one small issue.\n"
+                'Return only valid JSON in this exact format:\n'
+                '{"score": 0.85, "reason": "short explanation"}'
+            )),
             HumanMessage(content=f"Your conversation:\n{history_text}\n\nYour rating:"),
         ]
         response = self.llm.invoke(messages)
@@ -128,9 +122,7 @@ Guidelines:
         self.turn_count = 0
         messages = [
             SystemMessage(content=self._system_prompt()),
-            HumanMessage(
-                content="Write your opening message to the coffee shop staff to start the conversation."
-            ),
+            HumanMessage(content="Write your opening message to the coffee shop staff to start the conversation."),
         ]
         response = self.llm.invoke(messages)
         text = normalize_content(response.content).strip()

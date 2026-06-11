@@ -5,13 +5,13 @@ Uses the project's configured LLM (Anthropic proxy at localhost:6655 per
 hardcoded order_agent message, and asserts the supervisor lands on either
 an Execution/Termination line (happy path) or a Violation line (off-model).
 """
-
 import unittest
 
 from langchain_core.messages import AIMessage
 
 from src.control_plane.process_supervisor import ProcessSupervisor
 from src.llm import create_chat_llm
+
 
 _DESCRIPTION = """\
 Tiny coffee-shop process for testing.
@@ -91,8 +91,7 @@ class TestProcessSupervisorLLM(unittest.TestCase):
             self.assertIsNotNone(line, "supervisor returned None for an AI message")
             head = line.split(" | ", 1)[0]
             self.assertTrue(
-                head.startswith("Execution:A01:")
-                or head.startswith("Termination:A01:"),
+                head.startswith("Execution:A01:") or head.startswith("Termination:A01:"),
                 f"expected Execution/Termination on A01, got: {head!r}",
             )
 

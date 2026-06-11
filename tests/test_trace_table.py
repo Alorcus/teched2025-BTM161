@@ -4,7 +4,6 @@ These tests do not require an LLM, the database, or the dashboard server.
 They feed synthetic DashboardEvents into TraceTablePanel.handle_event /
 flush() and assert on the resulting in-memory rows + rendered HTML.
 """
-
 from __future__ import annotations
 
 import time
@@ -14,18 +13,9 @@ from src.dashboard.interaction.event_bus import DashboardEvent, EventType
 from src.dashboard.trace_table_panel import COLUMN_KEYS, TraceTablePanel
 
 
-def _ev(
-    et,
-    agent=None,
-    content="",
-    tool_name=None,
-    tool_args=None,
-    tool_result=None,
-    target_agent=None,
-    supervisor_line=None,
-    handoff_context=None,
-    rejection_reason=None,
-):
+def _ev(et, agent=None, content="", tool_name=None, tool_args=None,
+        tool_result=None, target_agent=None, supervisor_line=None,
+        handoff_context=None, rejection_reason=None):
     return DashboardEvent(
         event_type=et,
         agent_name=agent or "",
@@ -46,36 +36,17 @@ class TraceTablePanelTests(unittest.TestCase):
         p = TraceTablePanel()
         p.handle_event(_ev(EventType.CONVERSATION_START, agent="system"))
         p.handle_event(_ev(EventType.CUSTOMER_MESSAGE, agent="customer", content="hi"))
-        p.handle_event(
-            _ev(EventType.AGENT_THINKING, agent="order_agent", content="thinking")
-        )
+        p.handle_event(_ev(EventType.AGENT_THINKING, agent="order_agent", content="thinking"))
         p.handle_event(_ev(EventType.AGENT_MESSAGE, agent="order_agent", content="ok"))
-        p.handle_event(
-            _ev(
-                EventType.TOOL_CALL,
-                agent="order_agent",
-                tool_name="check_inventory",
-                tool_args={"item": "latte"},
-            )
-        )
-        p.handle_event(
-            _ev(
-                EventType.TOOL_RESULT,
-                agent="order_agent",
-                tool_name="check_inventory",
-                tool_result="ok",
-            )
-        )
+        p.handle_event(_ev(EventType.TOOL_CALL, agent="order_agent",
+                           tool_name="check_inventory", tool_args={"item": "latte"}))
+        p.handle_event(_ev(EventType.TOOL_RESULT, agent="order_agent",
+                           tool_name="check_inventory", tool_result="ok"))
         # HANDOFF is intentionally NOT a row-creator (the transfer_to_* TOOL_CALL
         # row already represents the transition).
-        p.handle_event(
-            _ev(
-                EventType.HANDOFF,
-                agent="order_agent",
-                target_agent="inventory_agent",
-                handoff_context={"from_agent": "order_agent"},
-            )
-        )
+        p.handle_event(_ev(EventType.HANDOFF, agent="order_agent",
+                           target_agent="inventory_agent",
+                           handoff_context={"from_agent": "order_agent"}))
         p.handle_event(_ev(EventType.LOG_MESSAGE, agent="system", content="debug"))
         p.handle_event(_ev(EventType.USER_VISIBLE, agent="order_agent", content="hi"))
         p.handle_event(_ev(EventType.CONVERSATION_END, agent="system"))
@@ -90,39 +61,18 @@ class TraceTablePanelTests(unittest.TestCase):
 
     def test_column_ownership(self):
         p = TraceTablePanel()
-        p.handle_event(
-            _ev(EventType.CUSTOMER_MESSAGE, agent="customer", content="latte please")
-        )
-        p.handle_event(
-            _ev(EventType.AGENT_MESSAGE, agent="order_agent", content="creating order")
-        )
-        p.handle_event(
-            _ev(
-                EventType.TOOL_CALL,
-                agent="inventory_agent",
-                tool_name="check_stock",
-                tool_args={"sku": "latte"},
-            )
-        )
-        p.handle_event(
-            _ev(EventType.AGENT_MESSAGE, agent="barista_agent", content="brewing")
-        )
-        p.handle_event(
-            _ev(
-                EventType.AGENT_MESSAGE, agent="customer_service_agent", content="ready"
-            )
-        )
+        p.handle_event(_ev(EventType.CUSTOMER_MESSAGE, agent="customer", content="latte please"))
+        p.handle_event(_ev(EventType.AGENT_MESSAGE, agent="order_agent", content="creating order"))
+        p.handle_event(_ev(EventType.TOOL_CALL, agent="inventory_agent",
+                           tool_name="check_stock", tool_args={"sku": "latte"}))
+        p.handle_event(_ev(EventType.AGENT_MESSAGE, agent="barista_agent", content="brewing"))
+        p.handle_event(_ev(EventType.AGENT_MESSAGE, agent="customer_service_agent", content="ready"))
         p.flush()
 
         self.assertEqual(
             [r["agent"] for r in p.rows],
-            [
-                "customer",
-                "order_agent",
-                "inventory_agent",
-                "barista_agent",
-                "customer_service_agent",
-            ],
+            ["customer", "order_agent", "inventory_agent",
+             "barista_agent", "customer_service_agent"],
         )
         for r in p.rows:
             self.assertIn(r["agent"], COLUMN_KEYS)
@@ -131,32 +81,16 @@ class TraceTablePanelTests(unittest.TestCase):
         p = TraceTablePanel()
         events = [
             _ev(EventType.CUSTOMER_MESSAGE, agent="customer", content="one latte"),
-            _ev(
-                EventType.AGENT_MESSAGE,
-                agent="order_agent",
-                content="creating order",
-                supervisor_line="Execution:A02:create_order",
-            ),
-            _ev(
-                EventType.TOOL_CALL,
-                agent="order_agent",
-                tool_name="transfer_to_inventory_agent",
-                tool_args={},
-                supervisor_line="Termination:A02:create_order:via_handoff_to_inventory_agent",
-            ),
-            _ev(
-                EventType.TOOL_RESULT,
-                agent="inventory_agent",
-                tool_name="check_inventory",
-                tool_result="in stock",
-                supervisor_line=None,
-            ),
-            _ev(
-                EventType.AGENT_MESSAGE,
-                agent="inventory_agent",
-                content="confirmed",
-                supervisor_line="Violation:llm_unknown_activity_A99",
-            ),
+            _ev(EventType.AGENT_MESSAGE, agent="order_agent", content="creating order",
+                supervisor_line="Execution:A02:create_order"),
+            _ev(EventType.TOOL_CALL, agent="order_agent",
+                tool_name="transfer_to_inventory_agent", tool_args={},
+                supervisor_line="Termination:A02:create_order:via_handoff_to_inventory_agent"),
+            _ev(EventType.TOOL_RESULT, agent="inventory_agent",
+                tool_name="check_inventory", tool_result="in stock",
+                supervisor_line=None),
+            _ev(EventType.AGENT_MESSAGE, agent="inventory_agent", content="confirmed",
+                supervisor_line="Violation:llm_unknown_activity_A99"),
         ]
         for e in events:
             p.handle_event(e)
@@ -164,14 +98,8 @@ class TraceTablePanelTests(unittest.TestCase):
         h = p.panel().object
 
         # Header columns present.
-        for label in [
-            "Order Agent",
-            "Inventory Agent",
-            "Barista Agent",
-            "Customer Service",
-            "Customer",
-            "Process Supervisor",
-        ]:
+        for label in ["Order Agent", "Inventory Agent", "Barista Agent",
+                      "Customer Service", "Customer", "Process Supervisor"]:
             self.assertIn(label, h)
 
         # Ownership classes appear (we use class="owned" + a CSS var, not
@@ -195,21 +123,10 @@ class TraceTablePanelTests(unittest.TestCase):
 
     def test_html_escape_prevents_xss(self):
         p = TraceTablePanel()
-        p.handle_event(
-            _ev(
-                EventType.AGENT_MESSAGE,
-                agent="order_agent",
-                content='<script>alert(1)</script> & "x"',
-            )
-        )
-        p.handle_event(
-            _ev(
-                EventType.TOOL_CALL,
-                agent="order_agent",
-                tool_name="<img onerror=x>",
-                tool_args={"k": "<v>"},
-            )
-        )
+        p.handle_event(_ev(EventType.AGENT_MESSAGE, agent="order_agent",
+                           content='<script>alert(1)</script> & "x"'))
+        p.handle_event(_ev(EventType.TOOL_CALL, agent="order_agent",
+                           tool_name="<img onerror=x>", tool_args={"k": "<v>"}))
         p.flush()
         h = p.panel().object
 
@@ -255,9 +172,7 @@ class TraceTablePanelTests(unittest.TestCase):
         self.assertEqual(len(rows), 3)
         for r in rows:
             owned_count = r.count('class="owned"')
-            self.assertEqual(
-                owned_count, 1, msg=f"row had {owned_count} owned cells: {r[:200]}"
-            )
+            self.assertEqual(owned_count, 1, msg=f"row had {owned_count} owned cells: {r[:200]}")
 
     def test_handle_event_without_flush_does_not_render(self):
         """handle_event accumulates; only flush() updates the pane object."""
@@ -294,15 +209,13 @@ class RejectedRowTests(unittest.TestCase):
 
     def test_rejected_event_creates_row(self):
         p = TraceTablePanel()
-        p.handle_event(
-            _ev(
-                EventType.AGENT_MESSAGE_REJECTED,
-                agent="order_agent",
-                content="off-topic chitchat",
-                supervisor_line="Violation:llm_unknown_activity_A99",
-                rejection_reason="You should call process_order instead.",
-            )
-        )
+        p.handle_event(_ev(
+            EventType.AGENT_MESSAGE_REJECTED,
+            agent="order_agent",
+            content="off-topic chitchat",
+            supervisor_line="Violation:llm_unknown_activity_A99",
+            rejection_reason="You should call process_order instead.",
+        ))
         p.flush()
 
         self.assertEqual(len(p.rows), 1)

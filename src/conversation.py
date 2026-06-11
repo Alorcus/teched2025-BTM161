@@ -9,10 +9,10 @@ import mlflow
 
 from src.agents import reset_inventory
 from src.agents.customer_agent import CustomerAgent
-from src.agents.order_state_machine import InvalidTransitionError, state_machine
+from src.agents.tray import get_tray, clear_tray
 from src.agents.order_store import load_recent_order
 from src.agents.shared_components import OrderStatus
-from src.agents.tray import clear_tray, get_tray
+from src.agents.order_state_machine import state_machine, InvalidTransitionError
 from src.stream import extract_messages
 
 logger = logging.getLogger("coffee_shop.conversation")
@@ -38,10 +38,7 @@ class ConversationEngine:
         last_agent_message = None
 
         stream = self.app.stream(
-            {
-                "messages": [{"role": "user", "content": message}],
-                "handoff_context": None,
-            },
+            {"messages": [{"role": "user", "content": message}], "handoff_context": None},
             config,
             subgraphs=True,
         )
@@ -90,16 +87,10 @@ class ConversationEngine:
 
         order_id = _extract_order_id_from_history(customer_agent.history)
         feedback = customer_agent.get_feedback()
-        self.feedback_log[thread_id] = {
-            "thread_id": thread_id,
-            "order_id": order_id,
-            **feedback,
-        }
+        self.feedback_log[thread_id] = {"thread_id": thread_id, "order_id": order_id, **feedback}
         self._save_feedback_store()
         logger.info(
-            "Customer feedback [%.2f]: %s",
-            feedback["feedback_score"],
-            feedback["feedback_reason"],
+            "Customer feedback [%.2f]: %s", feedback["feedback_score"], feedback["feedback_reason"]
         )
 
         return self.traces_of_latest_conversations[trace_start:]
@@ -132,9 +123,7 @@ class ConversationEngine:
 
         if order.status != OrderStatus.COMPLETED:
             try:
-                state_machine.transition(
-                    order, OrderStatus.COMPLETED, context="tray pickup by customer"
-                )
+                state_machine.transition(order, OrderStatus.COMPLETED, context="tray pickup by customer")
             except InvalidTransitionError:
                 pass
 

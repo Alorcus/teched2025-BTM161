@@ -1,25 +1,23 @@
 import logging
+from pathlib import Path
 
 import mlflow
 
-from src.agents import (
-    CustomerAgent,
-    init_db,
-    reset_inventory,
-)
-from src.agents.order_store import create_order_store_engine, set_engine
-from src.config import CoffeeShopConfig
-from src.control_plane import AgentRepo, Catalog, JsonlLogSink, ProcessSupervisor
-from src.conversation import ConversationEngine
-from src.graph import build_coffee_shop_graph
 from src.llm import create_chat_llm
-from src.notebook_ui import AGENT_CONFIG, NotebookUI
+from src.config import CoffeeShopConfig
 from src.setups import setup_dir
-
+from src.agents.order_store import create_order_store_engine, set_engine
+from src.agents import (
+    init_db, reset_inventory, set_item_stock, get_all_inventory,
+    CustomerAgent, CUSTOMER_SCENARIOS,
+)
+from src.control_plane import AgentRepo, Catalog, JsonlLogSink, ProcessSupervisor
+from src.graph import build_coffee_shop_graph
+from src.conversation import ConversationEngine
+from src.notebook_ui import NotebookUI, AGENT_CONFIG
 
 class _PaddedNameFormatter(logging.Formatter):
     """Left-pads %(name)s to the widest logger name seen so far, so child loggers stay aligned."""
-
     _max_width = 0
 
     def format(self, record):
@@ -31,14 +29,11 @@ class _PaddedNameFormatter(logging.Formatter):
         finally:
             record.name = original
 
-
 _coffee_shop_logger = logging.getLogger("coffee_shop")
 _coffee_shop_logger.setLevel(logging.INFO)
 if not _coffee_shop_logger.handlers:
     _handler = logging.StreamHandler()
-    _handler.setFormatter(
-        _PaddedNameFormatter("[%(levelname)-8s] %(name)s — %(message)s")
-    )
+    _handler.setFormatter(_PaddedNameFormatter("[%(levelname)-8s] %(name)s — %(message)s"))
     _coffee_shop_logger.addHandler(_handler)
 
 
@@ -88,16 +83,12 @@ class CoffeeShop:
         config_dir = setup_dir(self.config.setup_name)
         self.agent_repo = AgentRepo(config_dir)
         self.catalog = Catalog(config_dir)
-        self.log_sink = JsonlLogSink(
-            self.config.guardrail_log_path, setup_name=self.config.setup_name
-        )
+        self.log_sink = JsonlLogSink(self.config.guardrail_log_path, setup_name=self.config.setup_name)
         _coffee_shop_logger.info(
             f"control plane: setup={self.config.setup_name} | agents={self.agent_repo.ids()} | log={self.config.guardrail_log_path}"
         )
 
-        self.app = build_coffee_shop_graph(
-            llm, self.agent_repo, self.catalog, self.log_sink
-        )
+        self.app = build_coffee_shop_graph(llm, self.agent_repo, self.catalog, self.log_sink)
 
         if self.config.process_supervisor_enabled:
             self.process_supervisor = ProcessSupervisor(
@@ -121,24 +112,18 @@ class CoffeeShop:
     def send_message(self, thread_id, message):
         """Send a message through the swarm and return the last customer-facing agent response."""
         result = self._conversation_engine.send_message(thread_id, message)
-        self.traces_of_latest_conversations = (
-            self._conversation_engine.traces_of_latest_conversations
-        )
+        self.traces_of_latest_conversations = self._conversation_engine.traces_of_latest_conversations
         self._last_agent_message = result
         return result
 
-    def run_conversation(
-        self, scenario_index=None, on_message=None, reset_inventory_first=True
-    ):
+    def run_conversation(self, scenario_index=None, on_message=None, reset_inventory_first=True):
         """Run a full automated conversation using the CustomerAgent."""
         if reset_inventory_first:
             reset_inventory()
         trace_ids = self._conversation_engine.run_automated(
             self.customer_agent, scenario_index=scenario_index, on_message=on_message
         )
-        self.traces_of_latest_conversations = (
-            self._conversation_engine.traces_of_latest_conversations
-        )
+        self.traces_of_latest_conversations = self._conversation_engine.traces_of_latest_conversations
         return trace_ids
 
     def create_interactive_interface(self, success_only=False):

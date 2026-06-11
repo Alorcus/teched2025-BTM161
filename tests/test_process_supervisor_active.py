@@ -13,7 +13,6 @@ No real LLM is used. The supervisor's classification LLM and corrective LLM
 calls are scripted via MagicMock to deterministically return the desired
 verdict / corrective text.
 """
-
 import tempfile
 import unittest
 from pathlib import Path
@@ -33,6 +32,7 @@ from src.control_plane.process_supervisor import (
     SupervisorVerdict,
 )
 from src.control_plane.subgraph import create_agent_subgraph
+
 
 _REAL_MODEL = Path(__file__).resolve().parent.parent / "config" / "process_model.yaml"
 
@@ -70,9 +70,7 @@ class _ScriptedBoundLLM:
     def invoke(self, messages, config=None):
         self.invoke_count += 1
         if not self._queue:
-            return AIMessage(
-                content="exhausted", id=f"ai-exhausted-{self.invoke_count}"
-            )
+            return AIMessage(content="exhausted", id=f"ai-exhausted-{self.invoke_count}")
         return self._queue.pop(0)
 
 
@@ -89,7 +87,6 @@ class _FakeLLM:
         # answer to a fake "ChatAnthropic" identity.
         class ChatAnthropic:  # noqa: N801
             pass
-
         return ChatAnthropic
 
     def bind_tools(self, tools, parallel_tool_calls=False):
@@ -116,11 +113,8 @@ class TestActiveSupervisorRejectsAndRetries(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
 
-    def _make_supervisor(
-        self,
-        decide_action_returns: list[SupervisorVerdict],
-        corrective_text: str = "Process supervisor: rerun please.",
-    ):
+    def _make_supervisor(self, decide_action_returns: list[SupervisorVerdict],
+                         corrective_text: str = "Process supervisor: rerun please."):
         """Build a real ProcessSupervisor instance but stub decide_action and
         corrective_text so we control the flow without LLM calls."""
         sup = ProcessSupervisor(
@@ -200,8 +194,7 @@ class TestActiveSupervisorRejectsAndRetries(unittest.TestCase):
             corrective_text="Process supervisor: please retry.",
         )
         graph = self._build_subgraph(
-            scripted_messages=[violating, compliant],
-            supervisor=sup,
+            scripted_messages=[violating, compliant], supervisor=sup,
         )
 
         config = {"configurable": {"thread_id": "t-1"}}
@@ -217,20 +210,16 @@ class TestActiveSupervisorRejectsAndRetries(unittest.TestCase):
 
         # (b) The violating AIMessage is gone from state.
         self.assertNotIn(
-            "ai-violating-1",
-            msg_ids,
+            "ai-violating-1", msg_ids,
             f"rejected AIMessage should be removed; got messages={msg_types}",
         )
         # (c) A HumanMessage authored by process_supervisor is in state.
         supervisor_msgs = [
-            m
-            for m in final["messages"]
-            if isinstance(m, HumanMessage)
-            and getattr(m, "name", None) == "process_supervisor"
+            m for m in final["messages"]
+            if isinstance(m, HumanMessage) and getattr(m, "name", None) == "process_supervisor"
         ]
         self.assertEqual(
-            len(supervisor_msgs),
-            1,
+            len(supervisor_msgs), 1,
             f"expected one supervisor HumanMessage; got {msg_types}",
         )
         self.assertIn("retry", supervisor_msgs[0].content.lower())
@@ -244,18 +233,12 @@ class TestActiveSupervisorRejectsAndRetries(unittest.TestCase):
         # All scripted attempts violate. With max_retries=2, the 3rd attempt
         # must pass through unchanged.
         attempts = [
-            AIMessage(
-                content=f"violating attempt {i}", id=f"ai-v-{i}", name="order_agent"
-            )
+            AIMessage(content=f"violating attempt {i}", id=f"ai-v-{i}", name="order_agent")
             for i in range(1, 5)
         ]
         verdicts = [
-            SupervisorVerdict(
-                decision_line="Violation:r",
-                is_violation=True,
-                reason=f"r{i}",
-                allowed_activities=("A01",),
-            )
+            SupervisorVerdict(decision_line="Violation:r", is_violation=True,
+                              reason=f"r{i}", allowed_activities=("A01",))
             for i in range(1, 5)
         ]
         sup = self._make_supervisor(
@@ -263,9 +246,7 @@ class TestActiveSupervisorRejectsAndRetries(unittest.TestCase):
             corrective_text="Process supervisor: try again.",
         )
         graph = self._build_subgraph(
-            scripted_messages=attempts,
-            supervisor=sup,
-            max_retries=2,
+            scripted_messages=attempts, supervisor=sup, max_retries=2,
         )
 
         config = {"configurable": {"thread_id": "t-exhaust"}}
@@ -320,27 +301,20 @@ class TestActiveSupervisorRejectsAndRetries(unittest.TestCase):
             corrective_text="Process supervisor: respond on-topic.",
         )
         graph = self._build_subgraph(
-            scripted_messages=[violating, compliant],
-            supervisor=sup,
+            scripted_messages=[violating, compliant], supervisor=sup,
         )
         final = graph.invoke(
-            {
-                "messages": [HumanMessage(content="hi")],
-                "active_agent": "order_agent",
-                "handoff_context": None,
-            },
+            {"messages": [HumanMessage(content="hi")],
+             "active_agent": "order_agent",
+             "handoff_context": None},
             config={"configurable": {"thread_id": "t-text"}},
         )
         ids = [getattr(m, "id", None) for m in final["messages"]]
         self.assertNotIn("ai-text-violating", ids)
         self.assertIn("ai-text-compliant", ids)
         # supervisor HumanMessage was inserted between
-        sup_msgs = [
-            m
-            for m in final["messages"]
-            if isinstance(m, HumanMessage)
-            and getattr(m, "name", None) == "process_supervisor"
-        ]
+        sup_msgs = [m for m in final["messages"]
+                    if isinstance(m, HumanMessage) and getattr(m, "name", None) == "process_supervisor"]
         self.assertEqual(len(sup_msgs), 1)
 
 
@@ -350,8 +324,8 @@ class TestRunnerPublishesRejectedEvent(unittest.TestCase):
     is on."""
 
     def test_rejected_event_published(self):
-        from src.dashboard.conversation_runner import ConversationRunner
         from src.dashboard.event_bus import EventBus, EventType
+        from src.dashboard.conversation_runner import ConversationRunner
 
         shop = MagicMock()
         shop.config.process_supervisor_active = True
@@ -381,9 +355,7 @@ class TestRunnerPublishesRejectedEvent(unittest.TestCase):
         kinds = [e.event_type for e in events]
         self.assertIn(EventType.AGENT_MESSAGE_REJECTED, kinds)
         self.assertIn(EventType.LOG_MESSAGE, kinds)
-        rejected = next(
-            e for e in events if e.event_type == EventType.AGENT_MESSAGE_REJECTED
-        )
+        rejected = next(e for e in events if e.event_type == EventType.AGENT_MESSAGE_REJECTED)
         self.assertEqual(rejected.rejection_reason, "test_violation")
         self.assertEqual(rejected.allowed_activities, ["A01", "A02"])
         # Make sure normal AGENT_MESSAGE was NOT published for this message.
@@ -391,7 +363,6 @@ class TestRunnerPublishesRejectedEvent(unittest.TestCase):
         # WARNING level on the log message.
         log_msg = next(e for e in events if e.event_type == EventType.LOG_MESSAGE)
         import logging as _logging
-
         self.assertEqual(log_msg.log_level, _logging.WARNING)
 
 

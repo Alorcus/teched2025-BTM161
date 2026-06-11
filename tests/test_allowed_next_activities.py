@@ -1,6 +1,5 @@
 """Unit tests for ProcessSupervisor._allowed_next_activities and the static
 successor table. These run without an LLM — the helper is purely log-driven."""
-
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,12 +7,14 @@ from unittest.mock import MagicMock
 
 from src.control_plane.process_supervisor import ProcessSupervisor
 
+
 # Reuse the project's full process_model.yaml so the test exercises the same
 # activity catalogue the production code does.
 _REAL_MODEL = Path(__file__).resolve().parent.parent / "config" / "process_model.yaml"
 
 
 class TestAllowedNextActivities(unittest.TestCase):
+
     def _make_supervisor(self):
         td = tempfile.TemporaryDirectory()
         self.addCleanup(td.cleanup)
@@ -32,9 +33,7 @@ class TestAllowedNextActivities(unittest.TestCase):
 
     def test_after_a01_allows_a02_or_a08(self):
         sup = self._make_supervisor()
-        sup._lines.append(
-            "Execution:A01:identify_customer_request | AIMessage[order_agent] text=hi"
-        )
+        sup._lines.append("Execution:A01:identify_customer_request | AIMessage[order_agent] text=hi")
         self.assertEqual(
             sorted(sup._allowed_next_activities("order_agent")),
             sorted(["A02", "A08"]),
@@ -42,23 +41,19 @@ class TestAllowedNextActivities(unittest.TestCase):
 
     def test_after_a02_allows_a03(self):
         sup = self._make_supervisor()
-        sup._lines.extend(
-            [
-                "Execution:A01:identify_customer_request | AIMessage[order_agent] text=hi",
-                "Execution:A02:create_order | AIMessage[order_agent] tool_calls=[process_order(...)]",
-            ]
-        )
+        sup._lines.extend([
+            "Execution:A01:identify_customer_request | AIMessage[order_agent] text=hi",
+            "Execution:A02:create_order | AIMessage[order_agent] tool_calls=[process_order(...)]",
+        ])
         self.assertEqual(sup._allowed_next_activities("order_agent"), ["A03"])
 
     def test_after_a03_allows_parallel_split(self):
         sup = self._make_supervisor()
-        sup._lines.extend(
-            [
-                "Execution:A01:identify_customer_request | AIMessage[order_agent] text=hi",
-                "Execution:A02:create_order | AIMessage[order_agent] tool_calls=[process_order(...)]",
-                "Execution:A03:check_stock | AIMessage[inventory_agent] tool_calls=[check_inventory(...)]",
-            ]
-        )
+        sup._lines.extend([
+            "Execution:A01:identify_customer_request | AIMessage[order_agent] text=hi",
+            "Execution:A02:create_order | AIMessage[order_agent] tool_calls=[process_order(...)]",
+            "Execution:A03:check_stock | AIMessage[inventory_agent] tool_calls=[check_inventory(...)]",
+        ])
         self.assertEqual(
             sorted(sup._allowed_next_activities("inventory_agent")),
             sorted(["A04", "A05", "A06"]),
@@ -66,13 +61,11 @@ class TestAllowedNextActivities(unittest.TestCase):
 
     def test_terminated_branch_filtered_out(self):
         sup = self._make_supervisor()
-        sup._lines.extend(
-            [
-                "Execution:A03:check_stock | AIMessage[inventory_agent] tool_calls=[check_inventory(...)]",
-                "Execution:A04:place_food_on_tray | AIMessage[inventory_agent] tool_calls=[place_on_tray(...)]",
-                "Termination:A04:place_food_on_tray:via_handoff_to_barista_agent | AIMessage[inventory_agent] tool_calls=[transfer_to_agent(...)]",
-            ]
-        )
+        sup._lines.extend([
+            "Execution:A03:check_stock | AIMessage[inventory_agent] tool_calls=[check_inventory(...)]",
+            "Execution:A04:place_food_on_tray | AIMessage[inventory_agent] tool_calls=[place_on_tray(...)]",
+            "Termination:A04:place_food_on_tray:via_handoff_to_barista_agent | AIMessage[inventory_agent] tool_calls=[transfer_to_agent(...)]",
+        ])
         # After A04 terminates, the most recent event is the termination → its
         # successor set is consulted; A04 is filtered out as already terminated.
         allowed = sup._allowed_next_activities("inventory_agent")
@@ -101,9 +94,7 @@ class TestVerdictCacheRoundTrip(unittest.TestCase):
         llm = MagicMock()
         llm.invoke.return_value = MagicMock(content="Violation:test_only")
         sup = ProcessSupervisor(
-            process_model_path=_REAL_MODEL,
-            log_path=log_path,
-            llm=llm,
+            process_model_path=_REAL_MODEL, log_path=log_path, llm=llm,
         )
         msg = AIMessage(content="some text", id="ai-test-1", name="order_agent")
         sup.observe(msg, agent_name="order_agent")
@@ -111,11 +102,8 @@ class TestVerdictCacheRoundTrip(unittest.TestCase):
         verdict = sup.decide_action(msg, agent_name="order_agent")
         self.assertTrue(verdict.is_violation)
         # decide_action must NOT have re-invoked the LLM.
-        self.assertEqual(
-            llm.invoke.call_count,
-            first_call_count,
-            "decide_action should reuse cached verdict, not re-classify",
-        )
+        self.assertEqual(llm.invoke.call_count, first_call_count,
+                         "decide_action should reuse cached verdict, not re-classify")
 
     def test_last_verdict_for_returns_cached(self):
         from langchain_core.messages import AIMessage
@@ -126,9 +114,7 @@ class TestVerdictCacheRoundTrip(unittest.TestCase):
         llm = MagicMock()
         llm.invoke.return_value = MagicMock(content="Violation:foo")
         sup = ProcessSupervisor(
-            process_model_path=_REAL_MODEL,
-            log_path=log_path,
-            llm=llm,
+            process_model_path=_REAL_MODEL, log_path=log_path, llm=llm,
         )
         msg = AIMessage(content="x", id="ai-test-2", name="order_agent")
         self.assertIsNone(sup.last_verdict_for(msg))

@@ -51,10 +51,7 @@ class CoffeeMachinePanel:
         )
         self._queue_pane = pn.pane.HTML("", sizing_mode="stretch_width")
         self._regen_button = pn.widgets.Button(
-            name="♻️",
-            button_type="light",
-            width=36,
-            height=28,
+            name="♻️", button_type="light", width=36, height=28,
             margin=(0, 0, 0, 0),
         )
         self._regen_button.on_click(lambda e: self.regenerate_queue())
@@ -164,10 +161,10 @@ class CoffeeMachinePanel:
 
         self._pane.object = (
             f'<div style="min-width:220px;">'
-            f"{machine_svg}"
-            f"{progress_html}"
-            f"{status_html}"
-            f"</div>"
+            f'{machine_svg}'
+            f'{progress_html}'
+            f'{status_html}'
+            f'</div>'
         )
 
         self._queue_pane.object = self._build_queue()
@@ -188,16 +185,16 @@ class CoffeeMachinePanel:
                 '<path d="M30 5 Q32 0 34 5" stroke="#999" fill="none" stroke-width="1.5"/>'
                 '<path d="M38 7 Q40 2 42 7" stroke="#999" fill="none" stroke-width="1.5"/>'
                 '<path d="M46 5 Q48 0 50 5" stroke="#999" fill="none" stroke-width="1.5"/>'
-                "</g>"
+                '</g>'
             )
 
         return (
             f'<svg width="80" height="70" viewBox="0 0 80 70" style="display:block;margin:0 auto 8px;">'
-            f"{steam}"
+            f'{steam}'
             f'<rect x="15" y="15" width="50" height="45" rx="5" fill="{fill}" opacity="0.85"/>'
             f'<rect x="25" y="25" width="30" height="20" rx="3" fill="#fff" opacity="0.9"/>'
             f'<circle cx="40" cy="53" r="4" fill="#fff" opacity="0.7"/>'
-            f"</svg>"
+            f'</svg>'
         )
 
     def _build_progress(self) -> str:
@@ -209,7 +206,7 @@ class CoffeeMachinePanel:
             f'<div style="background:#e0e0e0;border-radius:4px;height:8px;margin:6px 0;overflow:hidden;">'
             f'<div style="background:#2196F3;height:100%;width:{pct}%;'
             f'border-radius:4px;transition:width 0.3s;"></div>'
-            f"</div>"
+            f'</div>'
         )
 
     def _build_status(self) -> str:
@@ -218,19 +215,19 @@ class CoffeeMachinePanel:
         elif self._state == "brewing":
             return (
                 f'<div style="font-size:12px;color:#2196F3;">'
-                f"⏳ Brewing {self._drink}...</div>"
+                f'⏳ Brewing {self._drink}...</div>'
             )
         elif self._state == "ready":
             return (
                 f'<div style="font-size:12px;color:#4CAF50;">'
-                f"✅ {self._drink.capitalize()} ready!</div>"
+                f'✅ {self._drink.capitalize()} ready!</div>'
             )
         elif self._state == "failed":
             return '<div style="font-size:12px;color:#F44336;">❌ Brew failed!</div>'
         elif self._state == "dirty":
             return (
                 '<div style="font-size:12px;color:#FF9800;">'
-                "🔧 Machine dirty — needs cleaning!</div>"
+                '🔧 Machine dirty — needs cleaning!</div>'
             )
         return ""
 
@@ -245,9 +242,9 @@ class CoffeeMachinePanel:
             opacity = "1" if is_last else "0.7"
             return (
                 f'<span style="display:inline-block;padding:2px 5px;border-radius:3px;'
-                f"font-size:10px;font-weight:600;font-family:monospace;"
+                f'font-size:10px;font-weight:600;font-family:monospace;'
                 f'background:{bg};color:{color};opacity:{opacity};margin:0 2px;">'
-                f"{label}</span>"
+                f'{label}</span>'
             )
 
         parts = [badge(self._last_result, is_last=True)]
@@ -257,6 +254,6 @@ class CoffeeMachinePanel:
 
         return (
             f'<div style="padding:4px 0;font-size:11px;display:flex;align-items:center;flex-wrap:wrap;">'
-            f"{''.join(parts)}"
-            f"</div>"
+            f'{"".join(parts)}'
+            f'</div>'
         )

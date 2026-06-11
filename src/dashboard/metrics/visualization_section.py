@@ -6,14 +6,10 @@ from pathlib import Path
 import panel as pn
 
 from src.trace_processing.eventlog_conversion import ObjectCentricEventlog
-from src.visualization.visualizer import VisualizationConfig, Visualizer
+from src.visualization.visualizer import Visualizer, VisualizationConfig
 
-from .styling_helpers import (
-    AGENT_COLORS,
-    COLOR_SCHEME,
-    section_header,
-    subsection_header,
-)
+from .styling_helpers import COLOR_SCHEME, AGENT_COLORS, section_header, subsection_header
+
 
 _COLOR_MAP = {
     "order_agent": AGENT_COLORS["order_agent"],

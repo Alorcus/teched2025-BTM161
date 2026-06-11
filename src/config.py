@@ -9,7 +9,6 @@ class CoffeeShopConfig:
     `setup_name` selects which `config/setups/<name>/` directory to load.
     There is no default — callers must pick one explicitly.
     """
-
     llm: Any = None
     db_url: str | None = None
     mlflow_experiment: str = "lg-coffee-mas"

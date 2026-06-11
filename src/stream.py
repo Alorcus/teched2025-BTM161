@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Callable, Iterator
+from typing import Iterator, Callable
 
 from langchain_core.messages import BaseMessage
 
@@ -37,7 +37,9 @@ def extract_messages(stream) -> Iterator[StreamMessage]:
             for nu in node_updates_list:
                 if isinstance(nu, tuple):
                     continue
-                messages_key = next((k for k in nu.keys() if k == "messages"), None)
+                messages_key = next(
+                    (k for k in nu.keys() if k == "messages"), None
+                )
                 if messages_key is None:
                     continue
 
