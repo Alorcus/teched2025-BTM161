@@ -34,6 +34,13 @@ into OCEL 2.0 — that step stays.
 Stream 1 is the source of truth for the schema. Streams 2 and 3 must
 adapt their column names so the rows can be concatenated and re-sorted.
 
+> **Stream 2 schema is implicit, not enforced.**
+> `services/coffee_machine/logger.py` generates the CSV header from the
+> `**attrs.keys()` of the **first** row written to a fresh file. Adding a
+> kwarg in `state.py`'s `emit_event(...)` silently changes the header for new
+> files but corrupts existing ones (header has N columns, rows have N+1).
+> Tracked in [Open thoughts](#open-thoughts).
+
 ---
 
 ## Canonical columns
@@ -50,19 +57,31 @@ who's expected to fill them.
 | `time:timestamp`   | ISO-8601 ms   | Event start time, format `YYYY-MM-DDTHH:MM:SS.fff`.                                                                |
 | `time_finished`    | ISO-8601 ms   | Event end time, same format. For instantaneous events: equal to `time:timestamp`.                                  |
 | `concept:name`     | string        | Activity type. Closed vocabulary — see [Activity vocabulary](#activity-vocabulary).                                |
-| `concept:instance` | string        | Human-readable label (e.g. `"order_agent calls llm"`, `"barista_agent uses tool start_preparation"`).              |
+| `concept:instance` | string        | Mostly a label, but the value `"prompt"` is **load-bearing** — see note below.                          |
 | `org:resource`     | string        | Who emitted the event. Closed vocabulary — see [Resources](#resources).                                            |
+
+> **`concept:instance` is partly fixed.** For `user_prompt` rows, the value
+> MUST equal the literal string `"prompt"` —
+> `_preprocess_eventlog` in `eventlog_conversion.py:411` keys on it to mint
+> the `prompt` object. Other rows use free-form labels like
+> `"order_agent calls llm"` or `"barista_agent uses tool start_preparation"`,
+> which are decoration only.
 
 ### Conditionally required (depending on `concept:name`)
 
-| Column            | Type       | Required for                               | Meaning                                                |
-| ----------------- | ---------- | ------------------------------------------ | ------------------------------------------------------ |
-| `duration`        | float (ns) | All events with measurable duration        | `time_finished − time:timestamp` in nanoseconds.       |
-| `message`         | string     | `user_prompt`, `call_llm` (assistant text) | The natural-language content.                          |
-| `model`           | string     | `call_llm`                                 | Model id (`ministral-3:14b`, `claude-…`).              |
-| `input_tokens`    | int        | `call_llm`                                 | Prompt-side token count.                               |
-| `response_tokens` | int        | `call_llm`                                 | Completion-side token count.                           |
-| `tool`            | string     | `execute_tool`                             | Tool name (e.g. `process_order`, `start_preparation`). |
+| Column            | Type     | Required for                               | Meaning                                                                       |
+| ----------------- | -------- | ------------------------------------------ | ----------------------------------------------------------------------------- |
+| `duration`        | int (ns) | All events with measurable duration        | Event duration in nanoseconds. Matches OTel native units; read directly off the span in `log_generator.py:101`. |
+| `message`         | string   | `user_prompt`, `call_llm` (assistant text) | The natural-language content.                                                 |
+| `model`           | string   | `call_llm`                                 | Model id (`ministral-3:14b`, `claude-…`).                                     |
+| `input_tokens`    | int      | `call_llm`                                 | Prompt-side token count.                                                      |
+| `response_tokens` | int      | `call_llm`                                 | Completion-side token count.                                                  |
+| `tool`            | string   | `execute_tool`                             | Tool name (e.g. `process_order`, `start_preparation`).                        |
+
+> **Unit mismatch today.** The agent log already emits `duration` in
+> nanoseconds (OTel). The coffee machine writes seconds (Python `time.time()`
+> deltas). The merge step multiplies stream 2's `duration` by 1e9 — see merge
+> step 4.
 
 ### Optional / source-specific (nullable for rows that don't apply)
 
@@ -74,8 +93,11 @@ who's expected to fill them.
 | `job_id`          | string | coffee machine          | Internal brew job id. Multiple `job_id`s per `case_id` are possible (re-brews). |
 | `drink`           | string | coffee machine          | Drink type for the brew job.                                                    |
 
-Optional columns that don't apply to a row are written as empty strings
-in CSV (matches today's behaviour).
+Optional columns that don't apply to a row are written as the empty CSV
+token. Polars reads them back as `null`, and the
+OCEL converter checks via `is_not_null()`. Emitters MUST NOT write a literal
+`""` deliberately — that would produce a non-null empty string and slip past
+those checks.
 
 ---
 
@@ -105,7 +127,8 @@ activity means updating this doc _and_ `EVENT_ATTRIBUTES` in
 
 > **Note on overlap with stream 1.** The barista agent calls
 > `start_preparation` / `end_preparation` (logged as `execute_tool` rows
-> with `org:resource=barista_agent`). The machine then emits its own
+> with `org:resource=barista_agent`; both are emitted per brew — see
+> `src/agents/barista_agent.py:448`). The machine then emits its own
 > `process_order` / `brew_completed` / `brew_failed` rows with
 > `org:resource=coffee_machine`. **Both are kept** — they describe the
 > same job from two perspectives (agent intent vs. physical reality).
@@ -167,9 +190,24 @@ coffee-machine merge follows the same shape with a different source CSV.
 
 These don't block writing the merge code, but worth flagging:
 
-1. **The coffee machine's CSV be should be trucated after a merge or even deteletd**
-   Today it accumulates across sessions.
-2. **`concept:instance` for non-LLM emitters.** Today it's a free-form
-   human label derived from `org:resource` + activity. Probably keep
-   that pattern for machine/guardrail rows; could also drop the column
-   entirely (it's not strictly needed) — but that's a separate cleanup.
+1. **Coffee-machine CSV lifecycle.** Today
+   `services/coffee_machine/logs/coffee_machine.csv` accumulates across
+   sessions. The merge filter (step 7) hides this for the merged log, but
+   the raw CSV grows forever. Truncate after a successful merge? Rotate?
+   Decide this.
+2. **Stream 2 header fragility** — see the warning under [Where logs live
+   today](#where-logs-live-today). The fix is to make
+   `services/coffee_machine/logger.py` enforce a fixed header (and reject
+   unknown kwargs), but that's a separate change.
+3. **Identical-timestamp ordering.** `_preprocess_eventlog` in
+   `eventlog_conversion.py` uses `pl.col(...).shift(-1)` to detect
+   handovers. If two rows of the merged log share `time:timestamp` (e.g.
+   barista `execute_tool` and machine `process_order` rounded to the same
+   millisecond), the order after `sort_values` is not guaranteed and could
+   produce phantom or missed handovers. Today `time.time()` gives μs
+   resolution so collisions are rare — but not impossible. Could be fixed
+   later by adding a per-case monotonic `seq` column at merge time.
+4. **Fate of `concept:instance`.** With `"prompt"` being the only
+   load-bearing value, the rest of the column is decoration. Could be
+   dropped entirely if the OCEL converter is updated to key on
+   `concept:name == "user_prompt"` instead. Separate cleanup.
