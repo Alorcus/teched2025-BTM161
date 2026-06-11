@@ -11,6 +11,7 @@ class EventType(Enum):
     USER_VISIBLE = auto()
     AGENT_THINKING = auto()
     AGENT_MESSAGE = auto()
+    AGENT_MESSAGE_REJECTED = auto()
     TOOL_CALL = auto()
     TOOL_RESULT = auto()
     HANDOFF = auto()
@@ -29,6 +30,8 @@ class DashboardEvent:
     handoff_context: dict | None = None
     target_agent: str | None = None
     log_level: int = 0
+    supervisor_line: str | None = None
+    rejection_reason: str | None = None
 
 
 class EventBus:
