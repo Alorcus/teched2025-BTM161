@@ -112,6 +112,25 @@ def start_coffee_machine() -> bool:
             return False
 
 
+def _kill_process_on_port(port: int) -> None:
+    """Kill any process listening on `port`. Best-effort; silent on failure.
+
+    Catches the cross-run leak where COFFEE_MACHINE_PROCESS is None (a previous
+    Python process started the server) but a uvicorn is still bound to the port.
+    """
+    if sys.platform == "win32":
+        return
+    try:
+        out = subprocess.run(
+            ["fuser", "-k", f"{port}/tcp"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return
+
+
 def stop_coffee_machine():
     """Stop the coffee machine subprocess (optional, for cleanup)."""
     global COFFEE_MACHINE_PROCESS
@@ -141,6 +160,11 @@ def stop_coffee_machine():
                     pass
                 proc.wait(timeout=2)
             COFFEE_MACHINE_PROCESS = None
+
+        # Cross-run safety: if the port is still bound (e.g. a leak from a
+        # previous Python process), nuke whoever's holding it.
+        if check_port_in_use(COFFEE_MACHINE_PORT):
+            _kill_process_on_port(COFFEE_MACHINE_PORT)
 
 
 # ----------------------------
