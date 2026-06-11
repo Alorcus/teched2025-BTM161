@@ -9,6 +9,7 @@ from pathlib import Path
 
 SETUPS_ROOT = Path("config/setups")
 ENV_VAR = "COFFEE_SHOP_SETUP"
+DEFAULT_SETUP = "baseline"
 
 
 def list_setups() -> list[str]:
@@ -34,12 +35,15 @@ def setup_dir(name: str) -> Path:
 
 
 def resolve_setup_name(cli_value: str | None) -> str:
-    """Pick the setup name. Env var supersedes CLI flag. Errors if neither is set."""
+    """Pick the setup name. Env var supersedes CLI flag. Falls back to the default setup if available."""
     env_value = os.environ.get(ENV_VAR)
     name = env_value or cli_value
     if not name:
+        available = list_setups()
+        if DEFAULT_SETUP in available:
+            return DEFAULT_SETUP
         raise SystemExit(
             f"No setup selected. Pass --setup <name> or set {ENV_VAR}=<name>. "
-            f"Available: {list_setups() or '(none)'}"
+            f"Available: {available or '(none)'}"
         )
     return name
