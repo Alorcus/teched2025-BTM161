@@ -37,11 +37,11 @@ class TrayPanel:
     def _render_empty(self):
         self._pane.object = (
             '<div style="border:2px solid #e0e0e0;border-radius:12px;padding:12px;'
-            'background:#fafafa;width:140px;height:140px;display:flex;flex-direction:column;'
+            "background:#fafafa;width:140px;height:140px;display:flex;flex-direction:column;"
             'justify-content:center;align-items:center;">'
             '<div style="font-weight:600;font-size:14px;margin-bottom:8px;">🍽️ Tray</div>'
             '<div style="font-size:12px;color:#999;text-align:center;">Empty</div>'
-            '</div>'
+            "</div>"
         )
 
     def _render(self, contents: list[dict]):
@@ -59,13 +59,13 @@ class TrayPanel:
             items_html.append(
                 f'<div style="display:inline-block;margin:3px 6px 3px 0;padding:4px 8px;'
                 f'border:1px solid #e0e0e0;border-radius:6px;background:#fff;font-size:12px;">'
-                f'{icon} {qty}x {name}{warning}</div>'
+                f"{icon} {qty}x {name}{warning}</div>"
             )
 
         self._pane.object = (
             '<div style="border:2px solid #4CAF50;border-radius:12px;padding:12px;'
             'background:#fafafa;width:140px;height:140px;overflow-y:auto;">'
             '<div style="font-weight:600;font-size:14px;margin-bottom:8px;">🍽️ Tray</div>'
-            f'<div>{"".join(items_html)}</div>'
-            '</div>'
+            f"<div>{''.join(items_html)}</div>"
+            "</div>"
         )

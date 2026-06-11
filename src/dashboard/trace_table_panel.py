@@ -9,6 +9,7 @@ The panel listens on the existing dashboard ``EventBus``. Events that don't
 correspond to a message (status pings, log lines, conversation lifecycle) are
 filtered out via ``ROW_CREATORS``.
 """
+
 from __future__ import annotations
 
 import html
@@ -17,14 +18,13 @@ import panel as pn
 
 from .interaction.event_bus import DashboardEvent, EventType
 
-
 # Column key MUST match the agent_name string the runner publishes.
 COLUMNS: list[tuple[str, str, str]] = [
-    ("order_agent", "Order Agent", "\U0001F4DD"),
-    ("inventory_agent", "Inventory Agent", "\U0001F4E6"),
+    ("order_agent", "Order Agent", "\U0001f4dd"),
+    ("inventory_agent", "Inventory Agent", "\U0001f4e6"),
     ("barista_agent", "Barista Agent", "☕"),
-    ("customer_service_agent", "Customer Service", "\U0001F4AC"),
-    ("customer", "Customer", "\U0001F464"),
+    ("customer_service_agent", "Customer Service", "\U0001f4ac"),
+    ("customer", "Customer", "\U0001f464"),
 ]
 COLUMN_KEYS = [k for k, _, _ in COLUMNS]
 
@@ -408,17 +408,20 @@ class TraceTablePanel:
         ts = ""
         try:
             import time as _time
+
             ts = _time.strftime("%H:%M:%S", _time.localtime(ev.timestamp))
         except Exception:
             ts = ""
-        self.rows.append({
-            "agent": agent,
-            "kind": kind,
-            "event_type": ev.event_type.name,
-            "content_html": content_html,
-            "supervisor_line": ev.supervisor_line,
-            "ts": ts,
-        })
+        self.rows.append(
+            {
+                "agent": agent,
+                "kind": kind,
+                "event_type": ev.event_type.name,
+                "content_html": content_html,
+                "supervisor_line": ev.supervisor_line,
+                "ts": ts,
+            }
+        )
         self._dirty = True
 
     def flush(self) -> None:
@@ -433,7 +436,11 @@ class TraceTablePanel:
         agent = ev.agent_name or ""
         et = ev.event_type
         if et == EventType.CUSTOMER_MESSAGE:
-            return (agent or "customer"), "say", html.escape(_truncate(ev.content or ""))
+            return (
+                (agent or "customer"),
+                "say",
+                html.escape(_truncate(ev.content or "")),
+            )
         if et == EventType.AGENT_MESSAGE:
             return agent, "say", html.escape(_truncate(ev.content or ""))
         if et == EventType.AGENT_MESSAGE_REJECTED:
@@ -442,8 +449,8 @@ class TraceTablePanel:
             if reason:
                 body += (
                     '<span class="reason">'
-                    f'⚠ supervisor: {html.escape(_truncate(reason, 600))}'
-                    '</span>'
+                    f"⚠ supervisor: {html.escape(_truncate(reason, 600))}"
+                    "</span>"
                 )
             return agent, "rejected", body
         if et == EventType.TOOL_CALL:
@@ -452,6 +459,7 @@ class TraceTablePanel:
             if ev.tool_args:
                 try:
                     import json as _json
+
                     args_text = _json.dumps(ev.tool_args, ensure_ascii=False)
                 except (TypeError, ValueError):
                     args_text = str(ev.tool_args)
@@ -468,17 +476,25 @@ class TraceTablePanel:
                     f'<span class="reason">⚠ not executed (supervisor rejected)</span>'
                 )
                 return agent, "rejected", body
-            return agent, "tool", (
-                f'<code class="tool">{name}</code>'
-                f'<span class="args"> {args_text}</span>'
+            return (
+                agent,
+                "tool",
+                (
+                    f'<code class="tool">{name}</code>'
+                    f'<span class="args"> {args_text}</span>'
+                ),
             )
         if et == EventType.TOOL_RESULT:
             name = html.escape(ev.tool_name or "")
             result = html.escape(_truncate(str(ev.tool_result or ""), 320))
-            return agent, "result", (
-                f'<span class="arrow">↩</span>'
-                f'<code class="tool">{name}</code>'
-                f'<span class="args"> {result}</span>'
+            return (
+                agent,
+                "result",
+                (
+                    f'<span class="arrow">↩</span>'
+                    f'<code class="tool">{name}</code>'
+                    f'<span class="args"> {result}</span>'
+                ),
             )
         return agent, "say", html.escape(_truncate(ev.content or ""))
 
@@ -493,22 +509,22 @@ class TraceTablePanel:
             return (
                 f'<td class="supervisor violation" {dc}>'
                 '<span class="badge">VIOL</span>'
-                f'{html.escape(verdict[len("Violation:"):])}'
-                '</td>'
+                f"{html.escape(verdict[len('Violation:') :])}"
+                "</td>"
             )
         if verdict.startswith("Execution:"):
             return (
                 f'<td class="supervisor execution" {dc}>'
                 '<span class="badge">EXEC</span>'
-                f'{html.escape(verdict[len("Execution:"):])}'
-                '</td>'
+                f"{html.escape(verdict[len('Execution:') :])}"
+                "</td>"
             )
         if verdict.startswith("Termination:"):
             return (
                 f'<td class="supervisor termination" {dc}>'
                 '<span class="badge">TERM</span>'
-                f'{html.escape(verdict[len("Termination:"):])}'
-                '</td>'
+                f"{html.escape(verdict[len('Termination:') :])}"
+                "</td>"
             )
         if verdict.startswith("NonAction:"):
             return f'<td class="supervisor dash">{html.escape(verdict)}</td>'
@@ -517,10 +533,10 @@ class TraceTablePanel:
     def _render_html(self) -> str:
         parts: list[str] = [_TABLE_CSS]
         parts.append('<div class="trace-wrap">')
-        parts.append('<h2>Trace Table</h2>')
+        parts.append("<h2>Trace Table</h2>")
         parts.append(
             '<p class="subtitle">One row per message, in global order. '
-            'Each agent owns its own column. Click a cell to expand truncated content.</p>'
+            "Each agent owns its own column. Click a cell to expand truncated content.</p>"
         )
         parts.append('<div class="trace-scroll">')
         # Column widths (CSS table-layout: fixed) — equal-ish for agents,
@@ -531,28 +547,25 @@ class TraceTablePanel:
         for _ in COLUMNS:
             parts.append(f'<col style="width:{agent_pct:.2f}%">')
         parts.append('<col style="width:12%">')
-        parts.append('</colgroup>')
+        parts.append("</colgroup>")
 
-        parts.append('<thead><tr>')
+        parts.append("<thead><tr>")
         for key, label, icon in COLUMNS:
             color = AGENT_ACCENT.get(key, "#cccccc")
             parts.append(
                 f'<th><span class="accent" style="background:{color}"></span>'
                 f'<span class="icon">{icon}</span>{html.escape(label)}</th>'
             )
-        parts.append('<th>Process Supervisor</th></tr></thead>')
+        parts.append("<th>Process Supervisor</th></tr></thead>")
 
-        parts.append('<tbody>')
+        parts.append("<tbody>")
         for idx, row in enumerate(self.rows):
             owner = row["agent"]
             accent = AGENT_ACCENT.get(owner, "#cccccc")
-            parts.append('<tr>')
+            parts.append("<tr>")
             for key, _label, _icon in COLUMNS:
                 if key == owner:
-                    style = (
-                        f'--accent:{accent};'
-                        f'--accent-soft:{accent}1f;'
-                    )
+                    style = f"--accent:{accent};--accent-soft:{accent}1f;"
                     title = html.escape(row.get("ts", ""))
                     kind_label = {
                         "say": "msg",
@@ -569,24 +582,24 @@ class TraceTablePanel:
                         f'<span class="meta">'
                         f'<span class="ts">{title}</span>'
                         f'<span class="kind">{kind_label}</span>'
-                        f'</span>'
+                        f"</span>"
                         f'<span class="body">{row["content_html"]}</span>'
-                        f'</td>'
+                        f"</td>"
                     )
                 else:
                     parts.append('<td class="empty"></td>')
             parts.append(self._supervisor_cell(row.get("supervisor_line"), idx))
-            parts.append('</tr>')
-        parts.append('</tbody>')
-        parts.append('</table>')
+            parts.append("</tr>")
+        parts.append("</tbody>")
+        parts.append("</table>")
 
         if not self.rows:
             parts.append(
                 f'<div class="trace-empty" style="grid-column: 1 / span {col_count};">'
                 'No messages yet — click "Run Conversation" to start a trace.'
-                '</div>'
+                "</div>"
             )
-        parts.append('</div>')  # /trace-scroll
+        parts.append("</div>")  # /trace-scroll
         parts.append(_SCROLL_SCRIPT)
-        parts.append('</div>')  # /trace-wrap
+        parts.append("</div>")  # /trace-wrap
         return "".join(parts)

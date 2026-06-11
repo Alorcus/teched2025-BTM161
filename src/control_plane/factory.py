@@ -4,6 +4,7 @@ Resolves an AgentDefinition from the Agent Repo, builds the Gateway with the
 applicable guardrails and Log Sink, composes the base prompt with applicable
 guideline prompts, and returns a compiled per-agent subgraph.
 """
+
 from .agent_repo import AgentDefinition, AgentRepo
 from .catalog import Catalog
 from .gateway import Gateway

@@ -12,7 +12,7 @@ class Guardrail(ABC):
     name: str
     version: str = "unversioned"
     tools: list[str] = field(default_factory=list)
-    effect: Effect = Effect.DENY
+    enforce: bool = True
     description: str = ""
 
     @abstractmethod
@@ -36,11 +36,16 @@ class HardGuardrail(Guardrail):
     def eval(self, context: GuardrailContext) -> Verdict:
         if self.predicate is None:
             raise ValueError(f"HardGuardrail {self.name!r} has no predicate")
+
         verdict = self.predicate(context)
+
+        if not self.enforce and verdict.effect == Effect.DENY:
+            verdict.effect = Effect.FLAG
         if not verdict.guardrail_name:
             verdict.guardrail_name = self.name
         if not verdict.guardrail_type:
             verdict.guardrail_type = self.type
+
         return verdict
 
     @property

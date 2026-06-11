@@ -1,20 +1,22 @@
-from contextlib import asynccontextmanager
 import logging
 import os
 import threading
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from .state import create_job, get_job, get_queue, clean_machine, reseed
+from .state import clean_machine, create_job, get_job, get_queue, reseed
 from .worker import run_worker
 
 # Configure the coffee_shop.coffee_machine logger hierarchy to match the main program's format.
 # When run standalone (uvicorn), this ensures logs are visible; when imported from the main
 # program, the parent coffee_shop logger's handler takes precedence.
 _coffee_machine_logger = logging.getLogger("coffee_shop.coffee_machine")
-_coffee_machine_logger.setLevel(getattr(logging, os.environ.get("COFFEE_MACHINE_LOG_LEVEL", "INFO")))
+_coffee_machine_logger.setLevel(
+    getattr(logging, os.environ.get("COFFEE_MACHINE_LOG_LEVEL", "INFO"))
+)
 if not _coffee_machine_logger.handlers:
     _handler = logging.StreamHandler()
     _handler.setFormatter(logging.Formatter("[%(levelname)s] %(name)s — %(message)s"))
@@ -46,15 +48,15 @@ class ReseedRequest(BaseModel):
 
 # -------- Endpoints --------
 
+
 @app.post("/brew")
 def brew(req: BrewRequest):
-    logger.info("Brew requested: drink=%s, correlation_id=%s", req.drink, req.correlation_id)
+    logger.info(
+        "Brew requested: drink=%s, correlation_id=%s", req.drink, req.correlation_id
+    )
     job = create_job(req.drink, req.correlation_id)
 
-    return {
-        "job_id": job["job_id"],
-        "eta_seconds": job["duration"]
-    }
+    return {"job_id": job["job_id"], "eta_seconds": job["duration"]}
 
 
 @app.get("/jobs/{job_id}")

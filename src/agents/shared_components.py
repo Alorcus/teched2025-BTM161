@@ -1,16 +1,17 @@
-from enum import Enum
-from typing import List, Optional, Annotated, Any, TypedDict
-from datetime import datetime, timezone
 import logging
+from datetime import datetime, timezone
+from enum import Enum
+from typing import Annotated, Any, List, Optional, TypedDict
 
-from langgraph.types import Command
-from langgraph.prebuilt import InjectedState
-from langgraph_swarm import SwarmState
-from langchain_core.tools import tool, InjectedToolCallId
 from langchain_core.messages import ToolMessage
+from langchain_core.tools import InjectedToolCallId, tool
+from langgraph.prebuilt import InjectedState
+from langgraph.types import Command
+from langgraph_swarm import SwarmState
 from pydantic import BaseModel, Field
 from sqlalchemy import Enum as SAEnum
-from sqlmodel import SQLModel, Field as SQLField, Relationship, Column, JSON
+from sqlmodel import JSON, Column, Relationship, SQLModel
+from sqlmodel import Field as SQLField
 
 logger = logging.getLogger("coffee_shop.handoff")
 
@@ -35,6 +36,7 @@ def _resolve_from_agent(state: dict) -> str:
 # Enums
 # ---------------------------------------------------------------------------
 
+
 class OrderStatus(str, Enum):
     PENDING = "pending"
     INVENTORY_CONFIRMED = "inventory_confirmed"
@@ -57,16 +59,24 @@ class Size(str, Enum):
 # ---------------------------------------------------------------------------
 
 ALLOWED_EXTRAS: set[str] = {
-    "soy milk", "oat milk", "almond milk",
-    "extra shot", "decaf",
-    "whipped cream", "vanilla syrup", "caramel syrup",
-    "hot", "cold", "iced",
+    "soy milk",
+    "oat milk",
+    "almond milk",
+    "extra shot",
+    "decaf",
+    "whipped cream",
+    "vanilla syrup",
+    "caramel syrup",
+    "hot",
+    "cold",
+    "iced",
 }
 
 
 # ---------------------------------------------------------------------------
 # SQLModel table classes
 # ---------------------------------------------------------------------------
+
 
 class MenuItem(SQLModel, table=True):
     __tablename__ = "inventory"
@@ -75,7 +85,9 @@ class MenuItem(SQLModel, table=True):
     price: float
     stock: int
     category: str
-    last_modified: datetime = SQLField(default_factory=lambda: datetime.now(timezone.utc))
+    last_modified: datetime = SQLField(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
 
 
 class OrderItem(SQLModel, table=True):
@@ -88,8 +100,9 @@ class OrderItem(SQLModel, table=True):
     price: float
     size: Size | None = SQLField(
         default=None,
-        sa_column=Column(SAEnum(Size, values_callable=lambda e: [m.value for m in e]),
-                         nullable=True),
+        sa_column=Column(
+            SAEnum(Size, values_callable=lambda e: [m.value for m in e]), nullable=True
+        ),
     )
     extras: list[str] = SQLField(default_factory=list, sa_column=Column(JSON))
 
@@ -103,12 +116,16 @@ class Order(SQLModel, table=True):
     customer: str
     status: OrderStatus = SQLField(
         default=OrderStatus.PENDING,
-        sa_column=Column(SAEnum(OrderStatus, values_callable=lambda e: [m.value for m in e]),
-                         nullable=False),
+        sa_column=Column(
+            SAEnum(OrderStatus, values_callable=lambda e: [m.value for m in e]),
+            nullable=False,
+        ),
     )
     total: float = 0.0
     created_at: datetime = SQLField(default_factory=lambda: datetime.now(timezone.utc))
-    last_modified: datetime = SQLField(default_factory=lambda: datetime.now(timezone.utc))
+    last_modified: datetime = SQLField(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
 
     items: List[OrderItem] = Relationship(
         back_populates="order",
@@ -139,6 +156,7 @@ MENU = {
 # Extended Swarm State with handoff context
 # ---------------------------------------------------------------------------
 
+
 class HandoffContext(TypedDict, total=False):
     from_agent: str
     context_summary: str
@@ -153,6 +171,7 @@ class CoffeeShopState(SwarmState):
 # Pydantic schema for tools that operate on an existing order by ID
 # ---------------------------------------------------------------------------
 
+
 class OrderIdSchema(BaseModel):
     order_id: str = Field(description="The order ID (e.g. 'ORD0001')")
 
@@ -161,17 +180,25 @@ class OrderIdSchema(BaseModel):
 # Handoff Tools — each requires explicit context summary and expectation
 # ---------------------------------------------------------------------------
 
-@tool 
+
+@tool
 def transfer_to_agent(
     target_agent: Annotated[str, "The agent to transfer to (e.g. 'inventory_agent')"],
-    context_summary: Annotated[str, "Summary of what you know so far that is relevant for the next agent"],
+    context_summary: Annotated[
+        str, "Summary of what you know so far that is relevant for the next agent"
+    ],
     expectation: Annotated[str, "What you expect the next agent to accomplish"],
     state: Annotated[Any, InjectedState],
     tool_call_id: Annotated[str, InjectedToolCallId],
 ) -> Command:
     """Generic transfer tool that can be used to transfer to any agent."""
     from_agent = _resolve_from_agent(state)
-    logger.debug("handoff %s -> %s | summary=%s", from_agent, target_agent, str(context_summary)[:80])
+    logger.debug(
+        "handoff %s -> %s | summary=%s",
+        from_agent,
+        target_agent,
+        str(context_summary)[:80],
+    )
     tool_message = ToolMessage(
         content=f"Successfully transferred to {target_agent}. Context: {context_summary}",
         name="transfer_to_agent",

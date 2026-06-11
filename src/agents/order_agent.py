@@ -1,26 +1,40 @@
-from langchain_core.tools import tool
-import logging
 import json
-from pydantic import BaseModel, Field
+import logging
 from typing import Optional
+
+from langchain_core.tools import tool
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger("coffee_shop.order_agent")
 
+from .order_store import load_order, save_order
 from .shared_components import (
-    MENU, Order, OrderItem, Size, ALLOWED_EXTRAS,
+    ALLOWED_EXTRAS,
+    MENU,
+    Order,
+    OrderItem,
+    Size,
 )
-from .order_store import save_order, load_order
 
 
 class CustomerOrderItemSchema(BaseModel):
     name: str = Field(description="Name of the item")
     quantity: int = Field(default=1, description="Quantity of the item")
-    size: Optional[Size] = Field(default=None, description="Size of the item (small, medium, large)")
-    extras: list[str] = Field(default_factory=list, description="List of extra options (e.g., soy milk, extra shot)")
+    size: Optional[Size] = Field(
+        default=None, description="Size of the item (small, medium, large)"
+    )
+    extras: list[str] = Field(
+        default_factory=list,
+        description="List of extra options (e.g., soy milk, extra shot)",
+    )
+
 
 class ProcessOrderInputSchema(BaseModel):
-    order: list[CustomerOrderItemSchema] = Field(description="List of items in the order")
+    order: list[CustomerOrderItemSchema] = Field(
+        description="List of items in the order"
+    )
     customer: str = Field(description="Customer's name")
+
 
 class CalculateTotalInputSchema(BaseModel):
     order_id: str = Field(description="The order ID string")
@@ -57,7 +71,13 @@ def process_order(order: list[CustomerOrderItemSchema], customer) -> str:
             price = MENU[item.name].price * item.quantity
 
             # Charge $0.50 for each paid extra
-            num_paid_extras = len([extra for extra in item.extras if extra.lower() not in {"hot", "cold", "iced"}])
+            num_paid_extras = len(
+                [
+                    extra
+                    for extra in item.extras
+                    if extra.lower() not in {"hot", "cold", "iced"}
+                ]
+            )
             price += num_paid_extras * 0.50 * item.quantity
 
             # Charge $0.50 less for small size, $0.75 more for large
@@ -67,10 +87,15 @@ def process_order(order: list[CustomerOrderItemSchema], customer) -> str:
                 elif item.size == Size.LARGE:
                     price += 0.75 * item.quantity
 
-            ordered_items.append(OrderItem(
-                name=item.name, quantity=item.quantity, price=price,
-                size=item.size, extras=item.extras,
-            ))
+            ordered_items.append(
+                OrderItem(
+                    name=item.name,
+                    quantity=item.quantity,
+                    price=price,
+                    size=item.size,
+                    extras=item.extras,
+                )
+            )
             total += price
 
         if unknown_items:
@@ -96,7 +121,9 @@ def process_order(order: list[CustomerOrderItemSchema], customer) -> str:
 @tool(args_schema=CalculateTotalInputSchema)
 def calculate_total(order_id: str, discount_percent: int = 0) -> str:
     """Updates the order's total with optional discount."""
-    logger.debug("calculate_total called for %s, discount=%d%%", order_id, discount_percent)
+    logger.debug(
+        "calculate_total called for %s, discount=%d%%", order_id, discount_percent
+    )
     order = load_order(order_id)
     if order is None:
         return f"Error: Order '{order_id}' not found."
@@ -107,12 +134,23 @@ def calculate_total(order_id: str, discount_percent: int = 0) -> str:
     order.total = final_total
     save_order(order)
     if discount_percent > 0:
-        logger.debug("Discount %d%% applied to %s: $%.2f -> $%.2f", discount_percent, order_id, original_total, final_total)
+        logger.debug(
+            "Discount %d%% applied to %s: $%.2f -> $%.2f",
+            discount_percent,
+            order_id,
+            original_total,
+            final_total,
+        )
 
     result = f"Order {order.order_id_str} total: ${original_total:.2f}"
     if discount_percent > 0:
         result += f", discount ({discount_percent}%): -${discount_amount:.2f}, final: ${final_total:.2f}"
 
-    return json.dumps({"order_id": order_id, "total": final_total, "discount": discount_amount, "summary": result})
-
-
+    return json.dumps(
+        {
+            "order_id": order_id,
+            "total": final_total,
+            "discount": discount_amount,
+            "summary": result,
+        }
+    )

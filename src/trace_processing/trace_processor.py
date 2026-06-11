@@ -3,8 +3,11 @@ import os
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
-from .log_generator import LogGenerator
+
 import pandas as pd
+
+from .log_generator import LogGenerator
+
 
 class TraceProcessor:
     def __init__(self, base_path: str = "./mlruns"):
@@ -68,13 +71,15 @@ class TraceProcessor:
 
         for i, trace in enumerate(traces, 1):
             trace_dict = trace.to_dict()
-            trace_id = trace_dict.get('info', {}).get('trace_id', f'trace-{i}')
+            trace_id = trace_dict.get("info", {}).get("trace_id", f"trace-{i}")
             print(f"\t📂 Processing trace {i}/{len(traces)}: {trace_id}")
 
             log_generator = LogGenerator()
             try:
                 trace_event_log = log_generator.generate_event_log_df(trace_dict)
-                combined_logs = pd.concat([combined_logs, trace_event_log], ignore_index=True)
+                combined_logs = pd.concat(
+                    [combined_logs, trace_event_log], ignore_index=True
+                )
                 successful_ingestions += 1
             except Exception as e:
                 print(f"   ❌ Failed to generate event log for {trace_id}: {e}")
@@ -92,28 +97,33 @@ class TraceProcessor:
                 continue
             last_ts = combined_logs.loc[case_mask, "time:timestamp"].max()
             feedback_ts = (
-                datetime.strptime(last_ts, "%Y-%m-%dT%H:%M:%S.%f") + timedelta(milliseconds=1)
+                datetime.strptime(last_ts, "%Y-%m-%dT%H:%M:%S.%f")
+                + timedelta(milliseconds=1)
             ).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
-            feedback_rows.append({
-                "case_id": case_id,
-                "identity:id": str(uuid.uuid4()),
-                "time:timestamp": feedback_ts,
-                "time_finished": feedback_ts,
-                "concept:name": "customer_feedback",
-                "concept:instance": f"customer rates: {fb['feedback_score']}",
-                "org:resource": "user",
-                "message": str(fb["feedback_score"]),
-                "feedback_score": fb["feedback_score"],
-                "feedback_reason": fb["feedback_reason"],
-                "feedback_valid": fb["valid"],
-            })
+            feedback_rows.append(
+                {
+                    "case_id": case_id,
+                    "identity:id": str(uuid.uuid4()),
+                    "time:timestamp": feedback_ts,
+                    "time_finished": feedback_ts,
+                    "concept:name": "customer_feedback",
+                    "concept:instance": f"customer rates: {fb['feedback_score']}",
+                    "org:resource": "user",
+                    "message": str(fb["feedback_score"]),
+                    "feedback_score": fb["feedback_score"],
+                    "feedback_reason": fb["feedback_reason"],
+                    "feedback_valid": fb["valid"],
+                }
+            )
 
         if feedback_rows:
             combined_logs = pd.concat(
                 [combined_logs, pd.DataFrame(feedback_rows)], ignore_index=True
             ).sort_values(by="time:timestamp")
 
-        self._generate_log_file(combined_logs, "./generated_event_log", json_format=export_as_json)
+        self._generate_log_file(
+            combined_logs, "./generated_event_log", json_format=export_as_json
+        )
 
         print("\n📈 Processing Summary:")
         print(f"   📊 Total traces processed: {len(traces)}")
@@ -123,15 +133,19 @@ class TraceProcessor:
         if successful_ingestions > 0:
             print("\nLog generation process completed successfully!")
         if len(traces) == 0:
-            print("\nNo trace files found. Make sure you have completed some coffee shop interactions first.")
+            print(
+                "\nNo trace files found. Make sure you have completed some coffee shop interactions first."
+            )
             print("💡 Go back to step 4 and create some orders to generate trace data.")
 
         return
 
-    def _generate_log_file(self, dataframe: pd.DataFrame, output_path: str, json_format: bool = False):
+    def _generate_log_file(
+        self, dataframe: pd.DataFrame, output_path: str, json_format: bool = False
+    ):
         """
         Generate a log file from the given DataFrame.
-        
+
         Args:
             dataframe: The DataFrame containing event log data
             output_path: The path to save the generated log file
@@ -139,7 +153,9 @@ class TraceProcessor:
         if not os.path.exists(output_path):
             os.makedirs(output_path)
 
-        timestamp = datetime.now().strftime("%Y%m%dT%H%M%S%f")[:-3]  # UTC timestamp with ms
+        timestamp = datetime.now().strftime("%Y%m%dT%H%M%S%f")[
+            :-3
+        ]  # UTC timestamp with ms
         filename = f"{timestamp}.eventlog"
         if json_format:
             filename += ".json"
@@ -147,7 +163,7 @@ class TraceProcessor:
             filename += ".csv"
 
         file_path = os.path.join(output_path, filename)
-        
+
         try:
             if json_format:
                 dataframe.to_json(file_path, orient="index")

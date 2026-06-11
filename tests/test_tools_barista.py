@@ -3,15 +3,19 @@
 Validates start_preparation (fires brew), end_preparation (polls for result),
 retry paths, precondition guard, and estimate_prep_time.
 """
+
 import json
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
-from src.agents.order_store import init_db, reset_inventory, save_order, load_order
 from src.agents.barista_agent import (
-    start_preparation, end_preparation, estimate_prep_time,
-    ORDER_STATUS_CACHE, ORDER_JOB_MAP,
+    ORDER_JOB_MAP,
+    ORDER_STATUS_CACHE,
+    end_preparation,
+    estimate_prep_time,
+    start_preparation,
 )
+from src.agents.order_store import init_db, load_order, reset_inventory, save_order
 from src.agents.shared_components import Order, OrderItem, OrderStatus
 
 
@@ -137,7 +141,9 @@ class TestStartPreparationRejectsWrongStatus(unittest.TestCase):
             customer="Test",
             status=OrderStatus.PENDING,
             total=4.0,
-            items=[OrderItem(name="latte", quantity=1, price=4.0, size=None, extras=[])],
+            items=[
+                OrderItem(name="latte", quantity=1, price=4.0, size=None, extras=[])
+            ],
         )
         save_order(order)
         result = start_preparation.invoke({"order_id": order.order_id_str})
@@ -167,7 +173,9 @@ class TestStartPreparationRetryAfterFailure(unittest.TestCase):
             customer="Test",
             status=OrderStatus.PREPARATION_ERROR,
             total=4.0,
-            items=[OrderItem(name="latte", quantity=1, price=4.0, size=None, extras=[])],
+            items=[
+                OrderItem(name="latte", quantity=1, price=4.0, size=None, extras=[])
+            ],
         )
         save_order(order)
 

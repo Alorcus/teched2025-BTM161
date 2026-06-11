@@ -4,7 +4,12 @@ import plotly.express as px
 from src.trace_processing.eventlog_conversion import ObjectCentricEventlog
 
 from .eventlog_helpers import agent_event_counts
-from .styling_helpers import AGENT_COLORS, COLOR_SCHEME, section_header, subsection_header
+from .styling_helpers import (
+    AGENT_COLORS,
+    COLOR_SCHEME,
+    section_header,
+    subsection_header,
+)
 
 
 class SystemMetricsSection:
@@ -30,8 +35,10 @@ class SystemMetricsSection:
             )
         fig = px.bar(
             agent_counts.to_pandas(),
-            x="agent", y="event_count",
-            color="agent", color_discrete_map=AGENT_COLORS,
+            x="agent",
+            y="event_count",
+            color="agent",
+            color_discrete_map=AGENT_COLORS,
             labels={"agent": "Agent", "event_count": "Events Handled"},
         )
         fig.update_layout(

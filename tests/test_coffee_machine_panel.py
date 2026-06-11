@@ -1,8 +1,12 @@
 """Tests for the CoffeeMachinePanel with HTTP-only interface via FakeClient."""
+
 import unittest
 from unittest.mock import patch
 
-from src.dashboard.interaction.coffee_machine_panel import CoffeeMachinePanel, CoffeeMachineClient
+from src.dashboard.interaction.coffee_machine_panel import (
+    CoffeeMachineClient,
+    CoffeeMachinePanel,
+)
 
 
 class FakeClient:
@@ -176,8 +180,10 @@ class TestBackendQueueState(unittest.TestCase):
 
     def setUp(self):
         import random
-        from services.coffee_machine.state import SEED
+
         import services.coffee_machine.state as state
+        from services.coffee_machine.state import SEED
+
         state.rng = random.Random(SEED)
         state.outcome_queue = [state._generate_outcome() for _ in range(4)]
         state.jobs = {}
@@ -185,6 +191,7 @@ class TestBackendQueueState(unittest.TestCase):
 
     def test_queue_has_four_elements(self):
         from services.coffee_machine.state import get_queue
+
         q = get_queue()
         self.assertEqual(len(q), 4)
         for item in q:
@@ -192,6 +199,7 @@ class TestBackendQueueState(unittest.TestCase):
 
     def test_reseed_regenerates_queue(self):
         from services.coffee_machine.state import get_queue, reseed
+
         original = get_queue()
         reseed(42)
         new_queue = get_queue()
@@ -200,12 +208,14 @@ class TestBackendQueueState(unittest.TestCase):
 
     def test_queue_is_copy(self):
         from services.coffee_machine.state import get_queue
+
         q = get_queue()
         q[0] = "MODIFIED"
         self.assertNotEqual(get_queue()[0], "MODIFIED")
 
     def test_three_consecutive_brews_match_queue(self):
-        from services.coffee_machine.state import get_queue, create_job
+        from services.coffee_machine.state import create_job, get_queue
+
         for i in range(3):
             queue_before = get_queue()
             predicted = queue_before[0]

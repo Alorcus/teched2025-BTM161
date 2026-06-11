@@ -2,10 +2,11 @@
 
 Validates publish/drain ordering and thread safety.
 """
+
 import threading
 import unittest
 
-from src.dashboard.interaction.event_bus import EventBus, DashboardEvent, EventType
+from src.dashboard.interaction.event_bus import DashboardEvent, EventBus, EventType
 
 
 class TestEventBusPublishAndDrain(unittest.TestCase):
@@ -14,9 +15,21 @@ class TestEventBusPublishAndDrain(unittest.TestCase):
     def test_fifo_ordering(self):
         bus = EventBus()
         events = [
-            DashboardEvent(event_type=EventType.CONVERSATION_START, agent_name="system", content="start"),
-            DashboardEvent(event_type=EventType.AGENT_MESSAGE, agent_name="order_agent", content="hello"),
-            DashboardEvent(event_type=EventType.TOOL_CALL, agent_name="order_agent", tool_name="process_order"),
+            DashboardEvent(
+                event_type=EventType.CONVERSATION_START,
+                agent_name="system",
+                content="start",
+            ),
+            DashboardEvent(
+                event_type=EventType.AGENT_MESSAGE,
+                agent_name="order_agent",
+                content="hello",
+            ),
+            DashboardEvent(
+                event_type=EventType.TOOL_CALL,
+                agent_name="order_agent",
+                tool_name="process_order",
+            ),
         ]
         for ev in events:
             bus.publish(ev)
@@ -29,7 +42,11 @@ class TestEventBusPublishAndDrain(unittest.TestCase):
 
     def test_second_drain_returns_empty(self):
         bus = EventBus()
-        bus.publish(DashboardEvent(event_type=EventType.AGENT_MESSAGE, agent_name="x", content="hi"))
+        bus.publish(
+            DashboardEvent(
+                event_type=EventType.AGENT_MESSAGE, agent_name="x", content="hi"
+            )
+        )
         bus.drain()
         self.assertEqual(bus.drain(), [])
 
@@ -50,13 +67,17 @@ class TestEventBusThreadSafety(unittest.TestCase):
         def publish_many(thread_id):
             barrier.wait()
             for i in range(events_per_thread):
-                bus.publish(DashboardEvent(
-                    event_type=EventType.AGENT_MESSAGE,
-                    agent_name=f"agent_{thread_id}",
-                    content=f"msg_{i}",
-                ))
+                bus.publish(
+                    DashboardEvent(
+                        event_type=EventType.AGENT_MESSAGE,
+                        agent_name=f"agent_{thread_id}",
+                        content=f"msg_{i}",
+                    )
+                )
 
-        threads = [threading.Thread(target=publish_many, args=(t,)) for t in range(num_threads)]
+        threads = [
+            threading.Thread(target=publish_many, args=(t,)) for t in range(num_threads)
+        ]
         for t in threads:
             t.start()
         for t in threads:
@@ -71,11 +92,13 @@ class TestUserVisibleEventType(unittest.TestCase):
 
     def test_user_visible_round_trip(self):
         bus = EventBus()
-        bus.publish(DashboardEvent(
-            event_type=EventType.USER_VISIBLE,
-            agent_name="order_agent",
-            content="I'd like a latte please",
-        ))
+        bus.publish(
+            DashboardEvent(
+                event_type=EventType.USER_VISIBLE,
+                agent_name="order_agent",
+                content="I'd like a latte please",
+            )
+        )
         drained = bus.drain()
         self.assertEqual(len(drained), 1)
         self.assertEqual(drained[0].event_type, EventType.USER_VISIBLE)

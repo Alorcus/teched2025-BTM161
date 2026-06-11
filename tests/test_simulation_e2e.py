@@ -33,10 +33,15 @@ class TestSimulationE2E(unittest.TestCase):
         try:
             result = subprocess.run(
                 [
-                    sys.executable, "-m", "src.simulate",
-                    "--scenario", "0",
-                    "--log-level", "debug",
-                    "--traces", "1",
+                    sys.executable,
+                    "-m",
+                    "src.simulate",
+                    "--scenario",
+                    "0",
+                    "--log-level",
+                    "debug",
+                    "--traces",
+                    "1",
                 ],
                 capture_output=True,
                 text=True,
@@ -61,7 +66,9 @@ class TestSimulationE2E(unittest.TestCase):
         order = None
         order_repr = "Order not found in database"
         try:
-            from sqlmodel import Session, select, create_engine as _ce
+            from sqlmodel import Session, select
+            from sqlmodel import create_engine as _ce
+
             from src.agents.shared_components import Order, OrderStatus
 
             eng = _ce(
