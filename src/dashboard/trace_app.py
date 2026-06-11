@@ -315,6 +315,9 @@ def create_trace_dashboard():
     # Start from the dataclass defaults; only OVERRIDE if env vars are set.
     # This keeps src/config.py as the single source of truth for the default.
     cfg_kwargs = {"setup_name": os.getenv("SETUP_NAME", "baseline")}
+    env_enabled = os.getenv("PROCESS_SUPERVISOR_ENABLED")
+    if env_enabled is not None:
+        cfg_kwargs["process_supervisor_enabled"] = env_enabled.lower() in ("1", "true", "yes")
     env_active = os.getenv("PROCESS_SUPERVISOR_ACTIVE")
     if env_active is not None:
         cfg_kwargs["process_supervisor_active"] = env_active.lower() in ("1", "true", "yes")
@@ -322,11 +325,14 @@ def create_trace_dashboard():
     if env_retries is not None:
         cfg_kwargs["process_supervisor_max_retries"] = int(env_retries)
     cfg = CoffeeShopConfig(**cfg_kwargs)
-    logger.info(
-        "active supervisor: %s (max_retries=%d)",
-        "ON" if cfg.process_supervisor_active else "OFF",
-        cfg.process_supervisor_max_retries,
-    )
+    if not cfg.process_supervisor_enabled:
+        logger.info("process supervisor: DISABLED (no observation, no critique)")
+    else:
+        logger.info(
+            "active supervisor: %s (max_retries=%d)",
+            "ON" if cfg.process_supervisor_active else "OFF",
+            cfg.process_supervisor_max_retries,
+        )
     shop = CoffeeShop(config=cfg)
     shop.open_shop()
     event_bus = EventBus()

@@ -103,6 +103,10 @@ class CoffeeShop:
                 self.config.process_model_path,
                 self.config.process_log_path,
             )
+        else:
+            _coffee_shop_logger.info(
+                "process supervisor: DISABLED — no observation, no critique, no process_meta.log entries"
+            )
 
         self._conversation_engine = ConversationEngine(
             self.app, mlflow_enabled=self.config.mlflow_enabled

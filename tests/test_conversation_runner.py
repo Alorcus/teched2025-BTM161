@@ -906,5 +906,41 @@ class TestRejectedContentFallsBackToToolCalls(unittest.TestCase):
         self.assertIn("call f", _rejected_content(msg))
 
 
+class TestSupervisorDisabledNoOp(unittest.TestCase):
+    """When process_supervisor_enabled=False, CoffeeShop.process_supervisor is
+    None. The runner must publish messages normally with supervisor_line=None
+    and never invoke supervisor methods (because there are none)."""
+
+    def test_runner_publishes_without_supervisor(self):
+        shop = _make_mock_shop()
+        shop.config = CoffeeShopConfig(process_supervisor_enabled=False)
+        shop.process_supervisor = None
+
+        msg = AIMessage(content="welcome!", name="order_agent", id="m1")
+
+        def stream(*_a, **_kw):
+            yield (("order_agent:abc",), {"agent": {"messages": [msg]}})
+
+        shop.app.stream.side_effect = stream
+        shop.customer_agent.get_initial_message.return_value = "hi"
+        shop.customer_agent.respond_to.return_value = None
+
+        bus = EventBus()
+        runner = ConversationRunner(shop, bus)
+        runner.start(scenario_index=0)
+        runner._thread.join(timeout=5)
+
+        events = bus.drain()
+        rejected = [e for e in events if e.event_type == EventType.AGENT_MESSAGE_REJECTED]
+        agent_msgs = [e for e in events if e.event_type == EventType.AGENT_MESSAGE
+                      and e.agent_name == "order_agent"]
+
+        self.assertEqual(len(rejected), 0)
+        self.assertEqual(len(agent_msgs), 1)
+        self.assertEqual(agent_msgs[0].content, "welcome!")
+        self.assertIsNone(agent_msgs[0].supervisor_line)
+        shop.app.update_state.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

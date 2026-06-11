@@ -76,6 +76,10 @@ def main():
         "--list-setups", action="store_true",
         help="List available setups under config/setups/ and exit.",
     )
+    parser.add_argument(
+        "--process-supervisor", action=argparse.BooleanOptionalAction, default=True,
+        help="Enable the process supervisor (default: true). Use --no-process-supervisor to run without it.",
+    )
     args = parser.parse_args()
 
     if args.list_setups:
@@ -101,7 +105,10 @@ def main():
     coffee_shop_logger.setLevel(getattr(logging, args.log_level.upper()))
 
     coffee_shop_logger.info(f"Initializing coffee shop with setup '{setup_name}'...")
-    shop = CoffeeShop(CoffeeShopConfig(setup_name=setup_name))
+    shop = CoffeeShop(CoffeeShopConfig(
+        setup_name=setup_name,
+        process_supervisor_enabled=args.process_supervisor,
+    ))
     shop.open_shop(reset_inventory_first=args.reset_inventory)
     coffee_shop_logger.info(f"Coffee shop is open. Running {args.traces} trace(s).")
     coffee_shop_logger.info(f"Resetting inventory before each trace: {args.reset_inventory}")
