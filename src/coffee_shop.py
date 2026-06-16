@@ -115,6 +115,7 @@ class CoffeeShop:
         self._conversation_engine.feedback_log[thread_id] = {
             "thread_id": thread_id,
             "order_id": order_id,
+            "scenario_index": self.customer_agent.scenario_index,
             **feedback,
         }
         self._conversation_engine._save_feedback_store()

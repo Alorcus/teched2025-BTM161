@@ -100,7 +100,7 @@ class TraceProcessor:
                 "time:timestamp": feedback_ts,
                 "time_finished": feedback_ts,
                 "concept:name": "customer_feedback",
-                "concept:instance": f"customer rates: {fb['feedback_score']}",
+                "concept:instance": f"user rates: {fb['feedback_score']}",
                 "org:resource": "user",
                 "message": str(fb["feedback_score"]),
                 "feedback_score": fb["feedback_score"],
