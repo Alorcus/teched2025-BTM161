@@ -324,6 +324,9 @@ def create_trace_dashboard():
     env_retries = os.getenv("PROCESS_SUPERVISOR_MAX_RETRIES")
     if env_retries is not None:
         cfg_kwargs["process_supervisor_max_retries"] = int(env_retries)
+    env_retro = os.getenv("RETROSPECTIVE_ENABLED")
+    if env_retro is not None:
+        cfg_kwargs["retrospective_enabled"] = env_retro.lower() in ("1", "true", "yes")
     cfg = CoffeeShopConfig(**cfg_kwargs)
     if not cfg.process_supervisor_enabled:
         logger.info("process supervisor: DISABLED (no observation, no critique)")

@@ -1,5 +1,6 @@
 import argparse
 import logging
+import os
 import sys
 
 from .coffee_shop import CoffeeShop
@@ -80,6 +81,10 @@ def main():
         "--process-supervisor", action=argparse.BooleanOptionalAction, default=True,
         help="Enable the process supervisor (default: true). Use --no-process-supervisor to run without it.",
     )
+    parser.add_argument(
+        "--retrospective", action=argparse.BooleanOptionalAction, default=False,
+        help="Run a per-agent After-Action Review at the end of each conversation (default: false).",
+    )
     args = parser.parse_args()
 
     if args.list_setups:
@@ -108,6 +113,10 @@ def main():
     shop = CoffeeShop(CoffeeShopConfig(
         setup_name=setup_name,
         process_supervisor_enabled=args.process_supervisor,
+        retrospective_enabled=args.retrospective,
+        retrospective_log_dir=os.environ.get(
+            "RETROSPECTIVE_LOG_DIR", CoffeeShopConfig.retrospective_log_dir
+        ),
     ))
     shop.open_shop(reset_inventory_first=args.reset_inventory)
     coffee_shop_logger.info(f"Coffee shop is open. Running {args.traces} trace(s).")

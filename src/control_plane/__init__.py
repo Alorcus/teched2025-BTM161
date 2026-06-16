@@ -5,6 +5,7 @@ from .gateway import Gateway, CallDecision
 from .guardrails import Guardrail, HardGuardrail, SoftGuardrail
 from .log_sink import JsonlLogSink, NullLogSink
 from .process_supervisor import ProcessSupervisor, Activity, load_process_model
+from .retrospective import Retrospective
 from .snapshot import snapshot_id
 from .subgraph import create_agent_subgraph
 from .tool_registry import TOOL_REGISTRY, resolve_tools
@@ -18,6 +19,7 @@ __all__ = [
     "Guardrail", "HardGuardrail", "SoftGuardrail",
     "JsonlLogSink", "NullLogSink",
     "ProcessSupervisor", "Activity", "load_process_model",
+    "Retrospective",
     "snapshot_id",
     "create_agent_subgraph",
     "TOOL_REGISTRY", "resolve_tools",

@@ -11,7 +11,7 @@ from src.agents import (
     init_db, reset_inventory, set_item_stock, get_all_inventory,
     CustomerAgent, CUSTOMER_SCENARIOS,
 )
-from src.control_plane import AgentRepo, Catalog, JsonlLogSink, ProcessSupervisor
+from src.control_plane import AgentRepo, Catalog, JsonlLogSink, ProcessSupervisor, Retrospective
 from src.graph import build_coffee_shop_graph
 from src.conversation import ConversationEngine
 from src.notebook_ui import NotebookUI, AGENT_CONFIG
@@ -54,6 +54,7 @@ class CoffeeShop:
         self.catalog: Catalog | None = None
         self.log_sink: JsonlLogSink | None = None
         self.process_supervisor: ProcessSupervisor | None = None
+        self.retrospective: Retrospective | None = None
 
     def open_shop(self, reset_inventory_first=True):
         """Start the coffee shop application after potentially updating agent definitions"""
@@ -108,8 +109,24 @@ class CoffeeShop:
                 "process supervisor: DISABLED — no observation, no critique, no process_meta.log entries"
             )
 
+        if self.config.retrospective_enabled:
+            self.retrospective = Retrospective(
+                llm=llm,
+                prompt_template=self.agent_repo.get("retrospective").base_prompt,
+                log_dir=Path(self.config.retrospective_log_dir),
+            )
+            _coffee_shop_logger.info(
+                "retrospective: log_dir=%s", self.config.retrospective_log_dir
+            )
+        else:
+            _coffee_shop_logger.info("retrospective: DISABLED")
+
         self._conversation_engine = ConversationEngine(
-            self.app, mlflow_enabled=self.config.mlflow_enabled
+            self.app, mlflow_enabled=self.config.mlflow_enabled,
+            retrospective=self.retrospective,
+            supervisor_log_path=(
+                self.config.process_log_path if self.config.process_supervisor_enabled else None
+            ),
         )
 
     def _get_config(self, thread_id):

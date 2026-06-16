@@ -1,0 +1,20 @@
+id: retrospective
+version: v1
+base_prompt: |
+  You are {agent_name}, reflecting on your own performance in the conversation that just ended. Answer the four After-Action Review questions about YOUR actions only. Do not speculate about what other agents thought, intended, or should have done.
+
+  Your role:
+  {agent_role}
+
+  Your transcript (only your own actions and the messages you responded to):
+  {agent_transcript}
+
+  Answer all four questions in one response. Each answer must be dense (1-2 sentences, no filler), and include one concrete example drawn from the transcript above where possible. If no example fits a question, set "example" to null — do not fabricate.
+
+  Return ONLY valid JSON in this exact shape, no prose, no code fences:
+  {{
+    "q1_supposed": {{"answer": "what was supposed to happen", "example": "concrete example or null"}},
+    "q2_actual":   {{"answer": "what actually happened",       "example": "concrete example or null"}},
+    "q3_why_diff": {{"answer": "why the difference",           "example": "concrete example or null"}},
+    "q4_next_time":{{"answer": "what to do next time",         "example": "concrete example or null"}}
+  }}

@@ -86,6 +86,9 @@ class ConversationRunner:
         # retry cycle, keyed by agent. Reset when the agent successfully
         # produces a non-violating message or retries are exhausted.
         self._critique_msgs: dict[str, HumanMessage] = {}
+        # Per-conversation transcript: (agent_name, content) tuples in turn
+        # order. Used to build per-agent views for the retrospective.
+        self._transcript: list[tuple[str, str]] = []
 
     def start(self, scenario_index=None, custom_prompt=None):
         with self._lock:
@@ -116,6 +119,7 @@ class ConversationRunner:
         self._active_agent = "order_agent"
         self._current_order_id = None
         thread_id = str(uuid.uuid4())
+        self._transcript = []
 
         scenario_label = (
             CUSTOMER_SCENARIOS[scenario_index]
@@ -134,6 +138,7 @@ class ConversationRunner:
             agent_name="customer",
             content=message,
         ))
+        self._transcript.append(("customer", message))
         self.event_bus.publish(DashboardEvent(
             event_type=EventType.USER_VISIBLE,
             agent_name=self._active_agent,
@@ -163,6 +168,7 @@ class ConversationRunner:
                     agent_name=self._active_agent,
                     content=message,
                 ))
+                self._transcript.append(("customer", message))
 
         self._consume_tray()
 
@@ -170,6 +176,22 @@ class ConversationRunner:
         logger.info(
             "Customer feedback [%.2f]: %s", feedback["feedback_score"], feedback["feedback_reason"]
         )
+
+        retrospective = getattr(self.shop, "retrospective", None)
+        if retrospective is not None:
+            try:
+                from src.conversation import _build_retrospective_views
+                supervisor_log_path = (
+                    self.shop.config.process_log_path
+                    if self.shop.config.process_supervisor_enabled
+                    else None
+                )
+                agents, transcripts = _build_retrospective_views(
+                    self._transcript, supervisor_log_path
+                )
+                retrospective.run(thread_id, agents, transcripts)
+            except Exception:
+                logger.exception("retrospective failed; continuing")
 
         self.event_bus.publish(DashboardEvent(
             event_type=EventType.CONVERSATION_END,
@@ -666,6 +688,9 @@ class ConversationRunner:
                         tool_args=tc.get("args", {}),
                         supervisor_line=_take(),
                     ))
+                tool_summary = _summarize_tool_calls(msg.tool_calls)
+                if tool_summary:
+                    self._transcript.append((agent_name, f"[tool_call] {tool_summary}"))
             elif msg.content:
                 self.event_bus.publish(DashboardEvent(
                     event_type=EventType.AGENT_MESSAGE,
@@ -673,6 +698,7 @@ class ConversationRunner:
                     content=msg.content,
                     supervisor_line=_take(),
                 ))
+                self._transcript.append((agent_name, msg.content))
         elif isinstance(msg, ToolMessage):
             content = msg.content if isinstance(msg.content, str) else str(msg.content)
             self.event_bus.publish(DashboardEvent(
@@ -683,6 +709,8 @@ class ConversationRunner:
                 supervisor_line=_take(),
             ))
             self._track_order_id(getattr(msg, "name", None), content)
+            tool_name = getattr(msg, "name", None) or "tool"
+            self._transcript.append((agent_name, f"[tool_result {tool_name}] {content[:200]}"))
 
     def _track_order_id(self, tool_name: str | None, content: str):
         """Extract order_id from tool results to track the current order."""
