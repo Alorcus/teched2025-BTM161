@@ -44,8 +44,10 @@ class CustomerAgent:
         self.custom_prompt = custom_prompt
         if scenario_index is not None and 0 <= scenario_index < len(CUSTOMER_SCENARIOS):
             self.scenario = CUSTOMER_SCENARIOS[scenario_index]
+            self.scenario_index = scenario_index
         else:
             self.scenario = random.choice(CUSTOMER_SCENARIOS)
+            self.scenario_index = CUSTOMER_SCENARIOS.index(self.scenario)
 
     def _system_prompt(self):
         if self.custom_prompt:
