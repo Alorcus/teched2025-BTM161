@@ -40,6 +40,16 @@ The repository contains three Jupyter notebooks for stepping through the system,
 5. Configure your LLM provider via a `.env` file (see `.env.example`). Set `LLM_PROVIDER=ollama` (default) or `LLM_PROVIDER=anthropic`.
 6. Start Jupyter: `jupyter notebook`
 
+## Pre-commit Hook
+
+Runs `ruff check` and `ruff format` on staged files. CI enforces the same on every PR.
+
+```bash
+brew install pre-commit          # macOS
+pip install pre-commit           # Linux (or: poetry install)
+pre-commit install
+```
+
 ## Notebooks
 
 Three self-contained exercises:
