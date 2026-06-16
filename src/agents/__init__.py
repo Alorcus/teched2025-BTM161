@@ -11,10 +11,6 @@ from .tray import get_tray, clear_tray, tray_as_list
 from .order_state_machine import (
     InvalidTransitionError, ALLOWED_TRANSITIONS, OrderStateMachine, state_machine,
 )
-from .order_agent import create_order_agent
-from .inventory_agent import create_inventory_agent
-from .barista_agent import create_barista_agent
-from .customer_service_agent import create_customer_service_agent
 from .customer_agent import CustomerAgent, CUSTOMER_SCENARIOS, build_default_prompt
 
 __all__ = [
@@ -25,6 +21,5 @@ __all__ = [
     'transfer_to_agent',
     'get_tray', 'clear_tray', 'tray_as_list',
     'InvalidTransitionError', 'ALLOWED_TRANSITIONS', 'OrderStateMachine', 'state_machine',
-    'create_order_agent', 'create_inventory_agent', 'create_barista_agent', 'create_customer_service_agent',
     'CustomerAgent', 'CUSTOMER_SCENARIOS', 'build_default_prompt',
 ]

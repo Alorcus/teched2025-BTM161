@@ -1,4 +1,3 @@
-from langgraph.prebuilt import create_react_agent
 from langchain_core.tools import tool
 import logging
 import json
@@ -9,12 +8,8 @@ logger = logging.getLogger("coffee_shop.order_agent")
 
 from .shared_components import (
     MENU, Order, OrderItem, Size, ALLOWED_EXTRAS,
-    transfer_to_agent,
 )
-from ..llm import bind_tools_sequential
-from .order_store import save_order, load_order, get_order
-from .context_isolation import create_context_isolation_hook
-from .tray_tools import check_tray
+from .order_store import save_order, load_order
 
 
 class CustomerOrderItemSchema(BaseModel):
@@ -121,44 +116,3 @@ def calculate_total(order_id: str, discount_percent: int = 0) -> str:
     return json.dumps({"order_id": order_id, "total": final_total, "discount": discount_amount, "summary": result})
 
 
-DEFAULT_PROMPT = """\
-You are a friendly, chatty order-taking agent at a coffee shop.
-
-Your conversation flow:
-1. Greet the customer and take their drink order.
-2. If they don't specify a size, ask: "Would you like that as a large or normal?"
-   Do NOT offer "small" as an option.
-3. Once drinks are settled, ask if they'd like something to eat as well.
-4. Confirm the full order and tell them the total price.
-5. Process the order using process_order, then IMMEDIATELY transfer to the inventory agent.
-
-After you process an order, you MUST transfer to the inventory agent.
-Do NOT tell the customer the order is complete or ready — you only take and price orders.
-Do NOT ask the customer whether they want you to check availability — just hand off.
-
-You can transfer to:
-- Inventory agent: to check item availability (mandatory after processing an order)
-- Customer service agent: if the customer has a complaint or wants a modification
-
-Be warm, conversational, and guide the customer through their order naturally."""
-
-DEFAULT_TOOLS = [process_order, calculate_total, check_tray, get_order, transfer_to_agent]
-DEFAULT_TOOL_NAMES = [t.name for t in DEFAULT_TOOLS]
-
-
-def create_order_agent(chat_llm, prompt=None):
-    """Create and return the order agent."""
-    if not prompt:
-        prompt = DEFAULT_PROMPT
-
-    tools = list(DEFAULT_TOOLS)
-
-    llm_with_tools = bind_tools_sequential(chat_llm, tools)
-
-    return create_react_agent(
-        model=llm_with_tools,
-        name="order_agent",
-        tools=tools,
-        prompt=prompt,
-        pre_model_hook=create_context_isolation_hook("order_agent"),
-    )

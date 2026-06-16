@@ -7,11 +7,10 @@ import time
 import panel as pn
 
 from src.coffee_shop import CoffeeShop
+from src.config import CoffeeShopConfig
 from src.agents import CUSTOMER_SCENARIOS, build_default_prompt
-from src.agents.order_agent import DEFAULT_PROMPT as ORDER_PROMPT, DEFAULT_TOOL_NAMES as ORDER_TOOLS
-from src.agents.inventory_agent import DEFAULT_PROMPT as INVENTORY_PROMPT, DEFAULT_TOOL_NAMES as INVENTORY_TOOLS
-from src.agents.barista_agent import DEFAULT_PROMPT as BARISTA_PROMPT, DEFAULT_TOOL_NAMES as BARISTA_TOOLS, start_coffee_machine, stop_coffee_machine
-from src.agents.customer_service_agent import DEFAULT_PROMPT as CS_PROMPT, DEFAULT_TOOL_NAMES as CS_TOOLS
+from src.agents.barista_agent import start_coffee_machine, stop_coffee_machine
+from ..nav import header_nav
 from .event_bus import EventBus, EventType, DashboardEvent
 from .agent_panel import AgentPanel
 from .conversation_runner import ConversationRunner
@@ -38,22 +37,30 @@ class _EventBusLogHandler(logging.Handler):
             log_level=record.levelno,
         ))
 
-AGENT_REGISTRY = {
-    "order_agent": {"prompt": ORDER_PROMPT, "tools": ORDER_TOOLS},
-    "inventory_agent": {"prompt": INVENTORY_PROMPT, "tools": INVENTORY_TOOLS},
-    "barista_agent": {"prompt": BARISTA_PROMPT, "tools": BARISTA_TOOLS},
-    "customer_service_agent": {"prompt": CS_PROMPT, "tools": CS_TOOLS},
-}
+
+def _agent_registry_from_repo(shop: CoffeeShop) -> dict[str, dict]:
+    """Read agent prompts/tool-names from the Agent Repo set up during open_shop()."""
+    repo = shop.agent_repo
+    if repo is None:
+        return {}
+    return {
+        agent_id: {
+            "prompt": d.base_prompt,
+            "tools": list(d.tools),
+        }
+        for agent_id, d in repo.all().items()
+    }
 
 
-def create_observatory_dashboard():
+def create_observatory_dashboard(setup_name: str):
     """Create the Agent Observatory dashboard page."""
     pn.extension(sizing_mode="stretch_both")
 
-    shop = CoffeeShop()
+    shop = CoffeeShop(CoffeeShopConfig(setup_name=setup_name))
     shop.open_shop()
     event_bus = EventBus()
     runner = ConversationRunner(shop, event_bus)
+    agent_registry = _agent_registry_from_repo(shop)
 
     coffee_shop_logger = logging.getLogger("coffee_shop")
     coffee_shop_logger.setLevel(logging.DEBUG)
@@ -70,7 +77,7 @@ def create_observatory_dashboard():
     for agent_name, config in shop.agent_config.items():
         if agent_name == "user":
             continue
-        reg = AGENT_REGISTRY.get(agent_name, {})
+        reg = agent_registry.get(agent_name, {})
         agent_panels[agent_name] = AgentPanel(
             agent_name=agent_name,
             config=config,
@@ -179,23 +186,10 @@ def create_observatory_dashboard():
     )
 
     # Navigation tabs for header
-    nav_tabs = pn.Row(
-        pn.pane.HTML(
-            '<div style="display:inline-block;padding:6px 14px;background:#6D4C41;color:white;'
-            'border-radius:4px;font-weight:600;margin-right:8px;font-size:13px;">Interaction Observatory</div>',
-            sizing_mode="fixed"
-        ),
-        pn.pane.HTML(
-            '<a href="/metrics" style="display:inline-block;padding:6px 14px;background:rgba(255,255,255,0.15);color:white;'
-            'border-radius:4px;text-decoration:none;font-weight:500;font-size:13px;">'
-            'Metrics Observatory</a>',
-            sizing_mode="fixed"
-        ),
-        margin=(0, 0, 0, 0),
-    )
+    nav_tabs = header_nav(active="/")
 
     template = pn.template.FastListTemplate(
-        title="Coffee Shop Agent Observatory",
+        title=f"Coffee Shop Agent Observatory — {setup_name}",
         sidebar=[sidebar],
         header=[nav_tabs],
         main=[pn.Column(
@@ -261,18 +255,36 @@ def _dispatch_event(
              f'<span style="color:{panel.color if panel else "#333"}">'
              f'<b>{event.agent_name}</b></span>: {_truncate(event.content)}')
 
-    elif event.event_type == EventType.TOOL_CALL:
+    elif event.event_type == EventType.AGENT_MESSAGE_REJECTED:
         if panel:
-            panel.set_status("executing_tool")
+            panel.set_status("idle")
+            panel.add_message("ai_rejected", event.content, reason=event.rejection_reason)
+        reason_short = ""
+        if event.rejection_reason:
+            reason_short = (
+                f' <span style="color:#8a3a34;font-style:italic;font-size:11px;">'
+                f'⚠ {_truncate(event.rejection_reason, 160)}</span>'
+            )
+        _log(log_entries, conversation_log,
+             f'<span style="color:#b3261e"><b>{event.agent_name} [REJECTED]</b></span>: '
+             f'<span style="color:#b3261e;">'
+             f'{_truncate(event.content)}</span>{reason_short}')
+
+    elif event.event_type == EventType.TOOL_CALL:
+        # Render-only TOOL_CALL events for rejected attempts: show in agent
+        # panel but skip coffee-machine side effects.
+        rejected_render_only = (event.supervisor_line or "").startswith("REJECTED")
+        if panel:
+            if not rejected_render_only:
+                panel.set_status("executing_tool")
             panel.add_tool_call(event.tool_name or "?", event.tool_args)
-        if event.tool_name == "start_preparation":
+        if not rejected_render_only and event.tool_name == "start_preparation":
             coffee_machine_panel.start_brewing("coffee")
 
     elif event.event_type == EventType.TOOL_RESULT:
         if panel:
             panel.set_status("idle")
             panel.set_tool_result(event.tool_name or "?", event.tool_result or "")
-            panel.add_message("tool", f"{event.tool_name}: {_truncate(event.tool_result or '', 100)}")
         if event.tool_name == "end_preparation" and event.tool_result:
             try:
                 result_data = json.loads(event.tool_result)
@@ -305,14 +317,6 @@ def _dispatch_event(
     elif event.event_type == EventType.HANDOFF:
         if panel:
             panel.set_status("handed_off")
-        target = agent_panels.get(event.target_agent or "")
-        if target and event.handoff_context:
-            target.set_handoff(event.handoff_context)
-            target.add_message(
-                "handoff",
-                f"[From {event.handoff_context.get('from_agent', '?')}] "
-                f"{event.handoff_context.get('context_summary', '')}",
-            )
         _log(log_entries, conversation_log,
              f'<span style="color:#9C27B0"><b>HANDOFF</b></span> '
              f'{event.agent_name} → {event.target_agent}')
