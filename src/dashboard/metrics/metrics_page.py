@@ -4,6 +4,7 @@ import panel as pn
 
 from src.trace_processing.eventlog_conversion import ObjectCentricEventlog
 
+from ..nav import header_nav
 from .overview_section import OverviewSection
 from .system_metrics_section import SystemMetricsSection
 from .time_metrics_section import TimeMetricsSection
@@ -62,20 +63,7 @@ def create_metrics_dashboard():
         styles={"padding": "10px 12px 10px 16px"},
     )
 
-    nav_tabs = pn.Row(
-        pn.pane.HTML(
-            '<a href="/" style="display:inline-block;padding:6px 14px;background:rgba(255,255,255,0.15);color:white;'
-            'border-radius:4px;text-decoration:none;font-weight:500;font-size:13px;margin-right:8px;">'
-            "Interaction Observatory</a>",
-            sizing_mode="fixed",
-        ),
-        pn.pane.HTML(
-            '<div style="display:inline-block;padding:6px 14px;background:#6D4C41;color:white;'
-            'border-radius:4px;font-weight:600;font-size:13px;">Metrics Observatory</div>',
-            sizing_mode="fixed",
-        ),
-        margin=(0, 0, 0, 0),
-    )
+    nav_tabs = header_nav(active="/metrics")
 
     return pn.template.FastListTemplate(
         title="Coffee Shop Agent Observatory",
@@ -98,6 +86,7 @@ def _empty_template(log_dir: Path) -> pn.template.FastListTemplate:
                 alert_type="warning",
             )
         ],
+        header=[header_nav(active="/metrics")],
         main=[],
         accent_base_color="#795548",
         header_background="#4E342E",

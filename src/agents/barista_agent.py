@@ -13,19 +13,13 @@ from pathlib import Path
 
 logger = logging.getLogger("coffee_shop.barista_agent")
 
-from langgraph.prebuilt import create_react_agent
 from langchain_core.tools import tool
-
-from src.llm import bind_tools_sequential
 
 from .shared_components import (
     OrderIdSchema,
     OrderStatus,
-    transfer_to_agent,
 )
-from .order_store import load_order, get_order
-from .context_isolation import create_context_isolation_hook
-from .tray_tools import place_on_tray, check_tray
+from .order_store import load_order
 from .order_state_machine import state_machine, InvalidTransitionError
 
 
@@ -118,6 +112,25 @@ def start_coffee_machine() -> bool:
             return False
 
 
+def _kill_process_on_port(port: int) -> None:
+    """Kill any process listening on `port`. Best-effort; silent on failure.
+
+    Catches the cross-run leak where COFFEE_MACHINE_PROCESS is None (a previous
+    Python process started the server) but a uvicorn is still bound to the port.
+    """
+    if sys.platform == "win32":
+        return
+    try:
+        out = subprocess.run(
+            ["fuser", "-k", f"{port}/tcp"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return
+
+
 def stop_coffee_machine():
     """Stop the coffee machine subprocess (optional, for cleanup)."""
     global COFFEE_MACHINE_PROCESS
@@ -147,6 +160,11 @@ def stop_coffee_machine():
                     pass
                 proc.wait(timeout=2)
             COFFEE_MACHINE_PROCESS = None
+
+        # Cross-run safety: if the port is still bound (e.g. a leak from a
+        # previous Python process), nuke whoever's holding it.
+        if check_port_in_use(COFFEE_MACHINE_PORT):
+            _kill_process_on_port(COFFEE_MACHINE_PORT)
 
 
 # ----------------------------
@@ -415,55 +433,3 @@ def clean_machine() -> str:
         return json.dumps({"status": "error", "message": "Invalid response from machine."})
 
 
-DEFAULT_PROMPT = """You are a barista agent responsible for coffee preparation.
-
-WORKFLOW:
-1. Call start_preparation(order_id) - This starts brewing and returns immediately with the ETA
-2. Call end_preparation(order_id) - This waits for the brew to finish and returns the result
-   - It returns either "ready", "contaminated", or "failed"
-
-3. Based on the result:
-   - If "ready" → Call place_on_tray(order_id, drink_name, quantity) to put the coffee on the customer's tray. Then tell the customer: "✅ Your coffee is on the tray!"
-   - If "contaminated" → The coffee was brewed on a dirty machine. Tell the customer: "⚠️ I need to remake your coffee — the machine wasn't clean." Then call clean_machine(), then retry.
-   - If "failed" → The machine broke. Call clean_machine() IMMEDIATELY, then ask: "❌ Brewing failed on attempt #{attempt}. Would you like me to try again or transfer you to customer service?"
-
-4. If customer wants to retry:
-   - Call start_preparation(order_id) again (the attempt count will auto-increment)
-   - Then call end_preparation(order_id) to wait for the result
-
-5. If customer wants customer service:
-   - Call transfer_to_agent(customer_service_agent,context_summary, expectation)
-   - context_summary: summarize what happened (e.g. "Brewing failed twice for order X")
-   - expectation: what should customer service do (e.g. "Help the customer with alternatives")
-
-IMPORTANT NOTES:
-- After a successful brew, ALWAYS call place_on_tray to put the coffee on the tray before informing the customer.
-- Always call end_preparation after start_preparation to get the final result
-- After a brew failure, you MUST call clean_machine() before retrying. If you skip cleaning, the coffee will be contaminated.
-- Be honest about failures and give customers clear choices
-- Don't call start_preparation without asking the customer if he wants to try
-
-Remember: Coffee takes time to brew. Be patient and keep the customer informed!
-"""
-
-DEFAULT_TOOLS = [start_preparation, end_preparation, estimate_prep_time, clean_machine, place_on_tray, check_tray, get_order, transfer_to_agent]
-DEFAULT_TOOL_NAMES = [t.name for t in DEFAULT_TOOLS]
-
-
-def create_barista_agent(chat_llm, prompt=None):
-    """Create and return the barista agent."""
-
-    if not prompt:
-        prompt = DEFAULT_PROMPT
-
-    tools = list(DEFAULT_TOOLS)
-
-    llm_with_tools = bind_tools_sequential(chat_llm, tools)
-
-    return create_react_agent(
-        model=llm_with_tools,
-        name="barista_agent",
-        tools=tools,
-        prompt=prompt,
-        pre_model_hook=create_context_isolation_hook("barista_agent"),
-    )

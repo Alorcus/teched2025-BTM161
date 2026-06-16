@@ -43,7 +43,10 @@ def extract_messages(stream) -> Iterator[StreamMessage]:
                 if messages_key is None:
                     continue
 
-                message = nu[messages_key][-1]
+                msgs = nu[messages_key]
+                if not msgs:
+                    continue
+                message = msgs[-1]
                 content = getattr(message, "content", "")
                 name = getattr(message, "name", "unknown")
                 msg_id = f"{content}_{name}"

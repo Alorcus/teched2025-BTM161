@@ -18,7 +18,6 @@ class AgentPanel(param.Parameterized):
     status = param.String(default="idle")
     messages = param.List(default=[])
     tool_calls = param.List(default=[])
-    handoff_context = param.Dict(default=None, allow_None=True)
 
     def __init__(self, agent_name, config, system_prompt="", tools=None, **kwargs):
         super().__init__(
@@ -32,11 +31,9 @@ class AgentPanel(param.Parameterized):
             **kwargs,
         )
         self._header_pane = pn.pane.HTML("", sizing_mode="stretch_width")
-        self._handoff_pane = pn.pane.HTML("", sizing_mode="stretch_width")
         self._messages_pane = pn.pane.HTML("", sizing_mode="stretch_width")
 
         self._render_header()
-        self._render_handoff()
         self._render_messages()
 
     def panel(self):
@@ -66,7 +63,6 @@ class AgentPanel(param.Parameterized):
         return pn.Column(
             self._header_pane,
             tools_section,
-            self._handoff_pane,
             self._messages_pane,
             sizing_mode="stretch_both",
             styles={
@@ -78,10 +74,10 @@ class AgentPanel(param.Parameterized):
             },
         )
 
-    def add_message(self, role: str, content: str):
+    def add_message(self, role: str, content: str, reason: str | None = None):
         ts = time.strftime("%H:%M:%S")
         msgs = list(self.messages)
-        msgs.append({"role": role, "content": content, "ts": ts})
+        msgs.append({"role": role, "content": content, "ts": ts, "reason": reason or ""})
         self.messages = msgs
         self._render_messages()
 
@@ -112,17 +108,11 @@ class AgentPanel(param.Parameterized):
         self.status = status
         self._render_header()
 
-    def set_handoff(self, context: dict | None):
-        self.handoff_context = context
-        self._render_handoff()
-
     def reset(self):
         self.status = "idle"
         self.messages = []
         self.tool_calls = []
-        self.handoff_context = None
         self._render_header()
-        self._render_handoff()
         self._render_messages()
 
     def _render_header(self):
@@ -142,20 +132,6 @@ class AgentPanel(param.Parameterized):
             f'{self.status.replace("_", " ")}</span></div>'
         )
 
-    def _render_handoff(self):
-        if not self.handoff_context:
-            self._handoff_pane.object = ""
-            return
-        hc = self.handoff_context
-        self._handoff_pane.object = (
-            f'<div style="background:#F3E5F5;border-left:3px solid #9C27B0;'
-            f'padding:8px;margin-bottom:8px;border-radius:4px;font-size:12px;">'
-            f'<strong>Handoff from:</strong> {html_mod.escape(str(hc.get("from_agent", "?")))}<br>'
-            f'<strong>Context:</strong> {html_mod.escape(str(hc.get("context_summary", "")))}<br>'
-            f'<strong>Expectation:</strong> {html_mod.escape(str(hc.get("expectation", "")))}'
-            f'</div>'
-        )
-
     def _render_messages(self):
         if not self.messages:
             self._messages_pane.object = (
@@ -172,6 +148,8 @@ class AgentPanel(param.Parameterized):
             ts = msg.get("ts", "")
             if role == "ai":
                 prefix = f'<span style="color:{self.color};font-weight:bold;">AI:</span>'
+            elif role == "ai_rejected":
+                prefix = '<span style="color:#b3261e;font-weight:bold;">AI&nbsp;[REJECTED]:</span>'
             elif role == "user":
                 prefix = '<span style="color:#2E7D32;font-weight:bold;">User:</span>'
             elif role == "tool":
@@ -180,14 +158,26 @@ class AgentPanel(param.Parameterized):
                 prefix = '<span style="color:#2196F3;font-weight:bold;">⚙️</span>'
             elif role == "tool_result":
                 prefix = '<span style="color:#666;">→</span>'
-            elif role == "handoff":
-                prefix = '<span style="color:#9C27B0;font-weight:bold;">Handoff:</span>'
             else:
                 prefix = f'<span style="font-weight:bold;">{html_mod.escape(role)}:</span>'
+            reason = msg.get("reason") or ""
+            reason_html = ""
+            if reason:
+                reason_full = html_mod.escape(reason)
+                reason_short = html_mod.escape(reason[:300]) + ("…" if len(reason) > 300 else "")
+                reason_html = (
+                    f'<div style="margin-top:4px;font-size:11px;color:#8a3a34;'
+                    f'font-style:italic;border-left:2px solid #b3261e;padding-left:6px;" '
+                    f'title="{reason_full}">⚠ supervisor: {reason_short}</div>'
+                )
+            body_style = ""
+            if role == "ai_rejected":
+                body_style = "color:#b3261e;"
             html_parts.append(
                 f'<div style="padding:4px 0;border-bottom:1px solid #eee;" title="{full_escaped}">'
                 f'<span style="color:#999;font-size:10px;margin-right:4px;">{ts}</span>'
-                f'{prefix} {display_content}</div>'
+                f'{prefix} <span style="{body_style}">{display_content}</span>'
+                f'{reason_html}</div>'
             )
         html_parts.append("</div>")
         self._messages_pane.object = "\n".join(html_parts)

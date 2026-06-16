@@ -58,8 +58,8 @@ def _load_coffee_machine_rows(path: Path) -> pd.DataFrame:
 
 
 class TraceProcessor:
-    def __init__(self, base_path: str = "./mlruns"):
-        self.base_path = base_path
+    def __init__(self, tracking_uri: str = "sqlite:///mlflow.db"):
+        self.tracking_uri = tracking_uri
 
     def _get_all_traces(self):
         """
@@ -67,8 +67,7 @@ class TraceProcessor:
         """
         import mlflow
 
-        tracking_uri = os.path.abspath(self.base_path)
-        client = mlflow.MlflowClient(tracking_uri=tracking_uri)
+        client = mlflow.MlflowClient(tracking_uri=self.tracking_uri)
 
         experiments = client.search_experiments()
         experiment_ids = [exp.experiment_id for exp in experiments]

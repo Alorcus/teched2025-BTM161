@@ -1,39 +1,46 @@
 import logging
+from pathlib import Path
 
 from langgraph.graph import StateGraph
 from langgraph_swarm import add_active_agent_router
 from langgraph.checkpoint.memory import InMemorySaver
 
 from src.agents.shared_components import CoffeeShopState
-from src.agents import (
-    create_order_agent, create_inventory_agent,
-    create_barista_agent, create_customer_service_agent,
-)
+from src.control_plane import AgentRepo, Catalog, JsonlLogSink, NullLogSink, build
 
 logger = logging.getLogger("coffee_shop.graph")
 
+AGENT_IDS = ("order_agent", "inventory_agent", "barista_agent", "customer_service_agent")
 
-def build_coffee_shop_graph(llm, agent_definitions=None):
-    """Construct and compile the multi-agent coffee shop graph.
 
-    Returns a compiled LangGraph StateGraph.
+def build_coffee_shop_graph(
+    llm,
+    repo: AgentRepo,
+    catalog: Catalog,
+    log_sink: JsonlLogSink | NullLogSink,
+):
+    """Construct and compile the multi-agent coffee shop swarm graph.
+
+    Each agent is built via the Gateway Factory (guarded subgraph). Allowed
+    handovers come from the AgentDefinitions in the repo.
     """
-    if agent_definitions is None:
-        agent_definitions = {}
-
-    order_agent = create_order_agent(llm, agent_definitions.get('order_agent', None))
-    inventory_agent = create_inventory_agent(llm, agent_definitions.get('inventory_agent', None))
-    barista_agent = create_barista_agent(llm, agent_definitions.get('barista_agent', None))
-    customer_service_agent = create_customer_service_agent(llm, agent_definitions.get('customer_service_agent', None))
+    subgraphs: dict[str, tuple] = {}
+    for agent_id in AGENT_IDS:
+        sg, defn, snapshot = build(agent_id, llm, repo, catalog, log_sink)
+        subgraphs[agent_id] = (sg, defn, snapshot)
+        logger.info("built %s | snapshot=%s | allowed_handovers=%s",
+                    agent_id, snapshot, list(defn.allowed_handovers))
 
     checkpointer = InMemorySaver()
-
-    agent_names = ["order_agent", "inventory_agent", "barista_agent", "customer_service_agent"]
     builder = StateGraph(CoffeeShopState)
-    add_active_agent_router(builder, route_to=agent_names, default_active_agent="order_agent")
-    builder.add_node("order_agent", order_agent, destinations=("inventory_agent", "customer_service_agent"))
-    builder.add_node("inventory_agent", inventory_agent, destinations=("barista_agent", "customer_service_agent"))
-    builder.add_node("barista_agent", barista_agent, destinations=("customer_service_agent",))
-    builder.add_node("customer_service_agent", customer_service_agent, destinations=("order_agent", "inventory_agent", "barista_agent"))
+    add_active_agent_router(
+        builder,
+        route_to=list(AGENT_IDS),
+        default_active_agent="order_agent",
+    )
+    for agent_id, (sg, defn, _) in subgraphs.items():
+        builder.add_node(
+            agent_id, sg, destinations=tuple(defn.allowed_handovers) or None,
+        )
 
     return builder.compile(checkpointer=checkpointer)

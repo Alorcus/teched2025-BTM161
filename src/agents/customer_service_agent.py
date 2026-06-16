@@ -1,20 +1,15 @@
-from langgraph.prebuilt import create_react_agent
 from langchain_core.tools import tool
 import logging
 
 logger = logging.getLogger("coffee_shop.customer_service_agent")
 
 from .shared_components import (
-    transfer_to_agent,
     OrderIdSchema, OrderStatus,
 )
-from ..llm import bind_tools_sequential
-from .context_isolation import create_context_isolation_hook
 from pydantic import BaseModel, Field
 import json
 
-from .order_store import load_order, save_order, get_order
-from .tray_tools import check_tray
+from .order_store import load_order, save_order
 from .order_state_machine import state_machine, InvalidTransitionError
 
 
@@ -76,38 +71,3 @@ def offer_partial_refund(order_id: str, refund_percent: int = 50) -> str:
     })
 
 
-DEFAULT_PROMPT = """\
-You are a customer service agent focused on customer satisfaction.
-
-Your job:
-- Handle complaints, failed preparations, and unavailable items with empathy.
-- Offer full or partial refunds when appropriate.
-- Help the customer decide on next steps (new order, alternative items, or refund).
-
-You can transfer to:
-- Order agent: when the customer wants to place a new or modified order
-- Inventory agent: to check availability of alternative items
-- Barista agent: to retry preparation of an item
-
-Always prioritize customer satisfaction and be generous with compensation when needed."""
-
-DEFAULT_TOOLS = [offer_refund, offer_partial_refund, check_tray, get_order, transfer_to_agent]
-DEFAULT_TOOL_NAMES = [t.name for t in DEFAULT_TOOLS]
-
-
-def create_customer_service_agent(chat_llm, prompt=None):
-    """Create and return the customer service agent."""
-    if not prompt:
-        prompt = DEFAULT_PROMPT
-
-    tools = list(DEFAULT_TOOLS)
-
-    llm_with_tools = bind_tools_sequential(chat_llm, tools)
-
-    return create_react_agent(
-        model=llm_with_tools,
-        name="customer_service_agent",
-        tools=tools,
-        prompt=prompt,
-        pre_model_hook=create_context_isolation_hook("customer_service_agent"),
-    )
