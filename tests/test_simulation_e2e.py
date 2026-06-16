@@ -28,15 +28,21 @@ class TestSimulationE2E(unittest.TestCase):
         env = os.environ.copy()
         env["COFFEE_MACHINE_SEED"] = "100"
         env["COFFEE_SHOP_DB"] = str(self._db_path)
-        env["COFFEE_SHOP_SETUP"] = "baseline"
 
         try:
             result = subprocess.run(
                 [
-                    sys.executable, "-m", "src.simulate",
-                    "--scenario", "0",
-                    "--log-level", "debug",
-                    "--traces", "1",
+                    sys.executable,
+                    "-m",
+                    "src.simulate",
+                    "--setup",
+                    "baseline",
+                    "--scenario",
+                    "0",
+                    "--log-level",
+                    "debug",
+                    "--traces",
+                    "1",
                 ],
                 capture_output=True,
                 text=True,
