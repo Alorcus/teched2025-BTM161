@@ -83,7 +83,7 @@ class TraceProcessor:
         # Sort combined logs by timestamp
         combined_logs.sort_values(by="time:timestamp", inplace=True)
 
-        # Append exactly one customer_feedback event per case, after all other events
+        # Append exactly one user_feedback event per case, after all other events
         feedback_rows = []
         for case_id, fb in feedback_store.items():
             case_mask = combined_logs["case_id"] == case_id
@@ -98,7 +98,7 @@ class TraceProcessor:
                 "identity:id": str(uuid.uuid4()),
                 "time:timestamp": feedback_ts,
                 "time_finished": feedback_ts,
-                "concept:name": "customer_feedback",
+                "concept:name": "user_feedback",
                 "concept:instance": f"user rates: {fb['feedback_score']}",
                 "org:resource": "user",
                 "message": str(fb["feedback_score"]),
