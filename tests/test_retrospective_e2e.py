@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -11,6 +12,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 TIMEOUT_SECONDS = 600
 
 _REQUIRED_KEYS = ("q1_supposed", "q2_actual", "q3_why_diff", "q4_next_time")
+_SYNTHESIS_KEYS = (
+    "what_worked", "what_broke", "agreements", "contradictions", "systemic_fix",
+)
+_TIMESTAMP_RE = re.compile(r"^\d{8}T\d{6}Z(?:_[0-9a-f]{8})?$")
 
 
 class TestRetrospectiveE2E(unittest.TestCase):
@@ -71,31 +76,31 @@ class TestRetrospectiveE2E(unittest.TestCase):
         )
 
         retro_path = files[0]
-        # Filename is the thread_id UUID — sanity-check it's a UUID-shaped name.
-        self.assertRegex(retro_path.stem, r"^[0-9a-f-]{36}$")
+        # Filename is a UTC timestamp (with optional thread-id suffix).
+        self.assertRegex(
+            retro_path.stem, _TIMESTAMP_RE,
+            f"Filename {retro_path.name} does not match timestamp pattern",
+        )
 
         with open(retro_path, encoding="utf-8") as f:
             payload = json.load(f)
 
+        self.assertIn("timestamp", payload, f"Missing timestamp in {payload!r}")
         self.assertIn("thread_id", payload, f"Missing thread_id in {payload!r}")
-        self.assertEqual(payload["thread_id"], retro_path.stem)
-        self.assertIn("entries", payload, f"Missing entries in {payload!r}")
-        entries = payload["entries"]
+        # thread_id is still UUID-shaped, just no longer the filename.
+        self.assertRegex(payload["thread_id"], r"^[0-9a-f-]{36}$")
+
+        entries = payload.get("entries", [])
         self.assertGreater(
             len(entries), 0,
             f"Retrospective file has no entries{diagnostics}\nFile: {payload}",
         )
 
-        # At least one operator agent we know participated in scenario 0
-        # (which always exercises the order_agent) should produce a valid entry.
         agent_names = {e.get("agent_name") for e in entries}
         self.assertIn(
             "order_agent", agent_names,
             f"order_agent retrospective missing. Got: {agent_names}",
         )
-
-        # The customer agent must NOT have a retrospective entry — its voice is
-        # captured separately via CustomerAgent.get_feedback().
         self.assertNotIn(
             "customer", agent_names,
             f"customer agent should not have a retrospective entry. Got: {agent_names}",
@@ -107,8 +112,8 @@ class TestRetrospectiveE2E(unittest.TestCase):
             f"No valid retrospective entries; raw entries: {entries}",
         )
 
-        # Verify the structure of one valid entry: all four AAR keys present
-        # with non-empty answers.
+        # Each valid entry has all four AAR keys with non-empty answers, and
+        # peer_review present as a list.
         for entry in valid_entries:
             for key in _REQUIRED_KEYS:
                 self.assertIn(key, entry, f"Entry {entry['agent_name']} missing {key}")
@@ -119,6 +124,32 @@ class TestRetrospectiveE2E(unittest.TestCase):
                     isinstance(block["answer"], str) and block["answer"].strip(),
                     f"{entry['agent_name']}.{key}.answer must be non-empty string, got {block['answer']!r}",
                 )
+            self.assertIn(
+                "peer_review", entry,
+                f"Entry {entry['agent_name']} missing peer_review",
+            )
+            self.assertIsInstance(
+                entry["peer_review"], list,
+                f"peer_review for {entry['agent_name']} must be a list",
+            )
+
+        # At least one valid entry should have produced peer_review content.
+        self.assertTrue(
+            any(len(e["peer_review"]) > 0 for e in valid_entries),
+            f"No agent produced any peer_review entries: {[e['peer_review'] for e in valid_entries]}",
+        )
+
+        # Synthesis pass produced a structured object.
+        synthesis = payload.get("synthesis")
+        self.assertIsNotNone(synthesis, f"Synthesis missing. Payload: {payload}")
+        self.assertTrue(
+            synthesis.get("valid"),
+            f"Synthesis not valid. raw_response: {synthesis.get('raw_response')!r}",
+        )
+        for key in _SYNTHESIS_KEYS:
+            self.assertIn(key, synthesis, f"Synthesis missing {key}")
+            self.assertIsInstance(synthesis[key], dict, f"Synthesis.{key} should be an object")
+            self.assertIn("summary", synthesis[key], f"Synthesis.{key} missing summary")
 
 
 if __name__ == "__main__":

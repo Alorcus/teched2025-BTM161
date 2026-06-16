@@ -1,18 +1,27 @@
 """Retrospective collector.
 
-After a conversation ends, asks each operator agent the four After-Action
-Review questions in isolation (one LLM call per agent, all four questions
-in one shot). Per-agent results are appended to a single JSON file per
-conversation: ``<log_dir>/<thread_id>.json``.
+After a conversation ends, runs a three-stage retrospective:
 
-The retrospective never raises into the caller — a failure for any one
-agent is recorded as an entry with ``valid=false`` and the run continues.
+1. Per-agent peer-aware After-Action Review — each operator agent sees the
+   FULL conversation transcript and answers the four AAR questions about its
+   own actions, plus a peer_review section critiquing the other agents it
+   interacted with.
+2. Synthesis pass — one final LLM call ingests all per-agent retrospectives
+   plus the conversation transcript and produces a team-level summary of
+   systemic issues, not bound to any one agent's perspective.
+3. Persist — one JSON file per conversation at
+   ``<log_dir>/<UTC-timestamp>.json``. The thread_id is preserved inside the
+   payload for cross-referencing with traces.
+
+The retrospective never raises into the caller — a failure for any one agent
+is recorded as an entry with ``valid=false`` and the run continues.
 """
 from __future__ import annotations
 
 import json
 import logging
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -35,8 +44,29 @@ _AGENT_ROLES: dict[str, str] = {
 _REQUIRED_KEYS = ("q1_supposed", "q2_actual", "q3_why_diff", "q4_next_time")
 
 
+_SYNTHESIS_PROMPT = """You are reviewing a multi-agent coffee shop conversation that just ended. You have the full transcript and each operator agent's self-review plus their peer reviews of each other.
+
+Your job: produce a TEAM-LEVEL synthesis. Look across all retrospectives for systemic issues (not individual mistakes). Where do the agents agree? Where do they contradict each other? What broke down between agents that no single agent can see alone?
+
+Conversation transcript:
+{transcript}
+
+Per-agent retrospectives (JSON):
+{retrospectives}
+
+Return ONLY valid JSON, no prose, no code fences:
+{{
+  "what_worked":      {{"summary": "...", "evidence": "concrete moment from transcript or retrospectives"}},
+  "what_broke":       {{"summary": "...", "evidence": "concrete moment"}},
+  "agreements":       {{"summary": "where multiple agents independently identified the same issue", "evidence": "which agents, what they said"}},
+  "contradictions":   {{"summary": "where agents disagree about what happened", "evidence": "which agents, what conflicting claims"}},
+  "systemic_fix":     {{"summary": "the single highest-leverage change for next time", "evidence": "why this fix, grounded in the data above"}}
+}}
+"""
+
+
 class Retrospective:
-    """Run a per-agent After-Action Review after a conversation ends."""
+    """Run a peer-aware AAR + synthesis pass after a conversation ends."""
 
     def __init__(self, llm, prompt_template: str, log_dir: Path | str):
         self.llm = llm
@@ -48,23 +78,27 @@ class Retrospective:
         thread_id: str,
         agents: Iterable[str],
         transcripts: dict[str, str],
-    ) -> list[dict[str, Any]]:
-        """Ask every agent the AAR questions, write one JSON file per conversation.
+    ) -> dict[str, Any]:
+        """Run per-agent AARs + synthesis, write one JSON file per conversation.
 
-        ``transcripts`` maps agent_name → that agent's view of the conversation
-        (already filtered by the caller — operator agents see their own swarm
-        slice; the process supervisor sees its own critique log tail).
+        ``transcripts`` maps agent_name → its transcript view. Operator agents
+        receive the full conversation (peer-aware); the process supervisor
+        receives its own critique log tail.
 
-        Agents with empty transcripts are skipped (silent agents add no signal).
+        Returns the full payload (also persisted to disk).
         """
-        results: list[dict[str, Any]] = []
-        for agent_name in agents:
+        agent_list = list(agents)
+        operator_agents = [a for a in agent_list if a != "process_supervisor"]
+
+        entries: list[dict[str, Any]] = []
+        for agent_name in agent_list:
             transcript = transcripts.get(agent_name, "").strip()
             if not transcript:
                 logger.debug("retrospective: skipping %s (no transcript)", agent_name)
                 continue
+            peers = [a for a in operator_agents if a != agent_name]
             try:
-                entry = self._ask_agent(agent_name, transcript)
+                entry = self._ask_agent(agent_name, transcript, peers)
             except Exception as exc:
                 logger.exception("retrospective: %s failed", agent_name)
                 entry = {
@@ -72,15 +106,34 @@ class Retrospective:
                     "valid": False,
                     "error": f"{type(exc).__name__}: {exc}",
                 }
-            results.append(entry)
+            entries.append(entry)
 
-        self._write(thread_id, results)
-        return results
+        # Use the first non-empty operator transcript as the canonical
+        # conversation view for the synthesis pass — they're all the same
+        # full transcript in peer-aware mode.
+        canonical_transcript = next(
+            (transcripts[a] for a in operator_agents if transcripts.get(a, "").strip()),
+            "",
+        )
+        synthesis: dict[str, Any] | None = None
+        if entries and canonical_transcript:
+            try:
+                synthesis = self._synthesize(canonical_transcript, entries)
+            except Exception as exc:
+                logger.exception("retrospective synthesis failed")
+                synthesis = {"valid": False, "error": f"{type(exc).__name__}: {exc}"}
 
-    def _ask_agent(self, agent_name: str, transcript: str) -> dict[str, Any]:
+        payload = self._write(thread_id, entries, synthesis)
+        return payload
+
+    def _ask_agent(
+        self, agent_name: str, transcript: str, peer_agents: list[str]
+    ) -> dict[str, Any]:
+        peer_str = ", ".join(peer_agents) if peer_agents else "(none)"
         prompt = self.prompt_template.format(
             agent_name=agent_name,
             agent_role=_AGENT_ROLES.get(agent_name, "Participating agent."),
+            peer_agents=peer_str,
             agent_transcript=transcript,
         )
         messages = [
@@ -103,20 +156,84 @@ class Retrospective:
             "agent_name": agent_name,
             "valid": True,
             **{k: parsed[k] for k in _REQUIRED_KEYS},
+            "peer_review": parsed.get("peer_review", []),
             "raw_response": raw,
         }
 
-    def _write(self, thread_id: str, entries: list[dict[str, Any]]) -> None:
+    def _synthesize(
+        self, transcript: str, entries: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        # Strip raw_response from the input — it's noisy and the structured
+        # fields carry the same content.
+        slim_entries = [
+            {k: v for k, v in e.items() if k != "raw_response"} for e in entries
+        ]
+        prompt = _SYNTHESIS_PROMPT.format(
+            transcript=transcript,
+            retrospectives=json.dumps(slim_entries, indent=2),
+        )
+        messages = [
+            SystemMessage(content=prompt),
+            HumanMessage(content="Return the synthesis JSON now."),
+        ]
+        response = self.llm.invoke(messages)
+        raw = normalize_content(response.content).strip()
+        parsed = _parse_json_object(raw)
+        if parsed is None:
+            return {"valid": False, "raw_response": raw}
+        return {"valid": True, **parsed, "raw_response": raw}
+
+    def _write(
+        self,
+        thread_id: str,
+        entries: list[dict[str, Any]],
+        synthesis: dict[str, Any] | None,
+    ) -> dict[str, Any]:
         self.log_dir.mkdir(parents=True, exist_ok=True)
-        path = self.log_dir / f"{thread_id}.json"
-        payload = {"thread_id": thread_id, "entries": entries}
+        # UTC, ISO-8601-ish, filesystem-safe.
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        path = self.log_dir / f"{timestamp}.json"
+        # If a file already exists for this timestamp (rare, but possible if
+        # two conversations end in the same second), append a short suffix.
+        if path.exists():
+            suffix = thread_id[:8]
+            path = self.log_dir / f"{timestamp}_{suffix}.json"
+        payload: dict[str, Any] = {
+            "timestamp": timestamp,
+            "thread_id": thread_id,
+            "entries": entries,
+            "synthesis": synthesis,
+        }
         with open(path, "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2)
-        logger.info("retrospective: wrote %d entries to %s", len(entries), path)
+        logger.info(
+            "retrospective: wrote %d entries + synthesis=%s to %s",
+            len(entries),
+            "yes" if synthesis else "no",
+            path,
+        )
+        return payload
 
 
 def _parse_retrospective(raw: str) -> dict[str, Any] | None:
-    """Extract the four-key AAR JSON object from an LLM response, or None."""
+    """Extract the AAR JSON object from an LLM response, or None.
+
+    Requires the four AAR keys (each a dict). ``peer_review`` is optional —
+    parsed as a list when present, defaulted to [] when absent.
+    """
+    parsed = _parse_json_object(raw)
+    if parsed is None:
+        return None
+    if not all(k in parsed and isinstance(parsed[k], dict) for k in _REQUIRED_KEYS):
+        return None
+    pr = parsed.get("peer_review", [])
+    if not isinstance(pr, list):
+        pr = []
+    parsed["peer_review"] = pr
+    return parsed
+
+
+def _parse_json_object(raw: str) -> dict[str, Any] | None:
     text = re.sub(r"```(?:json)?\s*", "", raw).strip().rstrip("`").strip()
     start = text.find("{")
     end = text.rfind("}")
@@ -127,7 +244,5 @@ def _parse_retrospective(raw: str) -> dict[str, Any] | None:
     except (json.JSONDecodeError, ValueError):
         return None
     if not isinstance(parsed, dict):
-        return None
-    if not all(k in parsed and isinstance(parsed[k], dict) for k in _REQUIRED_KEYS):
         return None
     return parsed
