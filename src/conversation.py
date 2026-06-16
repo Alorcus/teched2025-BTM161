@@ -175,13 +175,15 @@ def _build_retrospective_views(
 ) -> tuple[list[str], dict[str, str]]:
     """Build per-agent transcript views for the retrospective.
 
-    Each operator agent sees only the messages it produced and the customer
-    messages that immediately preceded its turns, so it has enough context to
-    explain its own actions without seeing other agents' reasoning.
+    Peer-aware: every operator agent sees the FULL conversation transcript so
+    it can reference what other agents did when explaining its own actions and
+    when peer-reviewing them. The prompt makes clear that Q1–Q4 are still
+    self-review; only the peer_review section is about others.
 
     The process supervisor sees the tail of its own critique log
     (process_meta.log) — its decisions about activities and violations — not
-    the conversation transcript, since its job is to judge the process flow.
+    the conversation transcript, since its job is to judge the process flow,
+    not the dialogue.
     """
     agents: list[str] = []
     views: dict[str, str] = {}
@@ -190,20 +192,18 @@ def _build_retrospective_views(
     for agent in _OPERATOR_AGENTS:
         if agent not in seen_agents:
             continue
+        # Build a view that marks the agent's own lines so it can distinguish
+        # "what I did" from "what others did" without ambiguity.
         lines: list[str] = []
-        last_customer: str | None = None
         for who, content in transcript:
             if who == "customer":
-                last_customer = content
-                continue
-            if who == agent:
-                if last_customer is not None:
-                    lines.append(f"Customer: {last_customer}")
-                    last_customer = None
+                lines.append(f"Customer: {content}")
+            elif who == agent:
                 lines.append(f"You ({agent}): {content}")
-        if lines:
-            agents.append(agent)
-            views[agent] = "\n".join(lines)
+            else:
+                lines.append(f"{who}: {content}")
+        agents.append(agent)
+        views[agent] = "\n".join(lines)
 
     if supervisor_log_path:
         tail = _read_log_tail(Path(supervisor_log_path), max_lines=80)

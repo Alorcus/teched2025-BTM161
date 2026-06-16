@@ -18,7 +18,7 @@ class CoffeeShopConfig:
     guardrail_log_path: str = "./guardrail_log/events.jsonl"
     process_model_path: str = "./config/process_model.yaml"
     process_log_path: str = "./process_log/process_meta.log"
-    process_supervisor_enabled: bool = True
+    process_supervisor_enabled: bool = False
     process_supervisor_active: bool = False
     process_supervisor_max_retries: int = 3
     retrospective_enabled: bool = True
