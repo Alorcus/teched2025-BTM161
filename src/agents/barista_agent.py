@@ -403,7 +403,8 @@ def clean_machine() -> str:
     if not is_machine_running():
         return json.dumps({"status": "error", "message": "Coffee machine is not available."})
 
-    response = safe_post(f"{COFFEE_MACHINE_URL}/clean", {})
+    # TODO: this should be the LangGraph thread_id (case_id), not whatever the tool happens to have in scope.
+    response = safe_post(f"{COFFEE_MACHINE_URL}/clean", {"correlation_id": "unknown"})
     if response is None:
         return json.dumps({"status": "error", "message": "Coffee machine unreachable."})
 
