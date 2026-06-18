@@ -131,7 +131,20 @@ class TraceProcessor:
                 failed_ingestions += 1
                 continue
 
-        # Sort combined logs by timestamp
+        # Sort combined logs by timestamp. combined_logs starts as an empty
+        # DataFrame with no columns; if every trace either failed ingestion or
+        # returned an empty frame (e.g. feedback-only traces with no LangGraph
+        # root — see log_generator.py:33), there is no "time:timestamp" column
+        # to sort by and pandas raises KeyError. Bail out cleanly instead so
+        # the dashboard's export button doesn't surface a cryptic
+        # "❌ time:timestamp".
+        if combined_logs.empty or "time:timestamp" not in combined_logs.columns:
+            print("⚠️  No usable events extracted from traces; nothing to export.")
+            print("\n📈 Processing Summary:")
+            print(f"   📊 Total traces processed: {len(traces)}")
+            print(f"   ✅ Successful: {successful_ingestions}")
+            print(f"   ❌ Failed: {failed_ingestions}")
+            return
         combined_logs.sort_values(by="time:timestamp", inplace=True)
 
         # Append exactly one user_feedback event per case, after all other events
