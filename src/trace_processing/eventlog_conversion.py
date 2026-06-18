@@ -29,7 +29,13 @@ EVENT_ATTRIBUTES = {
     "place_on_tray": ["ocel_time", "duration"],
     "check_tray":    ["ocel_time", "duration"],
     "clean_machine": ["ocel_time", "duration"],
-    "user_feedback": ["ocel_time", "feedback_score", "feedback_reason", "feedback_valid"],
+    "user_feedback": [
+        "ocel_time",
+        "feedback_score",
+        "feedback_reason",
+        "feedback_valid",
+        "scenario_index",
+    ],
     # coffee machine
     "job_created":   ["ocel_time"],
     "brew_completed": ["ocel_time", "duration"],
@@ -130,7 +136,7 @@ OBJECT_ATTRIBUTES = {
     "barista_agent": [],
     "inventory_agent": [],
     "customer_service_agent": [],
-    "feedback": ["feedback_score", "feedback_reason", "feedback_valid"],
+    "feedback": ["feedback_score", "feedback_reason", "feedback_valid", "scenario_index"],
     "coffee_machine": [],
 }
 
@@ -492,6 +498,7 @@ def _preprocess_eventlog(eventlog: pl.DataFrame) -> pl.DataFrame:
         "feedback_score",
         "feedback_reason",
         "feedback_valid",
+        "scenario_index",
     ]
 
     handover_rows = el_enriched.filter(pl.col("handover_flag")).with_columns(

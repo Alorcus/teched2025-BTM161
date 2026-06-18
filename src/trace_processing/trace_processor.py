@@ -182,6 +182,7 @@ class TraceProcessor:
                 "feedback_score": fb["feedback_score"],
                 "feedback_reason": fb["feedback_reason"],
                 "feedback_valid": fb["valid"],
+                "scenario_index": fb.get("scenario_index"),
             })
 
         if feedback_rows:
