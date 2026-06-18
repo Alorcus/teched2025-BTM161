@@ -1,4 +1,3 @@
-import csv
 import json
 import os
 import uuid
@@ -12,6 +11,9 @@ COFFEE_MACHINE_LOG = Path("services/coffee_machine/logs/coffee_machine.csv")
 
 def _load_coffee_machine_rows(path: Path) -> pd.DataFrame:
     """Read the coffee machine's raw CSV and map it to the canonical schema.
+
+    The expected column names mirror `FIXED_HEADER` in
+    services/coffee_machine/logger.py — keep the two in sync.
 
     Returns an empty DataFrame if the file is missing or contains only the
     header. Optional canonical columns (message/model/tokens/tool/feedback_*)
@@ -191,7 +193,6 @@ class TraceProcessor:
         # injection above: read the source CSV, map to canonical columns,
         # filter to known case_ids, concat, re-sort.
         machine_rows = _load_coffee_machine_rows(COFFEE_MACHINE_LOG)
-        merged_machine_rows = False
         if not machine_rows.empty:
             valid_case_ids = set(combined_logs["case_id"].unique())
             before = len(machine_rows)
@@ -206,17 +207,10 @@ class TraceProcessor:
                 combined_logs = pd.concat(
                     [combined_logs, machine_rows], ignore_index=True
                 ).sort_values(by="time:timestamp")
-                merged_machine_rows = True
 
-        written_path = self._generate_log_file(
+        self._generate_log_file(
             combined_logs, "./generated_event_log", json_format=export_as_json
         )
-
-        # Only truncate the source CSV if the merge actually pulled rows from
-        # it AND the unified log was written successfully. Otherwise a write
-        # failure would lose source data.
-        if merged_machine_rows and written_path:
-            self._truncate_coffee_machine_log(COFFEE_MACHINE_LOG)
 
         print("\n📈 Processing Summary:")
         print(f"   📊 Total traces processed: {len(traces)}")
@@ -265,36 +259,3 @@ class TraceProcessor:
         except Exception as e:
             print(f"\n″❌ Failed to generate log file at {file_path}: {e}")
             return None
-
-    def _truncate_coffee_machine_log(self, path: Path) -> None:
-        """Reset the coffee machine CSV after a successful merge.
-
-        Writes only the header row so subsequent appends from the FastAPI
-        service are valid. The header MUST mirror logger.FIXED_HEADER in
-        services/coffee_machine/logger.py — keep the two in sync.
-
-        Assumes the FastAPI worker is not actively writing during this call
-        (true today: process_all_traces runs after the session ends).
-        """
-        header = [
-            "case_id", "concept:name", "ocel_time", "duration",
-            "org:resource", "job_id", "drink",
-        ]
-        try:
-            with open(path, "w", newline="") as f:
-                csv.writer(f).writerow(header)
-            print(f"   🧹 Truncated {path}")
-        except OSError as e:
-            print(f"   ⚠️  Failed to truncate {path}: {e}")
-
-
-def _extract_case_id(trace_dict: dict) -> str | None:
-    """Extract the thread_id (case_id) from a raw MLflow trace dict."""
-    spans = trace_dict.get("data", {}).get("spans", trace_dict.get("spans", []))
-    root = next((s for s in spans if s.get("name") == "LangGraph"), None)
-    if not root:
-        return None
-    try:
-        return json.loads(root["attributes"]["metadata"]).get("thread_id")
-    except (KeyError, json.JSONDecodeError):
-        return None

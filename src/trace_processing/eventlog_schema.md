@@ -190,11 +190,10 @@ coffee-machine merge follows the same shape with a different source CSV.
 
 These don't block writing the merge code, but worth flagging:
 
-1. **Coffee-machine CSV lifecycle.** Today
-   `services/coffee_machine/logs/coffee_machine.csv` accumulates across
-   sessions. The merge filter (step 7) hides this for the merged log, but
-   the raw CSV grows forever. Truncate after a successful merge? Rotate?
-   Decide this.
+1. **Coffee-machine CSV lifecycle.** Decided: append-only, same as
+   `mlflow.db`. Every export re-merges every row whose `case_id` is still
+   in MLflow (the filter in step 7 drops the rest). The raw CSV grows
+   across sessions; rotation is out of scope for now.
 2. **Stream 2 header fragility** — see the warning under [Where logs live
    today](#where-logs-live-today). The fix is to make
    `services/coffee_machine/logger.py` enforce a fixed header (and reject
