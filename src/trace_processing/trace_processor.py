@@ -113,6 +113,7 @@ class TraceProcessor:
 
         successful_ingestions = 0
         failed_ingestions = 0
+        skipped_ingestions = 0  # processed without error but produced 0 events
 
         combined_logs = pd.DataFrame()
 
@@ -124,12 +125,21 @@ class TraceProcessor:
             log_generator = LogGenerator()
             try:
                 trace_event_log = log_generator.generate_event_log_df(trace_dict)
-                combined_logs = pd.concat([combined_logs, trace_event_log], ignore_index=True)
-                successful_ingestions += 1
             except Exception as e:
                 print(f"   ❌ Failed to generate event log for {trace_id}: {e}")
                 failed_ingestions += 1
                 continue
+
+            if trace_event_log.empty:
+                # LogGenerator returns an empty frame for traces with no
+                # spans, no LangGraph root, etc. (e.g. standalone ChatOllama
+                # calls from get_feedback()). These are legitimately-skipped,
+                # not successful — counting them as such hides real bugs.
+                skipped_ingestions += 1
+                continue
+
+            combined_logs = pd.concat([combined_logs, trace_event_log], ignore_index=True)
+            successful_ingestions += 1
 
         # Sort combined logs by timestamp. combined_logs starts as an empty
         # DataFrame with no columns; if every trace either failed ingestion or
@@ -143,6 +153,7 @@ class TraceProcessor:
             print("\n📈 Processing Summary:")
             print(f"   📊 Total traces processed: {len(traces)}")
             print(f"   ✅ Successful: {successful_ingestions}")
+            print(f"   ⏭️  Skipped (no events): {skipped_ingestions}")
             print(f"   ❌ Failed: {failed_ingestions}")
             return
         combined_logs.sort_values(by="time:timestamp", inplace=True)
@@ -210,6 +221,7 @@ class TraceProcessor:
         print("\n📈 Processing Summary:")
         print(f"   📊 Total traces processed: {len(traces)}")
         print(f"   ✅ Successful: {successful_ingestions}")
+        print(f"   ⏭️  Skipped (no events): {skipped_ingestions}")
         print(f"   ❌ Failed: {failed_ingestions}")
 
         if successful_ingestions > 0:
