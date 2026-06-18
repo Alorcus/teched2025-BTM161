@@ -11,5 +11,6 @@ class CoffeeShopConfig:
     llm: Any = None
     db_url: str | None = None
     mlflow_experiment: str = "lg-coffee-mas"
+    mlflow_tracking_uri: str = "sqlite:///mlflow.db"
     mlflow_enabled: bool = True
     coffee_machine_url: str = "http://127.0.0.1:8001"

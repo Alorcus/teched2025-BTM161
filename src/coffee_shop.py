@@ -70,6 +70,7 @@ class CoffeeShop:
         self.customer_agent = CustomerAgent(llm)
 
         if self.config.mlflow_enabled:
+            mlflow.set_tracking_uri(self.config.mlflow_tracking_uri)
             mlflow.langchain.autolog()
             if not mlflow.get_experiment_by_name(self.config.mlflow_experiment):
                 mlflow.create_experiment(self.config.mlflow_experiment)

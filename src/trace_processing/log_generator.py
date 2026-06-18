@@ -29,7 +29,10 @@ class LogGenerator:
             raise Exception('Cannot locate spans in trace data!')
 
         # This is the root node of the LangGraph trace
-        self.langgraph_root_span = [span for span in self.spans if span['name'] == 'LangGraph'][0]
+        langgraph_roots = [span for span in self.spans if span['name'] == 'LangGraph']
+        if not langgraph_roots:
+            return pd.DataFrame()
+        self.langgraph_root_span = langgraph_roots[0]
         self.case_id = json.loads(self.langgraph_root_span['attributes']['metadata'])['thread_id']
 
         self._process_root_span()
@@ -43,6 +46,9 @@ class LogGenerator:
                 self._process_agent_span(agent_span)
 
         dataframe = pd.DataFrame(self.process_events).sort_values(["time:timestamp"], ascending=True)
+        # if the trace was canceled before LLM answers
+        if 'duration' not in dataframe.columns:
+            dataframe['duration'] = None
         dataframe['time_finished'] = ((dataframe['time:timestamp'] + dataframe['duration'].fillna(0))).apply(lambda t: pd.to_datetime(t).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3])
         dataframe['time:timestamp'] = dataframe['time:timestamp'].apply(lambda t: pd.to_datetime(t).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3])
 
@@ -77,7 +83,11 @@ class LogGenerator:
 
         span = call_model_child_spans[0]
 
-        span_output = json.loads(span['attributes']['mlflow.spanOutputs'])['messages'][0]
+        raw_output = span['attributes'].get('mlflow.spanOutputs')
+        # prevent keyError if the simulation froze during an LLM call and was interrupted
+        if raw_output is None:
+            return
+        span_output = json.loads(raw_output)['messages'][0]
 
         model_name = span_output.get('response_metadata', {}).get('model_name', None)
 
@@ -110,9 +120,20 @@ class LogGenerator:
 
 
     def _process_tool_span(self, span, agent_name):
-        tool_input = json.loads(span['attributes'].get('mlflow.spanInputs', '[]'))[0]
+        parsed = json.loads(span['attributes'].get('mlflow.spanInputs', '[]'))
+        tool_input = None
+        if isinstance(parsed, list):
+            tool_input = parsed[0] if parsed else None
+        elif isinstance(parsed, dict) and 'messages' in parsed:
+            for msg in reversed(parsed['messages']):
+                if msg.get('type') == 'ai' and msg.get('tool_calls'):
+                    tool_input = msg['tool_calls'][0]
+                    break
+
+        if tool_input is None:
+            return
+
         tool_name = 'unknown_tool'
-        
         if tool_input.get('type', None) == 'tool_call':
             tool_name = tool_input.get('name', 'unknown_tool')
 
