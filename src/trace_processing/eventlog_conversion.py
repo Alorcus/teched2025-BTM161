@@ -224,7 +224,7 @@ class ObjectCentricEventlog:
 
         event_tables = {}
         for evt_type in event_map_type["ocel_type"].to_list():
-            attrs = EVENT_ATTRIBUTES[evt_type]
+            attrs = EVENT_ATTRIBUTES.get(evt_type, [])
             evt_type_tbl = (
                 events.filter(pl.col("ocel_type") == evt_type)
                 .join(

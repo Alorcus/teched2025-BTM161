@@ -1,15 +1,17 @@
 import logging
-from collections import defaultdict
+from pathlib import Path
 
 import mlflow
 
 from src.llm import create_chat_llm
 from src.config import CoffeeShopConfig
+from src.setups import setup_dir
 from src.agents.order_store import create_order_store_engine, set_engine
 from src.agents import (
     init_db, reset_inventory, set_item_stock, get_all_inventory,
     CustomerAgent, CUSTOMER_SCENARIOS,
 )
+from src.control_plane import AgentRepo, Catalog, JsonlLogSink, ProcessSupervisor
 from src.graph import build_coffee_shop_graph
 from src.conversation import ConversationEngine
 from src.notebook_ui import NotebookUI, AGENT_CONFIG
@@ -40,7 +42,6 @@ class CoffeeShop:
 
     def __init__(self, config: CoffeeShopConfig | None = None):
         self.config = config or CoffeeShopConfig()
-        self.agent_definitions = defaultdict(str)
         self.traces_of_latest_conversations = []
         self.verbose_mode = True
         self.customer_agent_enabled = False
@@ -49,10 +50,10 @@ class CoffeeShop:
         self.agent_config = AGENT_CONFIG
         self._engine = None
         self._ui = None
-
-    def set_agent_definition(self, agent, definition):
-        """Set or update the definition for a specific agent before starting the shop"""
-        self.agent_definitions[agent] = definition
+        self.agent_repo: AgentRepo | None = None
+        self.catalog: Catalog | None = None
+        self.log_sink: JsonlLogSink | None = None
+        self.process_supervisor: ProcessSupervisor | None = None
 
     def open_shop(self, reset_inventory_first=True):
         """Start the coffee shop application after potentially updating agent definitions"""
@@ -76,7 +77,36 @@ class CoffeeShop:
                 mlflow.create_experiment(self.config.mlflow_experiment)
             mlflow.set_experiment(self.config.mlflow_experiment)
 
-        self.app = build_coffee_shop_graph(llm, self.agent_definitions)
+        if not self.config.setup_name:
+            raise ValueError(
+                "CoffeeShopConfig.setup_name is required — pick a setup from config/setups/"
+            )
+        config_dir = setup_dir(self.config.setup_name)
+        self.agent_repo = AgentRepo(config_dir)
+        self.catalog = Catalog(config_dir)
+        self.log_sink = JsonlLogSink(self.config.guardrail_log_path, setup_name=self.config.setup_name)
+        _coffee_shop_logger.info(
+            f"control plane: setup={self.config.setup_name} | agents={self.agent_repo.ids()} | log={self.config.guardrail_log_path}"
+        )
+
+        self.app = build_coffee_shop_graph(llm, self.agent_repo, self.catalog, self.log_sink)
+
+        if self.config.process_supervisor_enabled:
+            self.process_supervisor = ProcessSupervisor(
+                process_model_path=self.config.process_model_path,
+                log_path=self.config.process_log_path,
+                llm=llm,
+                prompt_template=self.agent_repo.get("process_supervisor").base_prompt,
+            )
+            _coffee_shop_logger.info(
+                "process supervisor: model=%s | log=%s",
+                self.config.process_model_path,
+                self.config.process_log_path,
+            )
+        else:
+            _coffee_shop_logger.info(
+                "process supervisor: DISABLED — no observation, no critique, no process_meta.log entries"
+            )
 
         self._conversation_engine = ConversationEngine(
             self.app, mlflow_enabled=self.config.mlflow_enabled
@@ -116,6 +146,7 @@ class CoffeeShop:
         self._conversation_engine.feedback_log[thread_id] = {
             "thread_id": thread_id,
             "order_id": order_id,
+            "scenario_index": self.customer_agent.scenario_index,
             **feedback,
         }
         self._conversation_engine._save_feedback_store()
