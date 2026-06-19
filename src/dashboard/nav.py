@@ -4,6 +4,7 @@ Each page (Interaction / Metrics / Trace) renders the same three-tab strip
 in its template ``header`` slot. The currently active tab is shown solid;
 the others are subtle pill links.
 """
+
 from __future__ import annotations
 
 import panel as pn
@@ -11,7 +12,7 @@ import panel as pn
 _TABS: tuple[tuple[str, str], ...] = (
     ("/", "Interaction Observatory"),
     ("/metrics", "Metrics Observatory"),
-    ("/trace", "Trace Table"),
+    # ("/trace", "Trace Table"),
 )
 
 _ACTIVE_STYLE = (
