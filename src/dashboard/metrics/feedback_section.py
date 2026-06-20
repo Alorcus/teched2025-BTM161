@@ -1,12 +1,9 @@
-import json
-from pathlib import Path
-
 import panel as pn
 import polars as pl
 
-from .styling_helpers import section_header, small_kpi_card, subsection_header
+from src.trace_processing.eventlog_conversion import ObjectCentricEventlog
 
-FEEDBACK_STORE_PATH = Path("./feedback_store.json")
+from .styling_helpers import section_header, small_kpi_card, subsection_header
 
 _SCENARIO_NAMES = {
     0: "Large latte & croissant",
@@ -17,8 +14,8 @@ _SCENARIO_NAMES = {
 
 
 class FeedbackSection:
-    def __init__(self, log_path: Path):
-        self._log_path = log_path
+    def __init__(self, ocel: ObjectCentricEventlog):
+        self._ocel = ocel
         self._data = self._load_data()
 
     def panel(self) -> pn.viewable.Viewable:
@@ -37,22 +34,14 @@ class FeedbackSection:
         )
 
     def _load_data(self) -> pl.DataFrame | None:
-        try:
-            case_ids = set(pl.read_csv(str(self._log_path))["case_id"].to_list())
-        except Exception:
+        # Pull the user_feedback events straight from the OCEL — every other
+        # metrics section sources from `ocel` and we want a single source of
+        # truth. TraceProcessor injects exactly one user_feedback event per
+        # case during export (see trace_processor.py).
+        df = self._ocel.event_tables.get("event_user_feedback")
+        if df is None or df.is_empty():
             return None
-
-        if not FEEDBACK_STORE_PATH.exists():
-            return None
-
-        with open(FEEDBACK_STORE_PATH) as f:
-            store = json.load(f)
-
-        rows = [v for k, v in store.items() if k in case_ids]
-        if not rows:
-            return None
-
-        return pl.DataFrame(rows, infer_schema_length=len(rows))
+        return df
 
     def _build_kpi_row(self) -> pn.pane.HTML:
         df = self._data

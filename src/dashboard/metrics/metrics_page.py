@@ -42,7 +42,7 @@ def create_metrics_dashboard():
 
         return pn.Column(
             OverviewSection(ocel, selected_file).panel(),
-            FeedbackSection(selected_file).panel(),
+            FeedbackSection(ocel).panel(),
             SystemMetricsSection(ocel).panel(),
             TimeMetricsSection(ocel).panel(),
             VisualizationSection(ocel).panel(),
