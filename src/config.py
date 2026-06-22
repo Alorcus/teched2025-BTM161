@@ -8,6 +8,13 @@ class CoffeeShopConfig:
 
     `setup_name` selects which `config/setups/<name>/` directory to load.
     There is no default — callers must pick one explicitly.
+
+    `handover_pause_default` seeds the dashboard's "pause at next handover"
+    toggle initial state on page load. When `True`, the dashboard starts in
+    Pause mode and the next inter-agent handover will halt until the user
+    clicks the toggle back to Go. When `False` (default), handovers proceed
+    normally. Only affects the dashboard runner; the headless `simulate` path
+    has no consumer for this signal.
     """
     llm: Any = None
     db_url: str | None = None
@@ -22,3 +29,4 @@ class CoffeeShopConfig:
     process_supervisor_enabled: bool = False
     process_supervisor_active: bool = False
     process_supervisor_max_retries: int = 3
+    handover_pause_default: bool = False

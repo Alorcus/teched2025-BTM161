@@ -126,8 +126,53 @@ def create_observatory_dashboard(setup_name: str):
     scenario_select.param.watch(on_scenario_change, "value")
 
     run_button = pn.widgets.Button(
-        name="Run Conversation", button_type="primary", sizing_mode="stretch_width"
+        name="Run Conversation", button_type="primary",
+        sizing_mode="stretch_width", height=36,
+        margin=(0, 0, 0, 0),
     )
+    # Pause/Go toggle: square button (36x36), height matches run_button so
+    # they share a baseline in the Row. Label shows the action the next click
+    # will take (⏸ in Go mode → next click pauses; ▶ in Pause mode → next
+    # click resumes). Initial state is seeded from
+    # CoffeeShopConfig.handover_pause_default. The bk-btn stylesheet override
+    # zeros out min-width / padding so the rendered <button> matches its
+    # widget wrapper exactly — otherwise Panel's default button padding lets
+    # it expand past 36px wide.
+    _PAUSE_TOGGLE_CSS = """
+    :host { width: 36px !important; }
+    .bk-btn-group, .bk-btn {
+        width: 36px !important;
+        min-width: 36px !important;
+        padding: 0 !important;
+        font-size: 16px !important;
+        line-height: 1 !important;
+    }
+    """
+    pause_toggle = pn.widgets.Button(
+        name="▶" if runner.pause_on_next_handover else "⏸",
+        button_type="warning" if runner.pause_on_next_handover else "default",
+        width=36,
+        height=36,
+        sizing_mode="fixed",
+        margin=(0, 4, 0, 0),
+        stylesheets=[_PAUSE_TOGGLE_CSS],
+    )
+
+    def on_pause_toggle(event):
+        new_state = not runner.pause_on_next_handover
+        runner.pause_on_next_handover = new_state
+        if new_state:
+            pause_toggle.name = "▶"
+            pause_toggle.button_type = "warning"
+        else:
+            pause_toggle.name = "⏸"
+            pause_toggle.button_type = "default"
+            # If the runner is currently blocked at the pause seam, flipping
+            # back to Go releases it. resume() is a no-op when not paused, so
+            # this is safe to call unconditionally.
+            runner.resume()
+
+    pause_toggle.on_click(on_pause_toggle)
     export_button = pn.widgets.Button(
         name="Export to Event Log",
         button_type="default",
@@ -218,7 +263,8 @@ def create_observatory_dashboard(setup_name: str):
             styles={"gap": "5px"},
         ),
         prompt_textarea,
-        run_button,
+        pn.Row(pause_toggle, run_button, sizing_mode="stretch_width",
+               margin=(0, 0, 0, 0), styles={"align-items": "center"}),
         export_button,
         export_status,
         pn.Row(status_indicator, pn.pane.Markdown("", width=10)),

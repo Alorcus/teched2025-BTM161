@@ -942,5 +942,260 @@ class TestSupervisorDisabledNoOp(unittest.TestCase):
         shop.app.update_state.assert_not_called()
 
 
+# =============================================================================
+# Handover pause toggle (integration test for the dashboard pause feature)
+# =============================================================================
+
+
+class TestHandoverPauseAndResume(unittest.TestCase):
+    """End-to-end test for the dashboard's pause/go toggle.
+
+    Drives the ConversationRunner with a stream that emits one handover, then
+    asserts (1) with pause_on_next_handover=True the runner halts AFTER the
+    sender's handoff is published and BEFORE the receiver's first message is
+    published; (2) calling runner.resume() releases the wait, the receiver's
+    message is then published, and the conversation completes normally.
+    Both halves run in a single end-to-end flow so a regression in either
+    direction fails the test.
+    """
+
+    def test_pause_then_resume_in_single_flow(self):
+        shop = _make_mock_shop()
+
+        # Block the stream generator between yielding the handoff update and
+        # yielding the receiver's first message. This proves the runner has
+        # actually stopped *consuming* the stream, not just that we didn't
+        # call its callbacks — i.e. real backpressure on the receiver.
+        receiver_gate = threading.Event()
+
+        sender_msg = AIMessage(
+            content="Handing off to barista",
+            name="order_agent",
+            id="sender-msg-1",
+        )
+        receiver_msg = AIMessage(
+            content="Brewing the latte!",
+            name="barista_agent",
+            id="receiver-msg-1",
+        )
+
+        def streaming_handover(*_a, **_kw):
+            # 1. Sender's outgoing message + handoff_context — runner publishes
+            #    HANDOFF here and (if toggle on) enters _wait_for_resume.
+            yield (("order_agent:abc",), {"agent": {
+                "messages": [sender_msg],
+                "active_agent": "barista_agent",
+                "handoff_context": {
+                    "from_agent": "order_agent",
+                    "context_summary": "one latte for the customer",
+                    "expectation": "brew it",
+                },
+            }})
+            # 2. Block before the receiver speaks. Without a pause seam in
+            #    the runner, this would still gate the receiver — but the
+            #    HANDOFF event would have published, the wait would not, and
+            #    the assertion below (that no AGENT_MESSAGE from barista has
+            #    been published yet but the runner thread is parked) would
+            #    still hold for the WRONG reason (parked on receiver_gate
+            #    instead of on _resume_event). To distinguish, we wait only
+            #    a short time on receiver_gate, then assert the runner is
+            #    paused via runner.is_paused — that property is True iff the
+            #    runner is parked at _resume_event specifically.
+            assert receiver_gate.wait(timeout=10), (
+                "Test bug: receiver_gate was never released; the runner "
+                "either never reached the receiver-message yield or the "
+                "stream generator was abandoned."
+            )
+            # 3. Receiver's first message.
+            yield (("barista_agent:def",), {"agent": {
+                "messages": [receiver_msg],
+            }})
+
+        shop.app.stream.side_effect = streaming_handover
+        shop.customer_agent.get_initial_message.return_value = "I want a latte"
+        shop.customer_agent.respond_to.return_value = None
+
+        bus = EventBus()
+        runner = ConversationRunner(shop, bus)
+        runner.pause_on_next_handover = True
+        runner.start(scenario_index=0)
+
+        # --- Half 1: assert pause is honored ---
+        # Wait for the runner to reach the pause seam. The HANDOFF event is
+        # published immediately before _wait_for_resume() clears the resume
+        # Event, so we poll for is_paused becoming True with a tight bound.
+        # Failing here means the toggle was ignored (test fails if pause is
+        # not honored, per the spec).
+        deadline = time.time() + 5.0
+        while time.time() < deadline and not runner.is_paused:
+            time.sleep(0.01)
+        self.assertTrue(
+            runner.is_paused,
+            "Runner did not pause at the handover seam; pause toggle not honored.",
+        )
+
+        # The HANDOFF event must be on the bus (sender emitted), but the
+        # receiver's AGENT_MESSAGE must NOT be there yet (receiver has not
+        # accepted). We drain partially via a peek that preserves bus order.
+        mid_events = bus.drain()
+        handoffs = [e for e in mid_events if e.event_type == EventType.HANDOFF]
+        receiver_msgs = [
+            e for e in mid_events
+            if e.event_type == EventType.AGENT_MESSAGE
+            and e.agent_name == "barista_agent"
+        ]
+        self.assertEqual(
+            len(handoffs), 1,
+            f"Expected 1 HANDOFF event after pause, got {len(handoffs)}",
+        )
+        self.assertEqual(handoffs[0].target_agent, "barista_agent")
+        self.assertEqual(
+            len(receiver_msgs), 0,
+            "Receiver's AGENT_MESSAGE was published before resume — "
+            "pause did not halt at the correct seam.",
+        )
+
+        # Sanity: stream() must not have been called a second time yet
+        # (the generator is still parked on receiver_gate.wait inside the
+        # ongoing call).
+        self.assertEqual(shop.app.stream.call_count, 1)
+
+        # --- Half 2: toggle to Go and assert resume completes the handover ---
+        # First release the upstream gate so the receiver_msg yield can fire
+        # once the runner consumes it; then resume the runner. If resume()
+        # does nothing, the runner stays parked at _resume_event.wait and
+        # the join below times out — which fails this half of the test.
+        receiver_gate.set()
+        runner.resume()
+
+        runner._thread.join(timeout=5)
+        self.assertFalse(
+            runner.is_running,
+            "Runner did not finish after resume — pending handoff did not complete.",
+        )
+
+        # After resume, the receiver's AGENT_MESSAGE must have been published.
+        post_events = bus.drain()
+        receiver_msgs_post = [
+            e for e in post_events
+            if e.event_type == EventType.AGENT_MESSAGE
+            and e.agent_name == "barista_agent"
+        ]
+        self.assertEqual(
+            len(receiver_msgs_post), 1,
+            "Receiver's AGENT_MESSAGE was not published after resume — "
+            "conversation did not progress past the paused handover.",
+        )
+        self.assertEqual(receiver_msgs_post[0].content, "Brewing the latte!")
+
+        # The runner reflects the post-handoff active agent.
+        self.assertEqual(runner._active_agent, "barista_agent")
+
+    def test_pause_off_proceeds_without_blocking(self):
+        """Sanity guard: with the toggle off (default), the runner must NOT
+        pause — a regression that always pauses would deadlock real use."""
+        shop = _make_mock_shop()
+
+        sender_msg = AIMessage(content="ok", name="order_agent", id="s1")
+        receiver_msg = AIMessage(content="ok", name="barista_agent", id="r1")
+
+        def stream(*_a, **_kw):
+            yield (("order_agent:abc",), {"agent": {
+                "messages": [sender_msg],
+                "active_agent": "barista_agent",
+                "handoff_context": {
+                    "from_agent": "order_agent",
+                    "context_summary": "go",
+                    "expectation": "brew",
+                },
+            }})
+            yield (("barista_agent:def",), {"agent": {"messages": [receiver_msg]}})
+
+        shop.app.stream.side_effect = stream
+        shop.customer_agent.get_initial_message.return_value = "hi"
+        shop.customer_agent.respond_to.return_value = None
+
+        bus = EventBus()
+        runner = ConversationRunner(shop, bus)
+        # Explicitly off (matches the default but make it explicit).
+        runner.pause_on_next_handover = False
+        runner.start(scenario_index=0)
+        runner._thread.join(timeout=5)
+
+        self.assertFalse(runner.is_running)
+        self.assertFalse(runner.is_paused)
+        events = bus.drain()
+        receiver_msgs = [
+            e for e in events
+            if e.event_type == EventType.AGENT_MESSAGE
+            and e.agent_name == "barista_agent"
+        ]
+        self.assertEqual(len(receiver_msgs), 1)
+
+    def test_pause_default_seeded_from_config(self):
+        """CoffeeShopConfig.handover_pause_default seeds the runner flag."""
+        shop = _make_mock_shop()
+        shop.config = CoffeeShopConfig(handover_pause_default=True)
+        runner = ConversationRunner(shop, EventBus())
+        self.assertTrue(runner.pause_on_next_handover)
+
+        shop2 = _make_mock_shop()
+        shop2.config = CoffeeShopConfig(handover_pause_default=False)
+        runner2 = ConversationRunner(shop2, EventBus())
+        self.assertFalse(runner2.pause_on_next_handover)
+
+    def test_pause_skipped_on_dedup_echo(self):
+        """A router echo of the same handoff_context must NOT trigger a
+        second pause — pause sits inside the dedup branch."""
+        shop = _make_mock_shop()
+        sender_msg = AIMessage(content="hand off", name="order_agent", id="s1")
+        receiver_msg = AIMessage(content="brewing", name="barista_agent", id="r1")
+        hc = {
+            "from_agent": "order_agent",
+            "context_summary": "one latte",
+            "expectation": "brew",
+        }
+
+        # Both updates carry the SAME handoff_context — the second is a
+        # router echo and must be deduped.
+        def stream(*_a, **_kw):
+            yield (("order_agent:abc",), {"agent": {
+                "messages": [sender_msg],
+                "active_agent": "barista_agent",
+                "handoff_context": hc,
+            }})
+            yield ((), {"router": {
+                "active_agent": "barista_agent",
+                "handoff_context": hc,
+            }})
+            yield (("barista_agent:def",), {"agent": {"messages": [receiver_msg]}})
+
+        shop.app.stream.side_effect = stream
+        shop.customer_agent.get_initial_message.return_value = "hi"
+        shop.customer_agent.respond_to.return_value = None
+
+        bus = EventBus()
+        runner = ConversationRunner(shop, bus)
+        runner.pause_on_next_handover = True
+        runner.start(scenario_index=0)
+
+        # Wait for the (single) pause to occur.
+        deadline = time.time() + 5.0
+        while time.time() < deadline and not runner.is_paused:
+            time.sleep(0.01)
+        self.assertTrue(runner.is_paused)
+
+        # Resume; runner must finish without parking a second time.
+        runner.resume()
+        runner._thread.join(timeout=5)
+        self.assertFalse(runner.is_running)
+
+        events = bus.drain()
+        handoffs = [e for e in events if e.event_type == EventType.HANDOFF]
+        # Dedup means exactly one HANDOFF was published even though the
+        # stream emitted handoff_context twice.
+        self.assertEqual(len(handoffs), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
