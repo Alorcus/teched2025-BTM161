@@ -85,10 +85,17 @@ class AgentPanel(param.Parameterized):
         ts = time.strftime("%H:%M:%S")
         args_str = ""
         if args:
+            # Force display order for transfer_to_agent: receiver first.
+            # The LLM may emit args in any order; reorder so the receiver
+            # (target_agent) appears before the rationale fields.
+            if name == "transfer_to_agent" and "target_agent" in args:
+                ordered = {"target_agent": args["target_agent"]}
+                for k, v in args.items():
+                    if k != "target_agent":
+                        ordered[k] = v
+                args = ordered
             try:
                 args_str = json.dumps(args, ensure_ascii=False)
-                if len(args_str) > 100:
-                    args_str = args_str[:100] + "..."
             except (TypeError, ValueError):
                 args_str = "..."
         msgs = list(self.messages)
@@ -98,9 +105,8 @@ class AgentPanel(param.Parameterized):
 
     def set_tool_result(self, name: str, result: str):
         ts = time.strftime("%H:%M:%S")
-        result_short = result[:150] if len(result) > 150 else result
         msgs = list(self.messages)
-        msgs.append({"role": "tool_result", "content": f"{name} → {result_short}", "ts": ts, "tool_name": name})
+        msgs.append({"role": "tool_result", "content": f"{name} → {result}", "ts": ts, "tool_name": name})
         self.messages = msgs
         self._render_messages()
 
@@ -139,12 +145,28 @@ class AgentPanel(param.Parameterized):
             )
             return
 
-        html_parts = ['<div style="font-size:12px;max-height:300px;overflow-y:auto;">']
+        html_parts = [
+            '<style>'
+            '.agent-msg{padding:4px 0;border-bottom:1px solid #eee;}'
+            '.agent-msg-body{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'
+            'display:inline-block;max-width:100%;vertical-align:bottom;}'
+            '.agent-msg:hover{background:#fffbe6;}'
+            '.agent-msg:hover .agent-msg-body{white-space:pre-wrap;word-break:break-word;'
+            'overflow:visible;text-overflow:clip;display:block;}'
+            '.agent-msg:hover .agent-msg-truncated{display:none;}'
+            '.agent-msg-reason{margin-top:4px;font-size:11px;color:#8a3a34;'
+            'font-style:italic;border-left:2px solid #b3261e;padding-left:6px;}'
+            '.agent-msg-reason-body{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'
+            'display:inline-block;max-width:100%;vertical-align:bottom;}'
+            '.agent-msg-reason:hover .agent-msg-reason-body{white-space:pre-wrap;'
+            'word-break:break-word;overflow:visible;text-overflow:clip;display:block;}'
+            '</style>'
+        ]
+        html_parts.append('<div style="font-size:12px;max-height:300px;overflow-y:auto;">')
         for msg in self.messages[-20:]:
             role = msg["role"]
             full_content = str(msg["content"])
             full_escaped = html_mod.escape(full_content)
-            display_content = html_mod.escape(full_content[:500])
             ts = msg.get("ts", "")
             if role == "ai":
                 prefix = f'<span style="color:{self.color};font-weight:bold;">AI:</span>'
@@ -164,19 +186,17 @@ class AgentPanel(param.Parameterized):
             reason_html = ""
             if reason:
                 reason_full = html_mod.escape(reason)
-                reason_short = html_mod.escape(reason[:300]) + ("…" if len(reason) > 300 else "")
                 reason_html = (
-                    f'<div style="margin-top:4px;font-size:11px;color:#8a3a34;'
-                    f'font-style:italic;border-left:2px solid #b3261e;padding-left:6px;" '
-                    f'title="{reason_full}">⚠ supervisor: {reason_short}</div>'
+                    f'<div class="agent-msg-reason">⚠ supervisor: '
+                    f'<span class="agent-msg-reason-body">{reason_full}</span></div>'
                 )
             body_style = ""
             if role == "ai_rejected":
                 body_style = "color:#b3261e;"
             html_parts.append(
-                f'<div style="padding:4px 0;border-bottom:1px solid #eee;" title="{full_escaped}">'
+                f'<div class="agent-msg">'
                 f'<span style="color:#999;font-size:10px;margin-right:4px;">{ts}</span>'
-                f'{prefix} <span style="{body_style}">{display_content}</span>'
+                f'{prefix} <span class="agent-msg-body" style="{body_style}">{full_escaped}</span>'
                 f'{reason_html}</div>'
             )
         html_parts.append("</div>")

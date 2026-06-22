@@ -450,11 +450,19 @@ class TraceTablePanel:
             name = html.escape(ev.tool_name or "")
             args_text = ""
             if ev.tool_args:
+                args_to_render = ev.tool_args
+                # Force display order for transfer_to_agent: receiver first.
+                if ev.tool_name == "transfer_to_agent" and "target_agent" in args_to_render:
+                    ordered = {"target_agent": args_to_render["target_agent"]}
+                    for k, v in args_to_render.items():
+                        if k != "target_agent":
+                            ordered[k] = v
+                    args_to_render = ordered
                 try:
                     import json as _json
-                    args_text = _json.dumps(ev.tool_args, ensure_ascii=False)
+                    args_text = _json.dumps(args_to_render, ensure_ascii=False)
                 except (TypeError, ValueError):
-                    args_text = str(ev.tool_args)
+                    args_text = str(args_to_render)
             args_text = html.escape(_truncate(args_text, 240))
             # Tool calls produced by a rejected AIMessage are emitted with a
             # synthetic supervisor_line starting with "REJECTED" so the
