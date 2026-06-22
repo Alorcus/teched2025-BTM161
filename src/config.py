@@ -30,3 +30,4 @@ class CoffeeShopConfig:
     process_supervisor_active: bool = False
     process_supervisor_max_retries: int = 3
     handover_pause_default: bool = False
+    recursion_limit: int = 100
