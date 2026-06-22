@@ -143,11 +143,15 @@ class ConversationRunner:
         self._current_order_id = None
         thread_id = str(uuid.uuid4())
 
-        scenario_label = (
-            CUSTOMER_SCENARIOS[scenario_index]
-            if scenario_index is not None
-            else "random"
-        )
+        if scenario_index is None:
+            scenario_label = "random"
+        elif 0 <= scenario_index < len(CUSTOMER_SCENARIOS):
+            scenario_label = CUSTOMER_SCENARIOS[scenario_index]
+        else:
+            # Sentinel from the dashboard "Custom" dropdown entry (-1), or any
+            # other out-of-range index: the customer agent is running with a
+            # user-edited system prompt, so the preset list does not describe it.
+            scenario_label = "custom prompt"
         self.event_bus.publish(DashboardEvent(
             event_type=EventType.CONVERSATION_START,
             agent_name="system",

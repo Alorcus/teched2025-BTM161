@@ -102,6 +102,7 @@ def create_observatory_dashboard(setup_name: str):
     scenario_options = {
         f"{i}: {scenario_labels[i]}": i for i in range(len(CUSTOMER_SCENARIOS))
     }
+    scenario_options["Custom"] = -1
     scenario_select = pn.widgets.Select(
         name="", options=scenario_options, sizing_mode="stretch_width",
         margin=(0, 0, 5, 0),
@@ -120,10 +121,41 @@ def create_observatory_dashboard(setup_name: str):
         margin=(0, 0, 10, 0),
     )
 
+    # Guards re-entrant updates between the two watchers below: each callback
+    # writes to the widget the other watches, so without this flag a single
+    # user action would bounce back and forth.
+    _suppress_watchers: list[bool] = [False]
+
     def on_scenario_change(event):
-        prompt_textarea.value = build_default_prompt(event.new)
+        if _suppress_watchers[0]:
+            return
+        if event.new == -1:
+            # User picked "Custom" directly — leave whatever's in the textarea.
+            return
+        _suppress_watchers[0] = True
+        try:
+            prompt_textarea.value = build_default_prompt(event.new)
+        finally:
+            _suppress_watchers[0] = False
+
+    def on_prompt_change(event):
+        if _suppress_watchers[0]:
+            return
+        matched = next(
+            (i for i in range(len(CUSTOMER_SCENARIOS))
+             if event.new == build_default_prompt(i)),
+            None,
+        )
+        target = -1 if matched is None else matched
+        if scenario_select.value != target:
+            _suppress_watchers[0] = True
+            try:
+                scenario_select.value = target
+            finally:
+                _suppress_watchers[0] = False
 
     scenario_select.param.watch(on_scenario_change, "value")
+    prompt_textarea.param.watch(on_prompt_change, "value")
 
     run_button = pn.widgets.Button(
         name="Run Conversation", button_type="primary",
