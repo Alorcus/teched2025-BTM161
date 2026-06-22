@@ -6,6 +6,73 @@ import param
 import panel as pn
 
 
+# Per-agent scroll-preservation script. Mirrors trace_app._CONV_SCROLL_SCRIPT:
+# caches {atBottom, top} on `window` so re-renders restore position, with a
+# 32px sticky-bottom threshold so new messages glue to the bottom unless the
+# user has scrolled up. Selector and state key are parameterized by
+# agent_name so the four AgentPanel instances do not share window state.
+_AP_SCROLL_SCRIPT_TEMPLATE = """
+<script>
+(function () {
+  const NEAR = 32;
+  const KEY = '__agentPanelScrollState_%(agent)s';
+  const SEL = '.ap-scroll-body-%(agent)s';
+
+  // Panel injects scripts via replaceChild, so document.currentScript is
+  // unreliable. Walk every shadow root from document to find the scroller.
+  // Pattern mirrors trace_table_panel._SCROLL_SCRIPT.
+  function findScrollerRoot() {
+    const cs = document.currentScript;
+    if (cs && cs.getRootNode) {
+      const r = cs.getRootNode();
+      if (r && r.querySelector && r.querySelector(SEL)) return r;
+    }
+    const stack = [document];
+    while (stack.length) {
+      const node = stack.pop();
+      if (node.querySelector && node.querySelector(SEL)) return node;
+      const all = node.querySelectorAll ? node.querySelectorAll('*') : [];
+      for (const el of all) {
+        if (el.shadowRoot) stack.push(el.shadowRoot);
+      }
+    }
+    return null;
+  }
+
+  function apply() {
+    const root = findScrollerRoot();
+    if (!root) return;
+    const el = root.querySelector(SEL);
+    if (!el) return;
+    const prev = window[KEY];
+    if (prev && typeof prev.atBottom === 'boolean') {
+      if (prev.atBottom) {
+        el.scrollTop = el.scrollHeight;
+      } else if (typeof prev.top === 'number') {
+        const max = Math.max(0, el.scrollHeight - el.clientHeight);
+        el.scrollTop = Math.min(prev.top, max);
+      }
+    } else {
+      el.scrollTop = el.scrollHeight;
+      window[KEY] = { atBottom: true, top: el.scrollTop };
+    }
+    if (!el.__apPersistInstalled) {
+      el.__apPersistInstalled = true;
+      el.addEventListener('scroll', () => {
+        const slack = el.scrollHeight - el.scrollTop - el.clientHeight;
+        window[KEY] = { atBottom: slack <= NEAR, top: el.scrollTop };
+      }, { passive: true });
+    }
+  }
+
+  apply();
+  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(apply);
+  else setTimeout(apply, 0);
+})();
+</script>
+"""
+
+
 class AgentPanel(param.Parameterized):
     agent_name = param.String()
     display_name = param.String()
@@ -20,6 +87,11 @@ class AgentPanel(param.Parameterized):
     tool_calls = param.List(default=[])
 
     def __init__(self, agent_name, config, system_prompt="", tools=None, **kwargs):
+        # agent_name is interpolated raw into a JS selector and window
+        # state key; reject anything that wouldn't be a safe identifier.
+        assert agent_name.isidentifier(), (
+            f"agent_name must be a valid identifier, got: {agent_name!r}"
+        )
         super().__init__(
             agent_name=agent_name,
             display_name=config["name"],
@@ -31,10 +103,38 @@ class AgentPanel(param.Parameterized):
             **kwargs,
         )
         self._header_pane = pn.pane.HTML("", sizing_mode="stretch_width")
-        self._messages_pane = pn.pane.HTML("", sizing_mode="stretch_width")
+        # The messages pane is a flex child of the bordered Column (capped
+        # by the Column's height). We make it position:relative so the
+        # inner .ap-scroll-body can be absolutely positioned inside it —
+        # required because Panel injects an unstyled wrapper <div> between
+        # bk-panel-models-markup-HTML and our content; that wrapper has
+        # min-height:auto and grows to its child, bursting out of the
+        # bounded Bokeh wrapper. position:absolute on the scroll body
+        # tethers it to the Bokeh-sized markup wrapper instead.
+        #
+        # CRITICAL: pn.pane.HTML must be constructed WITH the rendered
+        # HTML (script included) — Panel only executes <script> tags
+        # that are present on the FIRST render. Subsequent `.object`
+        # updates do re-inject the script but do not execute it.
+        # See trace_table_panel.TraceTablePanel.__init__ for the same
+        # pattern.
+        self._messages_pane = pn.pane.HTML(
+            self._render_messages_html(),
+            sizing_mode="stretch_width",
+            styles={
+                "flex": "1 1 auto",
+                "min-height": "0",
+                "position": "relative",
+                "overflow": "hidden",
+            },
+        )
 
         self._render_header()
-        self._render_messages()
+        # _messages_pane was constructed with rendered HTML above; skip
+        # the redundant _render_messages() call — calling it would
+        # reassign .object, and Panel only executes <script> tags from
+        # the FIRST render. Subsequent .object updates leave the script
+        # in the DOM but do not re-execute it.
 
     def panel(self):
         tools_html = " ".join(
@@ -60,6 +160,10 @@ class AgentPanel(param.Parameterized):
             styles={"margin-bottom": "8px"},
         )
 
+        # Pin header + tools so the message scroller's flex:1 growth
+        # cannot squeeze them out.
+        self._header_pane.styles = {**(self._header_pane.styles or {}), "flex": "0 0 auto"}
+        tools_section.styles = {**(tools_section.styles or {}), "flex": "0 0 auto"}
         return pn.Column(
             self._header_pane,
             tools_section,
@@ -70,7 +174,14 @@ class AgentPanel(param.Parameterized):
                 "border-radius": "8px",
                 "padding": "12px",
                 "background": f"{self.bg_color}66",
-                "overflow-y": "auto",
+                # Outer Column never scrolls; the inner .ap-scroll-body
+                # owns the single scrollbar. height:100% closes the
+                # GridSpec→flex chain so flex min-height:0 has a bounded
+                # ancestor to measure against.
+                "display": "flex",
+                "flex-direction": "column",
+                "min-height": "0",
+                "height": "100%",
             },
         )
 
@@ -139,11 +250,17 @@ class AgentPanel(param.Parameterized):
         )
 
     def _render_messages(self):
+        self._messages_pane.object = self._render_messages_html()
+
+    def _render_messages_html(self) -> str:
+        script = _AP_SCROLL_SCRIPT_TEMPLATE % {"agent": self.agent_name}
         if not self.messages:
-            self._messages_pane.object = (
-                '<div style="color:#999;font-size:12px;padding:8px;">No messages yet</div>'
+            return (
+                f'<div class="ap-scroll-body ap-scroll-body-{self.agent_name}" '
+                f'style="position:absolute;inset:0;overflow-y:auto;">'
+                f'<div style="color:#999;font-size:12px;padding:8px;">No messages yet</div>'
+                f'</div>{script}'
             )
-            return
 
         html_parts = [
             '<style>'
@@ -162,7 +279,10 @@ class AgentPanel(param.Parameterized):
             'word-break:break-word;overflow:visible;text-overflow:clip;display:block;}'
             '</style>'
         ]
-        html_parts.append('<div style="font-size:12px;max-height:300px;overflow-y:auto;">')
+        html_parts.append(
+            f'<div class="ap-scroll-body ap-scroll-body-{self.agent_name}" '
+            f'style="font-size:12px;position:absolute;inset:0;overflow-y:auto;">'
+        )
         for msg in self.messages[-20:]:
             role = msg["role"]
             full_content = str(msg["content"])
@@ -200,4 +320,5 @@ class AgentPanel(param.Parameterized):
                 f'{reason_html}</div>'
             )
         html_parts.append("</div>")
-        self._messages_pane.object = "\n".join(html_parts)
+        html_parts.append(script)
+        return "\n".join(html_parts)
