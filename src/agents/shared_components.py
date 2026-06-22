@@ -171,7 +171,7 @@ def transfer_to_agent(
 ) -> Command:
     """Generic transfer tool that can be used to transfer to any agent."""
     from_agent = _resolve_from_agent(state)
-    logger.debug("handoff %s -> %s | summary=%s", from_agent, target_agent, str(context_summary)[:80])
+    logger.debug("handoff to %s from %s | summary=%s", target_agent, from_agent, str(context_summary)[:80])
     tool_message = ToolMessage(
         content=f"Successfully transferred to {target_agent}. Context: {context_summary}",
         name="transfer_to_agent",
