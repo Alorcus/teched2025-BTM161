@@ -142,6 +142,7 @@ class CoffeeShop:
     def run_conversation(self, scenario_index=None, on_message=None, reset_inventory_first=True):
         """Run a full automated conversation using the CustomerAgent."""
         if reset_inventory_first:
+            _coffee_shop_logger.info("Resetting inventory to initial stock levels")
             reset_inventory()
         trace_ids = self._conversation_engine.run_automated(
             self.customer_agent, scenario_index=scenario_index, on_message=on_message

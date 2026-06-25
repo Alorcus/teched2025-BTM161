@@ -105,6 +105,7 @@ poetry run simulate --setup baseline --traces 10 --scenario all --export-logs
 | `--traces N`    | `1`       | Number of conversation traces to run                                              |
 | `--scenario`    | `random`  | Scenario index (`0`–`3`), `all` (round-robin), or `random`                        |
 | `--export-logs` | off       | Generate event log CSV after simulation                                           |
+| `--reset-inventory` / `--no-reset-inventory` | `--reset-inventory` | Reset inventory before each trace. Use `--no-reset-inventory` to keep inventory state across traces |
 | `--quiet`       | off       | Minimal output: only trace numbers, scenarios, and summary                        |
 | `--log-level`   | `warning` | Set the logging level for agent diagnostics (`debug`, `info`, `warning`, `error`) |
 

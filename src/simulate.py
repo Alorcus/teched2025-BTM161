@@ -118,7 +118,7 @@ def main():
             "RETROSPECTIVE_LOG_DIR", CoffeeShopConfig.retrospective_log_dir
         ),
     ))
-    shop.open_shop(reset_inventory_first=args.reset_inventory)
+    shop.open_shop(reset_inventory_first=False)
     coffee_shop_logger.info(f"Coffee shop is open. Running {args.traces} trace(s).")
     coffee_shop_logger.info(f"Resetting inventory before each trace: {args.reset_inventory}")
 
