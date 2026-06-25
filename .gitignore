@@ -23,6 +23,9 @@ __pycache__/
 *.pyc
 *.pyo
 
+# uv lockfile
+uv.lock
+
 .DS_Store
 dev.ipynb
 
