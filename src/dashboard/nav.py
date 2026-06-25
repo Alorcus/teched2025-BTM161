@@ -4,6 +4,7 @@ Each page (Interaction / Metrics / Trace) renders the same three-tab strip
 in its template ``header`` slot. The currently active tab is shown solid;
 the others are subtle pill links.
 """
+
 from __future__ import annotations
 
 import panel as pn

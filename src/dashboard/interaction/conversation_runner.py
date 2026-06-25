@@ -18,6 +18,8 @@ logger = logging.getLogger("coffee_shop.dashboard")
 
 MAX_CONVERSATION_TURNS = 30
 
+HANDOVER_PAUSE_TIMEOUT_SECONDS = 300
+
 
 def _summarize_tool_calls(tool_calls: list[dict]) -> str:
     """Render a list of tool_calls as plain prose suitable for embedding inside
@@ -78,11 +80,17 @@ class ConversationRunner:
         if isinstance(cfg, _CoffeeShopConfig):
             self._supervisor_active: bool = bool(cfg.process_supervisor_active)
             self._max_retries: int = int(cfg.process_supervisor_max_retries)
+            self.pause_on_next_handover: bool = bool(cfg.handover_pause_default)
         else:
             # No real config available (e.g. unit-test MagicMock shop). Default
             # to passive mode so legacy behaviour is preserved.
             self._supervisor_active = False
             self._max_retries = 3
+            self.pause_on_next_handover = False
+        # Set when no pause is pending; clear()ed to block the runner thread at
+        # the next handover seam. resume() sets it again to release the wait.
+        self._resume_event = threading.Event()
+        self._resume_event.set()
         # Per-agent retry counter for the active-mode loop. Reset between turns.
         self._retry_counts: dict[str, int] = {}
         # The accumulating supervisor-authored HumanMessage for the current
@@ -95,10 +103,28 @@ class ConversationRunner:
             if self.is_running:
                 return
             self.is_running = True
+        # A fresh run always starts un-paused. A previously-paused-then-resumed
+        # runner has _resume_event already set, but explicitly setting it here
+        # protects against a future code path that could leave it cleared.
+        self._resume_event.set()
         self._thread = threading.Thread(
             target=self._run, args=(scenario_index, custom_prompt), daemon=True
         )
         self._thread.start()
+
+    def resume(self):
+        """Release a runner thread that is blocked at the handover pause seam.
+
+        No-op if the runner is not currently paused: setting an already-set
+        Event is harmless, and the seam only blocks when pause_on_next_handover
+        is True at the moment a fresh handover signature is observed."""
+        self._resume_event.set()
+
+    @property
+    def is_paused(self) -> bool:
+        """True iff the runner thread is currently blocked at the handover
+        pause seam waiting for resume()."""
+        return self.is_running and not self._resume_event.is_set()
 
     def _run(self, scenario_index, custom_prompt=None):
         try:
@@ -122,11 +148,15 @@ class ConversationRunner:
         self._current_order_id = None
         thread_id = str(uuid.uuid4())
 
-        scenario_label = (
-            CUSTOMER_SCENARIOS[scenario_index]
-            if scenario_index is not None
-            else "random"
-        )
+        if scenario_index is None:
+            scenario_label = "random"
+        elif 0 <= scenario_index < len(CUSTOMER_SCENARIOS):
+            scenario_label = CUSTOMER_SCENARIOS[scenario_index]
+        else:
+            # Sentinel from the dashboard "Custom" dropdown entry (-1), or any
+            # other out-of-range index: the customer agent is running with a
+            # user-edited system prompt, so the preset list does not describe it.
+            scenario_label = "custom prompt"
         self.event_bus.publish(
             DashboardEvent(
                 event_type=EventType.CONVERSATION_START,
@@ -360,6 +390,17 @@ class ConversationRunner:
                                     )
                                     if target:
                                         self._active_agent = target
+                                    # Pause seam: block here (between sender's
+                                    # handoff emission and receiver's first
+                                    # node execution) iff the toggle is on.
+                                    # Reading the flag inside the loop honours
+                                    # toggles flipped mid-stream — but only
+                                    # for handovers not yet observed.
+                                    if self.pause_on_next_handover:
+                                        self._wait_for_resume(
+                                            from_agent=hc.get("from_agent"),
+                                            target=target,
+                                        )
 
                             msgs_key = next(
                                 (k for k in node_data if k == "messages"), None
@@ -823,6 +864,49 @@ class ConversationRunner:
                 self._current_order_id = order_id
         except (json.JSONDecodeError, TypeError, AttributeError):
             pass
+
+    def _wait_for_resume(self, from_agent: str | None, target: str | None) -> None:
+        """Block the runner thread between sender emit and receiver accept.
+
+        Clears the resume Event, publishes a paused LOG_MESSAGE so the UI
+        can render the paused state, waits up to HANDOVER_PAUSE_TIMEOUT_SECONDS
+        for resume() to set the Event again, then publishes a resumed
+        LOG_MESSAGE. A timeout is logged as a warning and the runner resumes
+        on its own — better than leaking a thread if the user forgets the
+        dashboard tab.
+        """
+        self._resume_event.clear()
+        self.event_bus.publish(
+            DashboardEvent(
+                event_type=EventType.LOG_MESSAGE,
+                agent_name="runner",
+                log_level=logging.INFO,
+                content=f"PAUSED at handover {from_agent or '?'} -> {target or '?'}",
+            )
+        )
+        resumed = self._resume_event.wait(timeout=HANDOVER_PAUSE_TIMEOUT_SECONDS)
+        if not resumed:
+            self.event_bus.publish(
+                DashboardEvent(
+                    event_type=EventType.LOG_MESSAGE,
+                    agent_name="runner",
+                    log_level=logging.WARNING,
+                    content=(
+                        f"Handover pause timed out after "
+                        f"{HANDOVER_PAUSE_TIMEOUT_SECONDS}s; auto-resuming."
+                    ),
+                )
+            )
+            self._resume_event.set()
+        else:
+            self.event_bus.publish(
+                DashboardEvent(
+                    event_type=EventType.LOG_MESSAGE,
+                    agent_name="runner",
+                    log_level=logging.INFO,
+                    content=f"RESUMED handover -> {target or '?'}",
+                )
+            )
 
     def _parse_agent_name(self, ns: tuple) -> str | None:
         if not ns:

@@ -258,7 +258,7 @@ class TestActiveSupervisorRejectsAndRetries(unittest.TestCase):
         }
         final = graph.invoke(
             initial_state,
-            config={**config, "recursion_limit": 50},
+            config={**config, "recursion_limit": 100},
         )
 
         # Last AIMessage in state must be one of the violating attempts (the

@@ -87,7 +87,12 @@ class ConversationEngine:
 
         order_id = _extract_order_id_from_history(customer_agent.history)
         feedback = customer_agent.get_feedback()
-        self.feedback_log[thread_id] = {"thread_id": thread_id, "order_id": order_id, **feedback}
+        self.feedback_log[thread_id] = {
+            "thread_id": thread_id,
+            "order_id": order_id,
+            "scenario_index": getattr(customer_agent, "scenario_index", None),
+            **feedback,
+        }
         self._save_feedback_store()
         logger.info(
             "Customer feedback [%.2f]: %s", feedback["feedback_score"], feedback["feedback_reason"]

@@ -3,7 +3,8 @@ import html as html_mod
 import json
 import logging
 import time
-
+import threading
+from typing import Optional
 import panel as pn
 
 from src.coffee_shop import CoffeeShop
@@ -17,6 +18,7 @@ from .conversation_runner import ConversationRunner
 from .stock_panel import StockPanel
 from .coffee_machine_panel import CoffeeMachinePanel
 from .tray_panel import TrayPanel
+from src.trace_processing.trace_processor import TraceProcessor
 
 logger = logging.getLogger("coffee_shop.dashboard")
 
@@ -103,6 +105,7 @@ def create_observatory_dashboard(setup_name: str):
     scenario_options = {
         f"{i}: {scenario_labels[i]}": i for i in range(len(CUSTOMER_SCENARIOS))
     }
+    scenario_options["Custom"] = -1
     scenario_select = pn.widgets.Select(
         name="",
         options=scenario_options,
@@ -126,14 +129,112 @@ def create_observatory_dashboard(setup_name: str):
         margin=(0, 4, 10, 0),
     )
 
+    # Guards re-entrant updates between the two watchers below: each callback
+    # writes to the widget the other watches, so without this flag a single
+    # user action would bounce back and forth.
+    _suppress_watchers: list[bool] = [False]
+
     def on_scenario_change(event):
-        prompt_textarea.value = build_default_prompt(event.new)
+        if _suppress_watchers[0]:
+            return
+        if event.new == -1:
+            # User picked "Custom" directly — leave whatever's in the textarea.
+            return
+        _suppress_watchers[0] = True
+        try:
+            prompt_textarea.value = build_default_prompt(event.new)
+        finally:
+            _suppress_watchers[0] = False
+
+    def on_prompt_change(event):
+        if _suppress_watchers[0]:
+            return
+        matched = next(
+            (
+                i
+                for i in range(len(CUSTOMER_SCENARIOS))
+                if event.new == build_default_prompt(i)
+            ),
+            None,
+        )
+        target = -1 if matched is None else matched
+        if scenario_select.value != target:
+            _suppress_watchers[0] = True
+            try:
+                scenario_select.value = target
+            finally:
+                _suppress_watchers[0] = False
 
     scenario_select.param.watch(on_scenario_change, "value")
+    prompt_textarea.param.watch(on_prompt_change, "value")
 
     run_button = pn.widgets.Button(
-        name="Run Conversation", button_type="primary", sizing_mode="stretch_width"
+        name="Run Conversation",
+        button_type="primary",
+        sizing_mode="stretch_width",
+        height=36,
+        margin=(0, 0, 0, 0),
     )
+    # Pause/Go toggle: square button (36x36), height matches run_button so
+    # they share a baseline in the Row. Label shows the action the next click
+    # will take (⏸ in Go mode → next click pauses; ▶ in Pause mode → next
+    # click resumes). Initial state is seeded from
+    # CoffeeShopConfig.handover_pause_default. The bk-btn stylesheet override
+    # zeros out min-width / padding so the rendered <button> matches its
+    # widget wrapper exactly — otherwise Panel's default button padding lets
+    # it expand past 36px wide.
+    _PAUSE_TOGGLE_CSS = """
+    :host { width: 36px !important; }
+    .bk-btn-group, .bk-btn {
+        width: 36px !important;
+        min-width: 36px !important;
+        padding: 0 !important;
+        font-size: 16px !important;
+        line-height: 1 !important;
+    }
+    """
+    pause_toggle = pn.widgets.Button(
+        name="▶" if runner.pause_on_next_handover else "⏸",
+        button_type="warning" if runner.pause_on_next_handover else "default",
+        width=36,
+        height=36,
+        sizing_mode="fixed",
+        margin=(0, 4, 0, 0),
+        stylesheets=[_PAUSE_TOGGLE_CSS],
+    )
+
+    def on_pause_toggle(event):
+        new_state = not runner.pause_on_next_handover
+        runner.pause_on_next_handover = new_state
+        if new_state:
+            pause_toggle.name = "▶"
+            pause_toggle.button_type = "warning"
+        else:
+            pause_toggle.name = "⏸"
+            pause_toggle.button_type = "default"
+            # If the runner is currently blocked at the pause seam, flipping
+            # back to Go releases it. resume() is a no-op when not paused, so
+            # this is safe to call unconditionally.
+            runner.resume()
+
+    pause_toggle.on_click(on_pause_toggle)
+    export_button = pn.widgets.Button(
+        name="Export to Event Log",
+        button_type="default",
+        sizing_mode="stretch_width",
+        disabled=True,
+    )
+    export_status = pn.pane.HTML(
+        "",
+        sizing_mode="stretch_width",
+        styles={"font-size": "11px", "min-height": "16px"},
+    )
+    _export_done_flag: list[str] = []  # thread-safe message queue: ["ok"] or ["err: …"]
+    _conversation_has_run: list[bool] = [
+        False
+    ]  # mutable container so closure can write to it
+    _export_in_progress = threading.Event()  # set while a daemon export is running
+
     status_indicator = pn.indicators.LoadingSpinner(value=False, size=25)
     conversation_log = pn.pane.HTML(
         '<div style="font-size:12px;color:#999;">No conversation yet.</div>',
@@ -163,6 +264,32 @@ def create_observatory_dashboard(setup_name: str):
 
     run_button.on_click(on_run)
 
+    def on_export(event):
+        if runner.is_running:
+            return
+        # Guard against double-clicks racing two daemon threads against the
+        # same MLflow client / output directory. Event.is_set() is atomic;
+        # the Bokeh document thread reads it before spawning.
+        if _export_in_progress.is_set():
+            return
+        _export_in_progress.set()
+        export_button.disabled = True
+        export_status.object = '<span style="color:#FF9800;">⏳ Exporting…</span>'
+        _export_done_flag.clear()
+
+        def _run_export():
+            try:
+                TraceProcessor().process_all_traces(export_as_json=False)
+                _export_done_flag.append("ok")
+            except Exception as e:
+                _export_done_flag.append(f"err:{e}")
+            finally:
+                _export_in_progress.clear()
+
+        threading.Thread(target=_run_export, daemon=True).start()
+
+    export_button.on_click(on_export)
+
     def poll_events():
         events = event_bus.drain()
         for ev in events:
@@ -176,11 +303,24 @@ def create_observatory_dashboard(setup_name: str):
                 take_tray_button,
                 current_tray_order,
                 log_level_select.value,
+                export_button,
+                _conversation_has_run,
             )
         if not runner.is_running and not events:
             status_indicator.value = False
         stock_panel.refresh()
         coffee_machine_panel.update_progress()
+
+        if _export_done_flag:
+            msg = _export_done_flag.pop(0)
+            if msg == "ok":
+                export_status.object = '<span style="color:#4CAF50;">✅ Export complete — saved to ./generated_event_log/</span>'
+            else:
+                export_status.object = (
+                    f'<span style="color:#F44336;">❌ {msg[4:]}</span>'
+                )
+            if not runner.is_running and _conversation_has_run[0]:
+                export_button.disabled = False
 
     # ── Mode Toggle (als nativer HTML-Switch, wie der Theme-Toggle in der Navbar) ──
     mode_toggle = pn.widgets.RadioButtonGroup(
@@ -225,7 +365,15 @@ def create_observatory_dashboard(setup_name: str):
             margin=(0, 0, 2, 0),
         ),
         prompt_textarea,
-        run_button,
+        pn.Row(
+            pause_toggle,
+            run_button,
+            sizing_mode="stretch_width",
+            margin=(0, 0, 0, 0),
+            styles={"align-items": "center"},
+        ),
+        export_button,
+        export_status,
         pn.Row(status_indicator, pn.pane.Markdown("", width=10)),
         pn.layout.Divider(),
         pn.pane.HTML(
@@ -428,14 +576,16 @@ def create_observatory_dashboard(setup_name: str):
 
 def _dispatch_event(
     event,
-    agent_panels,
-    log_entries,
+    agent_panels: dict[str, AgentPanel],
+    log_entries: list[str],
     conversation_log,
-    coffee_machine_panel,
-    tray_panel,
+    coffee_machine_panel: CoffeeMachinePanel,
+    tray_panel: TrayPanel,
     take_tray_button,
     current_tray_order,
-    min_log_level=20,
+    min_log_level: int = 20,
+    export_button=None,
+    conversation_has_run: Optional[list[bool]] = None,
 ):
     panel = agent_panels.get(event.agent_name)
 
@@ -576,6 +726,10 @@ def _dispatch_event(
             '<span style="color:#F44336"><b>END</b></span> Conversation complete',
         )
         tray_panel.clear()
+        if conversation_has_run is not None:
+            conversation_has_run[0] = True
+        if export_button is not None:
+            export_button.disabled = False
 
     elif event.event_type == EventType.TRAY_READY:
         current_tray_order["id"] = event.content
@@ -585,6 +739,19 @@ def _dispatch_event(
         current_tray_order["id"] = None
         take_tray_button.disabled = True
         tray_panel.clear()
+
+    elif event.event_type == EventType.TRAY_READY:
+        current_tray_order["id"] = event.content
+        take_tray_button.disabled = False
+
+    elif event.event_type == EventType.TRAY_TAKEN:
+        current_tray_order["id"] = None
+        take_tray_button.disabled = True
+        tray_panel.clear()
+        if conversation_has_run is not None:
+            conversation_has_run[0] = True
+        if export_button is not None:
+            export_button.disabled = False
 
 
 def _log(entries: list[str], pane, html_line: str):
