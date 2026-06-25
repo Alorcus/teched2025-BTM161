@@ -92,7 +92,7 @@ class FeedbackSection:
 
         rows_html = ""
         for row in agg.to_dicts():
-            idx = int(row["scenario_index"])
+            idx = int(float(row["scenario_index"]))
             name = _SCENARIO_NAMES.get(idx, f"Scenario {idx}")
             score = row["avg_score"]
             count = row["count"]

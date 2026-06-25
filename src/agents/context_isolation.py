@@ -57,9 +57,10 @@ def _extract_handoff_context_from_boundary(messages: list, agent_name: str) -> d
     content = getattr(boundary_msg, "content", "") or ""
 
     # Extract the context from the tool message
-    match = re.search(r"Context:\s*(.+)", content)
+    match = re.search(r"Context:\s*(.+?)(?:\.\s*Expectation:\s*(.+))?$", content, re.DOTALL)
     if match:
         context_summary = match.group(1).strip()
+        expectation = (match.group(2) or "").strip()
         # Determine source agent from content
         from_match = re.search(r"transferred to (\w+)", content)
         from_agent = "previous_agent"
@@ -75,10 +76,13 @@ def _extract_handoff_context_from_boundary(messages: list, agent_name: str) -> d
                 from_agent = getattr(msg, "name", "") or "previous_agent"
                 break
 
-        return {
+        result = {
             "from_agent": from_agent,
             "context_summary": context_summary,
         }
+        if expectation:
+            result["expectation"] = expectation
+        return result
     return None
 
 
