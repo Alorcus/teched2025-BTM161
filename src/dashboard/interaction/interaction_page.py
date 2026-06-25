@@ -316,9 +316,7 @@ def create_observatory_dashboard(setup_name: str):
 
     sidebar = pn.Column(
         pn.pane.HTML(
-            '<span style="font-size:10px;font-weight:500;'
-            "letter-spacing:0.06em;text-transform:uppercase;opacity:0.6;"
-            '">Customer mode</span>',
+            '<label style="font-size:13px;font-weight:500;">Customer mode</label>',
             sizing_mode="stretch_width",
             margin=(0, 0, 4, 0),
         ),
