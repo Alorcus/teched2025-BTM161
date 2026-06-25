@@ -8,6 +8,18 @@ import pandas as pd
 
 COFFEE_MACHINE_LOG = Path("services/coffee_machine/logs/coffee_machine.csv")
 
+# Activities the coffee machine is allowed to emit. Anything else in the CSV
+# is a stale row from a previous version of the logger (e.g. pre-rename
+# "user_prompt" rows that would otherwise collide with the agent-side
+# user_prompt event type) and is dropped during merge.
+_COFFEE_MACHINE_ACTIVITIES = {
+    "job_created",
+    "process_order",
+    "brew_completed",
+    "brew_failed",
+    "clean_machine",
+}
+
 
 def _load_coffee_machine_rows(path: Path) -> pd.DataFrame:
     """Read the coffee machine's raw CSV and map it to the canonical schema.
@@ -29,6 +41,13 @@ def _load_coffee_machine_rows(path: Path) -> pd.DataFrame:
         return pd.DataFrame()
     if raw.empty:
         return pd.DataFrame()
+
+    # Drop rows whose activity isn't part of the current canonical set —
+    # protects against stale CSV content from older logger versions.
+    raw = raw[raw["concept:name"].isin(_COFFEE_MACHINE_ACTIVITIES)]
+    if raw.empty:
+        return pd.DataFrame()
+    raw = raw.reset_index(drop=True)
 
     # epoch float seconds → ISO-8601 ms strings
     ts = pd.to_datetime(raw["ocel_time"], unit="s")
