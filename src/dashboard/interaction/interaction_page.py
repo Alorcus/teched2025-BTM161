@@ -227,6 +227,12 @@ def create_observatory_dashboard(setup_name: str):
         prompt_textarea,
         run_button,
         pn.Row(status_indicator, pn.pane.Markdown("", width=10)),
+        pn.layout.Divider(),
+        pn.pane.HTML(
+            '<label style="font-size:14px;font-weight:600;">Conversation Log</label>',
+            sizing_mode="stretch_width",
+        ),
+        conversation_log,
         sizing_mode="stretch_width",
     )
 
@@ -273,6 +279,52 @@ def create_observatory_dashboard(setup_name: str):
 
     take_tray_button.on_click(on_take_tray)
 
+    feedback_score_input = pn.widgets.FloatSlider(
+        name="Feedback Score",
+        start=0.0,
+        end=1.0,
+        step=0.1,
+        value=0.8,
+        sizing_mode="stretch_width",
+        margin=(0, 4, 5, 0),
+    )
+    feedback_reason_input = pn.widgets.TextInput(
+        placeholder="Reason (optional)…",
+        sizing_mode="stretch_width",
+        margin=(0, 4, 5, 0),
+    )
+    end_conversation_button = pn.widgets.Button(
+        name="End Conversation & Submit Feedback",
+        button_type="warning",
+        sizing_mode="stretch_width",
+    )
+    feedback_panel = pn.Column(
+        # pn.pane.HTML(
+        #     '<label style="font-size:13px;font-weight:500;">Feedback Score</label>',
+        #     sizing_mode="stretch_width",
+        #     margin=(0, 0, 2, 0),
+        # ),
+        feedback_score_input,
+        pn.pane.HTML(
+            '<label style="font-size:13px;font-weight:500;">Reason</label>',
+            sizing_mode="stretch_width",
+            margin=(0, 0, 2, 0),
+        ),
+        feedback_reason_input,
+        end_conversation_button,
+        sizing_mode="stretch_width",
+    )
+
+    def on_end_conversation(event):
+        runner.end_manual_conversation(
+            feedback_score=feedback_score_input.value,
+            feedback_reason=feedback_reason_input.value,
+        )
+        feedback_score_input.value = 0.8
+        feedback_reason_input.value = ""
+
+    end_conversation_button.on_click(on_end_conversation)
+
     manual_panel = pn.Column(
         pn.Row(
             pn.Column(
@@ -295,7 +347,15 @@ def create_observatory_dashboard(setup_name: str):
         chat_input,
         send_button,
         take_tray_button,
+        pn.layout.Divider(),
+        feedback_panel,
         pn.Row(chat_status, pn.pane.Markdown("", width=10)),
+        pn.layout.Divider(),
+        pn.pane.HTML(
+            '<label style="font-size:14px;font-weight:600;">Conversation Log</label>',
+            sizing_mode="stretch_width",
+        ),
+        conversation_log,
         sizing_mode="stretch_width",
     )
 
@@ -322,23 +382,8 @@ def create_observatory_dashboard(setup_name: str):
         ),
         mode_toggle,
         content_panel,
-        pn.layout.Divider(),
-        pn.pane.HTML(
-            '<label style="font-size:14px;font-weight:600;'
-            'margin-top:8px;margin-bottom:4px;display:block;">'
-            "Conversation Log</label>",
-            sizing_mode="stretch_width",
-        ),
-        conversation_log,
         width=340,
         sizing_mode="stretch_height",
-        styles={
-            "display": "flex",
-            "flex-direction": "column",
-            "height": "100%",
-            "overflow": "hidden",
-            "padding-bottom": "12px",
-        },
     )
 
     # Navigation tabs for header
@@ -539,6 +584,7 @@ def _dispatch_event(
     elif event.event_type == EventType.TRAY_TAKEN:
         current_tray_order["id"] = None
         take_tray_button.disabled = True
+        tray_panel.clear()
 
 
 def _log(entries: list[str], pane, html_line: str):

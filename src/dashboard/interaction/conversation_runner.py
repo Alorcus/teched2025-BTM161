@@ -807,10 +807,14 @@ class ConversationRunner:
                     pass
 
     def _track_order_id(self, tool_name: str | None, content: str):
-        """Extract order_id from tool results to track the current order."""
         if self._current_order_id:
             return
-        if tool_name not in ("process_order", "check_inventory", "start_preparation"):
+        if tool_name not in (
+            "process_order",
+            "check_inventory",
+            "start_preparation",
+            "place_on_tray",
+        ):
             return
         try:
             data = json.loads(content)
@@ -836,6 +840,32 @@ class ConversationRunner:
             target=self._run_manual_turn, args=(thread_id, message), daemon=True
         ).start()
 
+    def end_manual_conversation(self, feedback_score: float, feedback_reason: str = ""):
+        """Called when the user explicitly ends the manual conversation."""
+        if self._current_order_id:
+            self.event_bus.publish(
+                DashboardEvent(
+                    event_type=EventType.TRAY_READY,
+                    agent_name="customer",
+                    content=self._current_order_id,
+                )
+            )
+
+        logger.info(
+            "Customer feedback [%.2f]: %s",
+            feedback_score,
+            feedback_reason or "Manual feedback",
+        )
+
+        self.event_bus.publish(
+            DashboardEvent(
+                event_type=EventType.CONVERSATION_END,
+                agent_name="system",
+            )
+        )
+        self._manual_thread_id = str(uuid.uuid4())
+        self._current_order_id = None
+
     def _run_manual_turn(self, thread_id: str, message: str):
         try:
             self.event_bus.publish(
@@ -853,6 +883,15 @@ class ConversationRunner:
                 )
             )
             self._stream_with_events(thread_id, message)
+        except Exception as e:
+            logger.exception("Manual turn failed")
+            self.event_bus.publish(
+                DashboardEvent(
+                    event_type=EventType.CONVERSATION_END,
+                    agent_name="system",
+                    content=f"ERROR: {e}",
+                )
+            )
         finally:
             with self._lock:
                 self.is_running = False
