@@ -11,9 +11,19 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 TIMEOUT_SECONDS = 600
 
-_REQUIRED_KEYS = ("q1_supposed", "q2_actual", "q3_why_diff", "q4_next_time")
+_REQUIRED_KEYS = (
+    "inferred_goal",
+    "goal_evidence_quote",
+    "obstacle_moment_quote",
+    "obstacle_source",
+    "what_was_in_the_way",
+    "next_time_change",
+)
+_OBSTACLE_SOURCES = {
+    "own_action", "peer_agent", "customer", "process", "tools_or_info", "none",
+}
 _SYNTHESIS_KEYS = (
-    "what_worked", "what_broke", "agreements", "contradictions", "systemic_fix",
+    "role_drift", "obstacle_pattern", "convergence", "contradictions", "systemic_fix",
 )
 _TIMESTAMP_RE = re.compile(r"^\d{8}T\d{6}Z(?:_[0-9a-f]{8})?$")
 
@@ -112,32 +122,31 @@ class TestRetrospectiveE2E(unittest.TestCase):
             f"No valid retrospective entries; raw entries: {entries}",
         )
 
-        # Each valid entry has all four AAR keys with non-empty answers, and
-        # peer_review present as a list.
+        # Each valid entry has all six string fields with non-empty answers,
+        # a valid obstacle_source enum, and obstacle_target wired correctly.
         for entry in valid_entries:
             for key in _REQUIRED_KEYS:
                 self.assertIn(key, entry, f"Entry {entry['agent_name']} missing {key}")
-                block = entry[key]
-                self.assertIsInstance(block, dict, f"{key} should be an object")
-                self.assertIn("answer", block, f"{key} missing 'answer'")
+                value = entry[key]
                 self.assertTrue(
-                    isinstance(block["answer"], str) and block["answer"].strip(),
-                    f"{entry['agent_name']}.{key}.answer must be non-empty string, got {block['answer']!r}",
+                    isinstance(value, str) and value.strip(),
+                    f"{entry['agent_name']}.{key} must be non-empty string, got {value!r}",
                 )
             self.assertIn(
-                "peer_review", entry,
-                f"Entry {entry['agent_name']} missing peer_review",
+                entry["obstacle_source"], _OBSTACLE_SOURCES,
+                f"{entry['agent_name']}.obstacle_source not in enum: {entry['obstacle_source']!r}",
             )
-            self.assertIsInstance(
-                entry["peer_review"], list,
-                f"peer_review for {entry['agent_name']} must be a list",
-            )
-
-        # At least one valid entry should have produced peer_review content.
-        self.assertTrue(
-            any(len(e["peer_review"]) > 0 for e in valid_entries),
-            f"No agent produced any peer_review entries: {[e['peer_review'] for e in valid_entries]}",
-        )
+            if entry["obstacle_source"] == "peer_agent":
+                target = entry.get("obstacle_target")
+                self.assertTrue(
+                    isinstance(target, str) and target.strip(),
+                    f"{entry['agent_name']} obstacle_source=peer_agent but obstacle_target empty: {target!r}",
+                )
+            else:
+                self.assertIsNone(
+                    entry.get("obstacle_target"),
+                    f"{entry['agent_name']} obstacle_source={entry['obstacle_source']!r} but obstacle_target set: {entry.get('obstacle_target')!r}",
+                )
 
         # Synthesis pass produced a structured object.
         synthesis = payload.get("synthesis")

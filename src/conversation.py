@@ -181,9 +181,9 @@ def _build_retrospective_views(
     """Build per-agent transcript views for the retrospective.
 
     Peer-aware: every operator agent sees the FULL conversation transcript so
-    it can reference what other agents did when explaining its own actions and
-    when peer-reviewing them. The prompt makes clear that Q1–Q4 are still
-    self-review; only the peer_review section is about others.
+    it can reference what other agents did when explaining where its own goal
+    became hard to reach. The single retrospective question is about the
+    agent's own goal; peers appear in the transcript only as context.
 
     The process supervisor sees the tail of its own critique log
     (process_meta.log) — its decisions about activities and violations — not

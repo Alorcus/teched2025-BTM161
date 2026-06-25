@@ -1,29 +1,43 @@
 id: retrospective
-version: v1
+version: v2
 base_prompt: |
-  You are {agent_name}, reflecting on the conversation that just ended. The full conversation transcript is below — your own messages are prefixed with "You ({agent_name}):", customer turns with "Customer:", and other agents with their own name.
+  You are {agent_name}. Your role as given to you: {agent_role}
 
-  Your role:
-  {agent_role}
+  The coffee shop conversation has ended. The other operator agents in this run were: {peer_agents}. Below is the full transcript as you saw it — your own turns are prefixed "You ({agent_name}):", customer turns with "Customer:", and other agents with their own name.
 
-  Other operator agents present in this conversation: {peer_agents}
-
-  Full transcript:
+  TRANSCRIPT
+  ==========
   {agent_transcript}
+  ==========
 
-  Answer in two parts.
+  ONE QUESTION
 
-  PART A — Self-review (After-Action Review). Reflect on YOUR OWN actions only. Each answer must be dense (1-2 sentences, no filler) and include one concrete example drawn from the transcript where possible. If no example fits, set "example" to null — do not fabricate.
+  Where in this conversation did YOUR OWN goal become hard or impossible to reach, and what was in the way?
 
-  PART B — Peer review. For each other operator agent listed above that you actually interacted with, give a brief evidence-based critique of their performance from your perspective. Be specific and grounded in the transcript: what did they do well, what could be improved. Skip agents you did not interact with — do not invent observations. Each critique must cite a concrete moment.
+  Answer in two disciplined beats. There is no third beat.
 
-  Return ONLY valid JSON in this exact shape, no prose, no code fences:
+  BEAT 1 — State your goal in your own words, grounded in what you actually did.
+  Do not paste the role description above. Write one sentence describing the goal a neutral observer would assign you based on what you actually said and did in this transcript. Then quote ONE line of your own (prefixed "You ({agent_name}):") that is the strongest evidence for that goal. If you never spoke in this transcript, write "NO_OWN_MESSAGES" for the quote and let your inferred goal acknowledge that.
+
+  BEAT 2 — Name the single sharpest moment where reaching that goal got hard, and what was in the way.
+  Pick exactly ONE moment from the transcript. Quote it verbatim, including the speaker prefix as it appears (it may be your line, a peer's, or the customer's — whoever spoke at the moment the goal got hard). Then attribute the obstacle to exactly ONE source — be honest, "own_action" is a legitimate answer and choosing "customer" or "peer_agent" without grounding is visible to a reviewer who has the transcript.
+
+  If your goal was reached cleanly with no meaningful obstacle anywhere, you must still pick the moment that came closest to becoming one and mark obstacle_source as "none" — but only do this if a skeptical reviewer reading the same transcript would agree the run was clean. "Everything was fine" without a cited moment is not acceptable.
+
+  Hard rules:
+  - goal_evidence_quote MUST be a verbatim substring of a line prefixed "You ({agent_name}):" from the transcript, OR the literal string "NO_OWN_MESSAGES".
+  - obstacle_moment_quote MUST be a verbatim substring of the transcript, including the speaker prefix as it appears there.
+  - obstacle_source MUST come from the enum. If you pick "peer_agent", obstacle_target MUST name the peer; otherwise it MUST be null.
+  - next_time_change MUST be a verb-led instruction to your future self, specific enough that another agent could execute it. Generic platitudes ("communicate better", "be more careful") are rejected.
+
+  Return STRICT JSON only — no prose, no markdown fences — matching exactly this shape:
+
   {{
-    "q1_supposed":  {{"answer": "what was supposed to happen", "example": "concrete example or null"}},
-    "q2_actual":    {{"answer": "what actually happened",       "example": "concrete example or null"}},
-    "q3_why_diff":  {{"answer": "why the difference",           "example": "concrete example or null"}},
-    "q4_next_time": {{"answer": "what to do next time",         "example": "concrete example or null"}},
-    "peer_review": [
-      {{"agent": "<other_agent_name>", "did_well": "...", "could_improve": "...", "evidence": "<concrete moment>"}}
-    ]
+    "inferred_goal": "<one sentence, your own words, grounded in what you actually did>",
+    "goal_evidence_quote": "<verbatim line of your own from the transcript, or 'NO_OWN_MESSAGES'>",
+    "obstacle_moment_quote": "<verbatim transcript line where reaching the goal got hard, including the speaker prefix>",
+    "obstacle_source": "own_action | peer_agent | customer | process | tools_or_info | none",
+    "obstacle_target": "<peer agent name if obstacle_source is 'peer_agent', else null>",
+    "what_was_in_the_way": "<one sentence naming concretely what made the goal hard to reach at that moment — not a feeling, a thing>",
+    "next_time_change": "<one verb-led instruction to your future self, specific and executable>"
   }}
