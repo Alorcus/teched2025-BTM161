@@ -12,7 +12,7 @@ import panel as pn
 _TABS: tuple[tuple[str, str], ...] = (
     ("/", "Interaction Observatory"),
     ("/metrics", "Metrics Observatory"),
-    # ("/trace", "Trace Table"),
+    ("/trace", "Trace Table"),
 )
 
 _ACTIVE_STYLE = (
