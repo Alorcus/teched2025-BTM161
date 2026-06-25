@@ -32,7 +32,6 @@ class VisualizationSection:
 
     def _build(self) -> pn.Column:
         column = section_header("Process Visualization")
-        column.append(subsection_header("Object-Centric Process Models"))
         column.append(self._visualization_tabs())
         return column
 
@@ -74,20 +73,32 @@ class VisualizationSection:
                 ocpn_svg = outputs["oc_pn"].read_text()
                 eto_svg = outputs["object_types"].read_text()
 
-                # Create scrollable containers for each visualization
                 def _wrap_svg(svg_text: str) -> pn.viewable.Viewable:
-                    """Wrap SVG in a scrollable container."""
-                    return pn.pane.HTML(
-                        svg_text,
-                        sizing_mode="stretch_width",
-                        styles={
-                            "overflow": "auto",
-                            "max-height": "600px",
-                            "border": "1px solid #e0e0e0",
-                            "border-radius": "4px",
-                            "padding": "8px",
-                        },
+                    zoom = pn.widgets.FloatSlider(
+                        name="Zoom",
+                        start=0.2,
+                        end=3.0,
+                        value=1.0,
+                        step=0.1,
                     )
+
+                    @pn.depends(zoom)
+                    def view(scale):
+                        return pn.pane.HTML(
+                            f"""
+                            <div style="overflow:auto;height:600px;">
+                                <div style="
+                                    transform: scale({scale});
+                                    transform-origin: top left;
+                                    display:inline-block;
+                                ">
+                                    {svg_text}
+                                </div>
+                            </div>
+                            """
+                        )
+
+                    return pn.Column(zoom, view)
 
                 # Create tabs with scrollable SVG visualizations
                 tabs = pn.Tabs(

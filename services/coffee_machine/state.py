@@ -92,7 +92,7 @@ def create_job(drink: str, correlation_id: str):
     jobs[job_id] = job
 
     # OCEL lifecycle start
-    emit_event(job, "user_prompt")
+    emit_event(job, "job_created")
     logger.info("Job created: %s (drink=%s, duration=%.1fs, contaminated=%s)", job_id[:8], drink, duration, job["contaminated"])
 
     return job
@@ -169,8 +169,16 @@ def get_queue() -> list[str]:
 # ----------------------------
 # Machine cleaning
 # ----------------------------
-def clean_machine():
+def clean_machine(correlation_id: str):
     global machine_dirty
+
+    log_event(
+        case_id=correlation_id,
+        activity="clean_machine",
+        timestamp=time.time(),
+        duration=0.0,  # instantaneous
+    )
+
     if machine_dirty:
         machine_dirty = False
         logger.info("Machine cleaned")

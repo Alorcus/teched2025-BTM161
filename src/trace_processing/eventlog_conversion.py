@@ -26,6 +26,20 @@ EVENT_ATTRIBUTES = {
     "calculate_total": ["ocel_time", "duration"],
     "prepare_order": ["ocel_time", "duration"],
     "remake_order_item": ["ocel_time", "duration"],
+    "place_on_tray": ["ocel_time", "duration"],
+    "check_tray":    ["ocel_time", "duration"],
+    "clean_machine": ["ocel_time", "duration"],
+    "user_feedback": [
+        "ocel_time",
+        "feedback_score",
+        "feedback_reason",
+        "feedback_valid",
+        "scenario_index",
+    ],
+    # coffee machine
+    "job_created":   ["ocel_time"],
+    "brew_completed": ["ocel_time", "duration"],
+    "brew_failed":   ["ocel_time", "duration"],
     # handovers
     "order_agent_handover_inventory_agent": [
         "ocel_time",
@@ -122,6 +136,8 @@ OBJECT_ATTRIBUTES = {
     "barista_agent": [],
     "inventory_agent": [],
     "customer_service_agent": [],
+    "feedback": ["feedback_score", "feedback_reason", "feedback_valid", "scenario_index"],
+    "coffee_machine": [],
 }
 
 
@@ -243,7 +259,7 @@ class ObjectCentricEventlog:
             attrs = OBJECT_ATTRIBUTES[obj_type]
             column_id = (
                 "object_id_message"
-                if (obj_type == "prompt" or obj_type == "response")
+                if obj_type in ("prompt", "response", "feedback")
                 else "object_id_agent"
             )
             obj_type_tbl = (
@@ -409,6 +425,8 @@ def _preprocess_eventlog(eventlog: pl.DataFrame) -> pl.DataFrame:
                     & (pl.col("message").is_not_null())
                 )
                 .then(pl.lit("response"))
+                .when(pl.col("concept:name") == "user_feedback")
+                .then(pl.lit("feedback"))
                 .otherwise(pl.lit(None))
             ),
             object_id_agent=pl.when(pl.col("org:resource").str.contains("agent"))
@@ -438,6 +456,8 @@ def _preprocess_eventlog(eventlog: pl.DataFrame) -> pl.DataFrame:
                 .then(pl.lit("prompt_") + pl.col("identity:id"))
                 .when(pl.col("object_type_message") == "response")
                 .then(pl.lit("response_") + pl.col("identity:id"))
+                .when(pl.col("object_type_message") == "feedback")
+                .then(pl.lit("feedback_") + pl.col("identity:id"))
                 .otherwise(pl.lit(None))
             ),
             next_event_type=pl.col("event_type").shift(-1),
@@ -475,6 +495,10 @@ def _preprocess_eventlog(eventlog: pl.DataFrame) -> pl.DataFrame:
         "model",
         "input_tokens",
         "response_tokens",
+        "feedback_score",
+        "feedback_reason",
+        "feedback_valid",
+        "scenario_index",
     ]
 
     handover_rows = el_enriched.filter(pl.col("handover_flag")).with_columns(
