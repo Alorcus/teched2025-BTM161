@@ -44,6 +44,10 @@ class ReseedRequest(BaseModel):
     seed: int
 
 
+class CleanRequest(BaseModel):
+    correlation_id: str
+
+
 # -------- Endpoints --------
 
 @app.post("/brew")
@@ -76,8 +80,8 @@ def job_status(job_id: str):
 
 
 @app.post("/clean")
-def clean():
-    result = clean_machine()
+def clean(req: CleanRequest):
+    result = clean_machine(req.correlation_id)
     logger.info("Clean request: %s", result["status"])
     return result
 

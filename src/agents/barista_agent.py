@@ -14,6 +14,7 @@ from pathlib import Path
 logger = logging.getLogger("coffee_shop.barista_agent")
 
 from langchain_core.tools import tool
+from langchain_core.runnables import RunnableConfig
 
 from .shared_components import (
     OrderIdSchema,
@@ -21,6 +22,18 @@ from .shared_components import (
 )
 from .order_store import load_order
 from .order_state_machine import state_machine, InvalidTransitionError
+
+
+def _thread_id(config: RunnableConfig | None) -> str | None:
+    """Pull the LangGraph thread_id (== MLflow case_id) out of an injected config.
+
+    Production tools are invoked through `tool_node.invoke(state, config=config)`
+    so the config is always present. Tests that call `.invoke({...})` directly
+    skip the config; callers handle the None case explicitly.
+    """
+    if config is None:
+        return None
+    return (config.get("configurable") or {}).get("thread_id")
 
 
 COFFEE_MACHINE_URL = "http://127.0.0.1:8001"
@@ -206,7 +219,7 @@ def tool_response(status, message, order_id: str, extra=None):
 # MACHINE TOOLS
 # ----------------------------
 @tool(args_schema=OrderIdSchema)
-def start_preparation(order_id: str) -> str:
+def start_preparation(order_id: str, config: RunnableConfig = None) -> str:
     """Start coffee preparation and automatically wait for completion."""
     logger.debug("start_preparation called for %s", order_id)
 
@@ -243,8 +256,21 @@ def start_preparation(order_id: str) -> str:
 
     # Start brewing — use the first item's name as the drink type
     drink_name = order.items[0].name if order.items else "coffee"
+    # The coffee machine writes events to its CSV keyed by `correlation_id` —
+    # which the trace processor merges into the export only if it matches a
+    # LangGraph thread_id (the MLflow case_id). Pass thread_id, not order_id.
+    thread_id = _thread_id(config)
+    if thread_id is None:
+        logger.warning(
+            "start_preparation invoked without thread_id in config; "
+            "coffee-machine rows for order %s will not merge into the export.",
+            order_id,
+        )
+        correlation_id = order_id
+    else:
+        correlation_id = thread_id
     response = safe_post(
-        f"{COFFEE_MACHINE_URL}/brew", {"drink": drink_name, "correlation_id": order_id}
+        f"{COFFEE_MACHINE_URL}/brew", {"drink": drink_name, "correlation_id": correlation_id}
     )
 
     if response is None:
@@ -414,14 +440,23 @@ def estimate_prep_time(order_id: str) -> str:
 
 
 @tool
-def clean_machine() -> str:
+def clean_machine(config: RunnableConfig = None) -> str:
     """Clean the coffee machine after a brew failure to prevent contamination."""
     logger.debug("clean_machine called")
 
     if not is_machine_running():
         return json.dumps({"status": "error", "message": "Coffee machine is not available."})
 
-    response = safe_post(f"{COFFEE_MACHINE_URL}/clean", {})
+    thread_id = _thread_id(config)
+    if thread_id is None:
+        logger.warning(
+            "clean_machine invoked without thread_id in config; "
+            "clean event will not merge into the export."
+        )
+        correlation_id = "unknown"
+    else:
+        correlation_id = thread_id
+    response = safe_post(f"{COFFEE_MACHINE_URL}/clean", {"correlation_id": correlation_id})
     if response is None:
         return json.dumps({"status": "error", "message": "Coffee machine unreachable."})
 

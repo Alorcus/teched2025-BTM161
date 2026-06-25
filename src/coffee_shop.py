@@ -72,7 +72,7 @@ class CoffeeShop:
         self.customer_agent = CustomerAgent(llm)
 
         if self.config.mlflow_enabled:
-            mlflow.set_tracking_uri("sqlite:///mlflow.db")
+            mlflow.set_tracking_uri(self.config.mlflow_tracking_uri)
             mlflow.langchain.autolog()
             if not mlflow.get_experiment_by_name(self.config.mlflow_experiment):
                 mlflow.create_experiment(self.config.mlflow_experiment)
@@ -163,6 +163,7 @@ class CoffeeShop:
         self._conversation_engine.feedback_log[thread_id] = {
             "thread_id": thread_id,
             "order_id": order_id,
+            "scenario_index": self.customer_agent.scenario_index,
             **feedback,
         }
         self._conversation_engine._save_feedback_store()
