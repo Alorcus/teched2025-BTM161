@@ -141,6 +141,7 @@ def create_observatory_dashboard(setup_name: str):
     )
     _export_done_flag: list[str] = []   # thread-safe message queue: ["ok"] or ["err: …"]
     _conversation_has_run: list[bool] = [False]  # mutable container so closure can write to it
+    _export_in_progress = threading.Event()  # set while a daemon export is running
 
     status_indicator = pn.indicators.LoadingSpinner(value=False, size=25)
     conversation_log = pn.pane.HTML(
@@ -165,6 +166,12 @@ def create_observatory_dashboard(setup_name: str):
     def on_export(event):
         if runner.is_running:
             return
+        # Guard against double-clicks racing two daemon threads against the
+        # same MLflow client / output directory. Event.is_set() is atomic;
+        # the Bokeh document thread reads it before spawning.
+        if _export_in_progress.is_set():
+            return
+        _export_in_progress.set()
         export_button.disabled = True
         export_status.object = '<span style="color:#FF9800;">⏳ Exporting…</span>'
         _export_done_flag.clear()
@@ -175,6 +182,8 @@ def create_observatory_dashboard(setup_name: str):
                 _export_done_flag.append("ok")
             except Exception as e:
                 _export_done_flag.append(f"err:{e}")
+            finally:
+                _export_in_progress.clear()
 
         threading.Thread(target=_run_export, daemon=True).start()
 
