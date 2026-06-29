@@ -107,7 +107,9 @@ poetry run simulate --setup baseline --traces 10 --scenario all --export-logs
 | `--export-logs` | off       | Generate event log CSV after simulation                                           |
 | `--reset-inventory` / `--no-reset-inventory` | `--reset-inventory` | Reset inventory before each trace. Use `--no-reset-inventory` to keep inventory state across traces |
 | `--quiet`       | off       | Minimal output: only trace numbers, scenarios, and summary                        |
-| `--log-level`   | `warning` | Set the logging level for agent diagnostics (`debug`, `info`, `warning`, `error`) |
+| `--log-level`   | `info`    | Set the logging level for agent diagnostics (`debug`, `info`, `warning`, `error`) |
+| `--process-supervisor` / `--no-process-supervisor` | `--process-supervisor` | Enable the process supervisor. Use `--no-process-supervisor` to run without it |
+| `--retrospective` / `--no-retrospective` | `--no-retrospective` | Run a per-agent After-Action Review at the end of each conversation |
 
 ### Available Scenarios
 
