@@ -62,6 +62,11 @@ Three self-contained exercises:
 
 A **setup** is a self-contained configuration of agents, guardrails, and guidelines under `config/setups/<name>/` (subdirs: `agents/`, `guardrails/`, `guidelines/`). Both `simulate` and `dashboard` require a setup to be selected. Guardrail predicate *logic* lives in Python ([src/control_plane/predicates.py](src/control_plane/predicates.py)) and is referenced by name from the guardrail YAML — varying `predicate_args` (e.g. `max_pct: 10`) is a YAML-only change.
 
+**Available setups:**
+
+- `baseline` — the standard coffee shop: each agent can only hand off to the next role in the workflow, and every agent prompt declares that a runtime process supervisor is watching.
+- `all_handovers` — every business agent can transfer to every other agent, and an `order_id_in_handoff` flag guardrail (plus matching `handoff_order_id` guideline) requires handoffs to carry an `ORDXXXX` once an order exists.
+
 **Selecting a setup:**
 
 ```bash
