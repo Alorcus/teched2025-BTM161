@@ -161,6 +161,7 @@ class LogGenerator:
             'concept:instance': f'{agent_name} uses tool {tool_name}',
             'org:resource': agent_name,
             'tool': tool_name,
+            'tool_call_id': tool_input.get('id'),
         })
 
 

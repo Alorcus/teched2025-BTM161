@@ -1,12 +1,21 @@
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 
 import json
 import os
 
 import polars as pl
 
+from .guardrail_log_loader import (
+    GATEWAY_EVENT_TYPES,
+    GATEWAY_OBJECT_TYPES,
+    GuardrailOcelExtension,
+    load_guardrail_events,
+)
 
+
+DEFAULT_GUARDRAIL_LOG_PATH = Path("./guardrail_log/events.jsonl")
 EVENT_ATTRIBUTES = {
     "agent_response": ["ocel_time", "duration", "input_tokens", "response_tokens"],
     "call_llm": ["ocel_time", "model", "duration", "input_tokens", "response_tokens"],
@@ -125,6 +134,37 @@ EVENT_ATTRIBUTES = {
         "input_tokens",
         "response_tokens",
     ],
+    # gateway
+    "gateway_flag": [
+        "ocel_time",
+        "tool_name",
+        "tool_args",
+        "tool_call_id",
+        "final_decision",
+        "setup_name",
+        "snapshot_id",
+        "agent_id",
+        "denied_by",
+        "flagged_by",
+        "consulted",
+        "n_verdicts",
+        "reason_for_llm",
+    ],
+    "gateway_deny": [
+        "ocel_time",
+        "tool_name",
+        "tool_args",
+        "tool_call_id",
+        "final_decision",
+        "setup_name",
+        "snapshot_id",
+        "agent_id",
+        "denied_by",
+        "flagged_by",
+        "consulted",
+        "n_verdicts",
+        "reason_for_llm",
+    ],
 }
 
 OBJECT_ATTRIBUTES = {
@@ -138,6 +178,10 @@ OBJECT_ATTRIBUTES = {
     "customer_service_agent": [],
     "feedback": ["feedback_score", "feedback_reason", "feedback_valid", "scenario_index"],
     "coffee_machine": [],
+    "guardrail": ["guardrail_type", "version"],
+    "setup": [],
+    "snapshot": ["agent_id", "version_label", "hash"],
+    "tool_call": ["tool_name"],
 }
 
 
@@ -157,19 +201,27 @@ class ObjectCentricEventlog:
     object_tables: dict[str, pl.DataFrame]
 
     @classmethod
-    def from_eventlog(cls, eventlog: str | pl.DataFrame) -> "ObjectCentricEventlog":
+    def from_eventlog(
+        cls,
+        eventlog: str | pl.DataFrame,
+        guardrail_log_path: str | Path | None = DEFAULT_GUARDRAIL_LOG_PATH,
+    ) -> "ObjectCentricEventlog":
         """
         Create an ObjectCentricEventlog according to the OCEL 2.0 standard from a flat event log.
         The input is either a path to the eventlog or the eventlog a as a polars DataFrame
 
         Input:
             el : pl.DataFrame holding the raw event log as loaded directly from the CSV.
-
         """
         if isinstance(eventlog, str):
             eventlog = pl.read_csv(eventlog)
 
         el_enriched = _preprocess_eventlog(eventlog)
+        ext = (
+            load_guardrail_events(guardrail_log_path)
+            if guardrail_log_path is not None
+            else GuardrailOcelExtension()
+        )
 
         objects = (
             el_enriched.select(
@@ -192,9 +244,15 @@ class ObjectCentricEventlog:
             .unique()
         )
 
+        if not ext.objects_rows.is_empty():
+            objects = pl.concat([objects, ext.objects_rows]).unique()
+
         events = el_enriched.select(
             ocel_id=pl.col("event_id"), ocel_type=pl.col("event_type")
         )
+
+        if not ext.events_rows.is_empty():
+            events = pl.concat([events, ext.events_rows]).unique()
 
         event_object = (
             el_enriched.select(
@@ -218,6 +276,77 @@ class ObjectCentricEventlog:
             .drop_nulls()
         )
 
+        if (
+            "tool_call_id" in el_enriched.columns
+            and ext.tool_call_ids
+        ):
+            tool_call_links = (
+                el_enriched
+                .filter(pl.col("tool_call_id").is_not_null() & pl.col("tool").is_not_null())
+                .filter(pl.col("tool_call_id").is_in(list(ext.tool_call_ids)))
+                .select(
+                    ocel_event_id=pl.col("event_id"),
+                    ocel_object_id=pl.col("tool_call_id"),
+                    ocel_qualifier=pl.lit("executes"),
+                )
+            )
+            if not tool_call_links.is_empty():
+                event_object = pl.concat([event_object, tool_call_links])
+
+        if ext.case_setup_map:
+            setup_map_df = pl.DataFrame(
+                {
+                    "case_id": list(ext.case_setup_map.keys()),
+                    "_setup": list(ext.case_setup_map.values()),
+                },
+                schema={"case_id": pl.Utf8, "_setup": pl.Utf8},
+            )
+            setup_links = (
+                el_enriched
+                .select("event_id", "case_id")
+                .unique()
+                .join(setup_map_df, on="case_id", how="inner")
+                .select(
+                    ocel_event_id=pl.col("event_id"),
+                    ocel_object_id=pl.col("_setup"),
+                    ocel_qualifier=pl.lit("under_setup"),
+                )
+            )
+            if not setup_links.is_empty():
+                event_object = pl.concat([event_object, setup_links])
+
+        if ext.case_agent_snapshot_map:
+            snap_map_df = pl.DataFrame(
+                {
+                    "case_id": [k[0] for k in ext.case_agent_snapshot_map],
+                    "org:resource": [k[1] for k in ext.case_agent_snapshot_map],
+                    "_snapshot": list(ext.case_agent_snapshot_map.values()),
+                },
+                schema={
+                    "case_id": pl.Utf8,
+                    "org:resource": pl.Utf8,
+                    "_snapshot": pl.Utf8,
+                },
+            )
+            snapshot_links = (
+                el_enriched
+                .select("event_id", "case_id", "org:resource")
+                .unique()
+                .join(snap_map_df, on=["case_id", "org:resource"], how="inner")
+                .select(
+                    ocel_event_id=pl.col("event_id"),
+                    ocel_object_id=pl.col("_snapshot"),
+                    ocel_qualifier=pl.lit("using_snapshot"),
+                )
+            )
+            if not snapshot_links.is_empty():
+                event_object = pl.concat([event_object, snapshot_links])
+
+        if not ext.event_object_rows.is_empty():
+            event_object = pl.concat([event_object, ext.event_object_rows])
+
+        event_object = event_object.unique()
+
         object_object = pl.DataFrame(
             schema={
                 "ocel_source_id": str,
@@ -225,6 +354,9 @@ class ObjectCentricEventlog:
                 "ocel_qualifier": str,
             }
         )
+
+        if not ext.object_object_rows.is_empty():
+            object_object = pl.concat([object_object, ext.object_object_rows]).unique()
 
         event_map_type = (
             events.select("ocel_type")
@@ -240,6 +372,8 @@ class ObjectCentricEventlog:
 
         event_tables = {}
         for evt_type in event_map_type["ocel_type"].to_list():
+            if evt_type in GATEWAY_EVENT_TYPES:
+                continue
             attrs = EVENT_ATTRIBUTES.get(evt_type, [])
             evt_type_tbl = (
                 events.filter(pl.col("ocel_type") == evt_type)
@@ -254,8 +388,13 @@ class ObjectCentricEventlog:
             )
             event_tables[f"event_{evt_type}"] = evt_type_tbl
 
+        for evt_type, df in ext.event_tables.items():
+            event_tables[f"event_{evt_type}"] = df
+
         object_tables = {}
         for obj_type in object_map_type["ocel_type"].to_list():
+            if obj_type in GATEWAY_OBJECT_TYPES:
+                continue
             attrs = OBJECT_ATTRIBUTES[obj_type]
             column_id = (
                 "object_id_message"
@@ -274,6 +413,9 @@ class ObjectCentricEventlog:
                 .unique()
             )
             object_tables[f"object_{obj_type}"] = obj_type_tbl
+
+        for obj_type, df in ext.object_tables.items():
+            object_tables[f"object_{obj_type}"] = df
 
         return cls(
             events=events,

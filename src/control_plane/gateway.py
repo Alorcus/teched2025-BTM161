@@ -63,11 +63,13 @@ class Gateway:
         applicable.sort(key=lambda g: 0 if g.type == "hard" else 1)
 
         verdicts: list[Verdict] = []
+        verdict_versions: list[str] = []
         final = Effect.ALLOW
         deny_reason = ""
         for guardrail in applicable:
             verdict = guardrail.eval(context)
             verdicts.append(verdict)
+            verdict_versions.append(guardrail.version)
             if verdict.effect == Effect.DENY and final != Effect.DENY:
                 final = Effect.DENY
                 deny_reason = verdict.reason_for_llm or verdict.reason_internal
@@ -83,10 +85,15 @@ class Gateway:
             final_decision=final,
             deny_reason_for_llm=deny_reason,
         )
-        self._log_decision(decision, thread_id)
+        self._log_decision(decision, thread_id, verdict_versions)
         return decision
 
-    def _log_decision(self, decision: CallDecision, thread_id: str | None) -> None:
+    def _log_decision(
+        self,
+        decision: CallDecision,
+        thread_id: str | None,
+        verdict_versions: list[str],
+    ) -> None:
         self.log_sink.append({
             "event_type": "gateway_decision",
             "snapshot_id": self.snapshot_id,
@@ -99,12 +106,13 @@ class Gateway:
             "verdicts": [
                 {
                     "guardrail_name": v.guardrail_name,
+                    "guardrail_version": ver,
                     "guardrail_type": v.guardrail_type,
                     "effect": v.effect.value,
                     "reason_internal": v.reason_internal,
                     "reason_for_llm": v.reason_for_llm,
                 }
-                for v in decision.verdicts
+                for v, ver in zip(decision.verdicts, verdict_versions)
             ],
         })
 
