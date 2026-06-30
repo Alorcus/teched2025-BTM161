@@ -4,11 +4,10 @@ A "setup" is a self-contained `config/setups/<name>/` directory containing
 `agents/*.yaml` and `guidelines/*.yaml`. Setups are not merged or composed —
 each one is a complete, independent configuration of the coffee shop.
 """
-import os
+
 from pathlib import Path
 
 SETUPS_ROOT = Path("config/setups")
-ENV_VAR = "COFFEE_SHOP_SETUP"
 DEFAULT_SETUP = "baseline"
 
 
@@ -35,15 +34,23 @@ def setup_dir(name: str) -> Path:
 
 
 def resolve_setup_name(cli_value: str | None) -> str:
-    """Pick the setup name. Env var supersedes CLI flag. Falls back to the default setup if available."""
-    env_value = os.environ.get(ENV_VAR)
-    name = env_value or cli_value
-    if not name:
-        available = list_setups()
-        if DEFAULT_SETUP in available:
-            return DEFAULT_SETUP
-        raise SystemExit(
-            f"No setup selected. Pass --setup <name> or set {ENV_VAR}=<name>. "
-            f"Available: {available or '(none)'}"
-        )
-    return name
+    """Pick a single setup name. Falls back to the default setup if available."""
+    if cli_value:
+        return cli_value
+    available = list_setups()
+    if DEFAULT_SETUP in available:
+        return DEFAULT_SETUP
+    raise SystemExit(
+        f"No setup selected. Pass --setup <name>. Available: {available or '(none)'}"
+    )
+
+
+def resolve_setup_names(cli_values: list[str] | None) -> list[str]:
+    """Resolve the ordered list of setups to run.
+
+    - If cli_values is non-empty, return it (order preserved; duplicates allowed).
+    - Else fall back to the default via resolve_setup_name(None).
+    """
+    if cli_values:
+        return list(cli_values)
+    return [resolve_setup_name(None)]

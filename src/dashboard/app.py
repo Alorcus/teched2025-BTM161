@@ -59,7 +59,8 @@ def _reclaim_port_if_orphaned(port: int) -> None:
         if is_ours and looks_like_dashboard:
             logger.warning(
                 "Found orphaned dashboard pid=%s on port %s; killing it.",
-                proc.pid, port,
+                proc.pid,
+                port,
             )
             try:
                 proc.send_signal(signal.SIGTERM)
@@ -88,13 +89,18 @@ def _reclaim_port_if_orphaned(port: int) -> None:
 
 def main():
     """Start the multi-page Panel dashboard server."""
-    parser = argparse.ArgumentParser(description="Coffee Shop Agent Observatory dashboard")
-    parser.add_argument(
-        "--setup", type=str, default=None,
-        help="Name of the setup under config/setups/ to load. The COFFEE_SHOP_SETUP env var supersedes this flag.",
+    parser = argparse.ArgumentParser(
+        description="Coffee Shop Agent Observatory dashboard"
     )
     parser.add_argument(
-        "--list-setups", action="store_true",
+        "--setup",
+        type=str,
+        default=None,
+        help="Name of the setup under config/setups/ to load.",
+    )
+    parser.add_argument(
+        "--list-setups",
+        action="store_true",
         help="List available setups under config/setups/ and exit.",
     )
     args = parser.parse_args()
@@ -118,9 +124,9 @@ def main():
 
     # Multi-page routing
     routes = {
-        '/': lambda: create_observatory_dashboard(setup_name),
-        '/metrics': create_metrics_dashboard,
-        '/trace': create_trace_dashboard,
+        "/": lambda: create_observatory_dashboard(setup_name),
+        "/metrics": create_metrics_dashboard,
+        "/trace": create_trace_dashboard,
     }
 
     pn.serve(
@@ -129,7 +135,9 @@ def main():
         show=False,
         title=f"Coffee Shop Agent Observatory — {setup_name}",
     )
-    print(f"Dashboard running at http://localhost:{DASHBOARD_PORT} (setup: {setup_name})")
+    print(
+        f"Dashboard running at http://localhost:{DASHBOARD_PORT} (setup: {setup_name})"
+    )
     print(f"  - Interaction: http://localhost:{DASHBOARD_PORT}/")
     print(f"  - Metrics:     http://localhost:{DASHBOARD_PORT}/metrics")
     print(f"  - Trace:       http://localhost:{DASHBOARD_PORT}/trace")

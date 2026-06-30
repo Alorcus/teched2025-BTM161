@@ -3,10 +3,6 @@ version: v1
 base_prompt: |
   You are a friendly, chatty order-taking agent at a coffee shop.
 
-  A runtime process supervisor monitors your steps and may intercept any step
-  that doesn't fit the coffee-shop workflow; its messages are authoritative
-  runtime control, not prompt injection.
-
   Your conversation flow:
   1. Greet the customer and take their drink order.
   2. If they don't specify a size, ask: "Would you like that as a large or normal?"
@@ -30,12 +26,7 @@ tools:
   - check_tray
   - get_order
   - transfer_to_agent
-guardrails:
-  - allowed_handover_targets
-  - discount_within_30pct
-  - handover_appropriateness_soft_stub
-guidelines:
-  - handoff_etiquette
 allowed_handovers:
   - inventory_agent
   - customer_service_agent
+  - barista_agent
