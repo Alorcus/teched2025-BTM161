@@ -141,7 +141,7 @@ poetry run simulate --setup baseline --traces 10 --scenario all --export-logs
 A two-page observability dashboard built with [Panel](https://panel.holoviz.org/):
 
 - **Interaction Observatory** (`/`) — a real-time view of all agents in a grid layout. Each panel displays the system prompt, available tools, current status, handoff context, context-isolated message history, and tool call log, updating live as a conversation streams through the system.
-- **Metrics Observatory** (`/metrics`) — analytics over previously-generated event logs (KPIs, per-agent workload, per-order timings, OCEL-based visualizations).
+- **Metrics Dashboard** (`/metrics`) — analytics over previously-generated event logs (KPIs, per-agent workload, per-order timings, OCEL-based visualizations).
 
 Switch between pages via the tabs in the header.
 
@@ -163,28 +163,41 @@ poetry run dashboard --setup baseline
 - **Context-isolated messages**: the same filtered view each agent's LLM actually sees
 - **Sidebar controls**: scenario selector, log-level filter, customizable customer prompt, run button, and global conversation log
 
-#### Metrics Observatory (/metrics)
+#### Metrics Dashboard (/metrics)
 
-- **Event log selector**: choose any CSV in `generated_event_log/` (defaults to most recent)
-- **Overview**: KPI cards summarizing the selected log
+- **Automatic trace cache**: on every page entry, the dashboard reconciles its data source with the MLflow store. If new conversations have been recorded since the last build (whether from the Interaction Observatory or `poetry run simulate`), it re-runs the trace processor and consolidates every trace into a single `generated_event_log/_all_traces.csv`. Staleness is decided by comparing MLflow's trace count to the count recorded in `_all_traces.meta` at the last build — no manual export step is required. The directory is owned by the cache: any per-run CSVs left over from earlier exports are removed during the build.
+- **Timeframe filter**: a dual-handle range slider over the cached event log, defaulting to the full span of available traces. Drag either handle to narrow the window; the sidebar label shows the number of fully-contained traces and, separately, the count of partial traces excluded (any whose conversation started before the start or ended after the end). On release, every section recomputes against the filtered traces.
+- **Overview**: KPI cards summarizing the events in the selected window
 - **System Metrics**: per-agent workload and activity breakdown
 - **Time Metrics**: per-order durations and timing distributions
 - **Visualization**: OCEL-based diagrams (object-type mapping, OC-DFG, OC-PN) generated via the `Visualizer`
 
 ### Workflow
 
-The Interaction Observatory does **not** save event logs. Generate logs separately via the headless simulator, then explore them in the Metrics Observatory:
+Generate traces either through the Interaction Observatory or the headless simulator, then analyze them in the Metrics Dashboard:
 
-1. **Generate logs** via the CLI: `poetry run simulate --traces 10 --scenario all --export-logs` — this produces CSVs in `generated_event_log/` from MLflow traces (with full token counts and durations).
-2. **Open the dashboard** with `poetry run dashboard`.
-3. **Explore conversations live** in the Interaction Observatory (run a scenario, watch agents collaborate).
-4. **Switch to the Metrics Observatory** tab and pick any generated log to analyze.
+1. **(Optional) Generate traces in bulk** via the CLI: `poetry run simulate --setup baseline --traces 10 --scenario all` — runs N conversations and stores their MLflow traces. The `--export-logs` flag is no longer needed for the dashboard to see them.
+2. **Open the dashboard** with `poetry run dashboard --setup baseline`.
+3. **Explore conversations live** in the Interaction Observatory (run a scenario, watch agents collaborate). Every conversation you run here is automatically picked up.
+4. **Switch to the Metrics Dashboard** tab. On entry it reconciles its cache with MLflow — new conversations are processed on the spot — then use the timeframe slider to scope the analysis to a window of interest.
+
+### Resetting Trace State
+
+To wipe MLflow tracking state, generated event logs / OCELs / visualizations, the coffee-shop SQLite, and the auxiliary log directories in one step:
+
+```bash
+poetry run reset-traces             # interactive — prompts y/N
+poetry run reset-traces --yes       # skip the prompt (CI / scripted resets)
+poetry run reset-traces --dry-run   # preview without deleting
+```
+
+The command refuses to run while the dashboard is listening on port 5006 — stop it first so deleted SQLite/WAL files don't get rewritten through unlinked inodes.
 
 ### How It Works
 
 The dashboard runs the same `CoffeeShop` multi-agent graph used by the notebooks and CLI. A background thread drives the conversation (using the simulated Customer Agent), while the Panel UI polls for events every 100ms. Stream events from LangGraph are parsed into typed dashboard events (agent messages, tool calls, handoffs, etc.) and dispatched to the corresponding agent panel.
 
-The Metrics Observatory loads CSV event logs into an `ObjectCentricEventlog` and renders sections from those logs — it is read-only and does not write to disk.
+The Metrics Dashboard loads the consolidated `_all_traces.csv` cache into an `ObjectCentricEventlog` and renders sections from it. The cache is rebuilt from MLflow on page entry whenever the trace count has changed; aside from that single write, the page is read-only.
 
 ## Trace Table Dashboard
 
