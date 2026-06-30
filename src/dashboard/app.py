@@ -26,7 +26,11 @@ def _reclaim_port_if_orphaned(port: int) -> None:
     clear message instead of letting bind() fail with a cryptic OSError 98.
     """
     holders: list[psutil.Process] = []
-    for conn in psutil.net_connections(kind="tcp"):
+    try:
+        tcp_connections = psutil.net_connections(kind="tcp")
+    except psutil.AccessDenied:
+        return
+    for conn in tcp_connections:
         if (
             conn.status == psutil.CONN_LISTEN
             and conn.laddr

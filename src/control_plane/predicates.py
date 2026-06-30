@@ -77,4 +77,5 @@ PREDICATE_REGISTRY = {
     "allowed_handover_targets": allowed_handover_targets_predicate,
     "discount_within_limit": discount_within_limit_predicate,
     "transfer_includes_order_id": transfer_includes_order_id_predicate,
+    "transfer_includes_order_id": transfer_includes_order_id_predicate,
 }

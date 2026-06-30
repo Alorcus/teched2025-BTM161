@@ -9,6 +9,7 @@ from .overview_section import OverviewSection
 from .system_metrics_section import SystemMetricsSection
 from .time_metrics_section import TimeMetricsSection
 from .visualization_section import VisualizationSection
+from .feedback_section import FeedbackSection
 
 
 def create_metrics_dashboard():
@@ -41,6 +42,7 @@ def create_metrics_dashboard():
 
         return pn.Column(
             OverviewSection(ocel, selected_file).panel(),
+            FeedbackSection(ocel).panel(),
             SystemMetricsSection(ocel).panel(),
             TimeMetricsSection(ocel).panel(),
             VisualizationSection(ocel).panel(),

@@ -156,7 +156,11 @@ def _scenario_options() -> dict[str, int]:
         "Complaint (cold cappuccino)",
         "Ask for a recommendation",
     ]
-    return {f"{i}: {labels[i]}": i for i in range(min(len(labels), len(CUSTOMER_SCENARIOS)))}
+    options: dict[str, int] = {
+        f"{i}: {labels[i]}": i for i in range(min(len(labels), len(CUSTOMER_SCENARIOS)))
+    }
+    options["Custom"] = -1
+    return options
 
 
 def _truncate(text: str, max_len: int = 150) -> str:
@@ -364,10 +368,40 @@ def create_trace_dashboard():
         margin=(0, 0, 12, 0),
     )
 
+    # Same suppression-flag pattern as interaction_page: prevents on_scenario_change
+    # ↔ on_prompt_change from bouncing back and forth when one writes to the
+    # widget the other watches.
+    _suppress_watchers: list[bool] = [False]
+
     def on_scenario_change(event):
-        prompt_textarea.value = build_default_prompt(event.new)
+        if _suppress_watchers[0]:
+            return
+        if event.new == -1:
+            return
+        _suppress_watchers[0] = True
+        try:
+            prompt_textarea.value = build_default_prompt(event.new)
+        finally:
+            _suppress_watchers[0] = False
+
+    def on_prompt_change(event):
+        if _suppress_watchers[0]:
+            return
+        matched = next(
+            (i for i in range(len(CUSTOMER_SCENARIOS))
+             if event.new == build_default_prompt(i)),
+            None,
+        )
+        target = -1 if matched is None else matched
+        if scenario_select.value != target:
+            _suppress_watchers[0] = True
+            try:
+                scenario_select.value = target
+            finally:
+                _suppress_watchers[0] = False
 
     scenario_select.param.watch(on_scenario_change, "value")
+    prompt_textarea.param.watch(on_prompt_change, "value")
 
     run_button = pn.widgets.Button(
         name="Run Conversation",
