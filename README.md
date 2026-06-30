@@ -66,6 +66,7 @@ A **setup** is a self-contained configuration of agents, guardrails, and guideli
 
 - `baseline` — the standard coffee shop: each agent can only hand off to the next role in the workflow, and every agent prompt declares that a runtime process supervisor is watching.
 - `all_handovers` — every business agent can transfer to every other agent, and an `order_id_in_handoff` flag guardrail (plus matching `handoff_order_id` guideline) requires handoffs to carry an `ORDXXXX` once an order exists.
+- `unconstrained` — every business agent can transfer to every other agent, with no guardrails, no guidelines, and no supervisor preamble — maximum agent freedom for observing emergent behavior.
 
 **Selecting a setup:**
 
