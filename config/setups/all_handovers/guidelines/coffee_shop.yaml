@@ -10,5 +10,5 @@ guidelines:
     version: v1
     prompt: |
       When you hand off to another agent, if the conversation involves a concrete order,
-      you MUST include the order_id in the context_summary, structured like this: ORDXXXX. This allows the next agent 
+      you MUST include the order_id in the context_summary, structured like this: ORDXXXX. This allows the next agent
       to retrieve the full order details using get_order(order_id) and provide better assistance.
