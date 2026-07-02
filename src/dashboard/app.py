@@ -61,6 +61,8 @@ def _reclaim_port_if_orphaned(port: int) -> None:
                 "Found orphaned dashboard pid=%s on port %s; killing it.",
                 proc.pid,
                 port,
+                proc.pid,
+                port,
             )
             try:
                 proc.send_signal(signal.SIGTERM)
@@ -92,13 +94,18 @@ def main():
     parser = argparse.ArgumentParser(
         description="Coffee Shop Agent Observatory dashboard"
     )
+    parser = argparse.ArgumentParser(
+        description="Coffee Shop Agent Observatory dashboard"
+    )
     parser.add_argument(
         "--setup",
         type=str,
         default=None,
-        help="Name of the setup under config/setups/ to load. The COFFEE_SHOP_SETUP env var supersedes this flag.",
+        help="Name of the setup under config/setups/ to load.",
     )
     parser.add_argument(
+        "--list-setups",
+        action="store_true",
         "--list-setups",
         action="store_true",
         help="List available setups under config/setups/ and exit.",
