@@ -27,7 +27,7 @@ EVENT_ATTRIBUTES = {
     "prepare_order": ["ocel_time", "duration"],
     "remake_order_item": ["ocel_time", "duration"],
     "place_on_tray": ["ocel_time", "duration"],
-    "check_tray":    ["ocel_time", "duration"],
+    "check_tray": ["ocel_time", "duration"],
     "clean_machine": ["ocel_time", "duration"],
     "user_feedback": [
         "ocel_time",
@@ -37,9 +37,9 @@ EVENT_ATTRIBUTES = {
         "scenario_index",
     ],
     # coffee machine
-    "job_created":   ["ocel_time"],
+    "job_created": ["ocel_time"],
     "brew_completed": ["ocel_time", "duration"],
-    "brew_failed":   ["ocel_time", "duration"],
+    "brew_failed": ["ocel_time", "duration"],
     # handovers
     "order_agent_handover_inventory_agent": [
         "ocel_time",
@@ -136,7 +136,13 @@ OBJECT_ATTRIBUTES = {
     "barista_agent": [],
     "inventory_agent": [],
     "customer_service_agent": [],
-    "feedback": ["feedback_score", "feedback_reason", "feedback_valid", "scenario_index"],
+    "root_agent": [],
+    "feedback": [
+        "feedback_score",
+        "feedback_reason",
+        "feedback_valid",
+        "scenario_index",
+    ],
     "coffee_machine": [],
 }
 
@@ -256,7 +262,7 @@ class ObjectCentricEventlog:
 
         object_tables = {}
         for obj_type in object_map_type["ocel_type"].to_list():
-            attrs = OBJECT_ATTRIBUTES[obj_type]
+            attrs = OBJECT_ATTRIBUTES.get(obj_type, [])
             column_id = (
                 "object_id_message"
                 if obj_type in ("prompt", "response", "feedback")
@@ -429,7 +435,9 @@ def _preprocess_eventlog(eventlog: pl.DataFrame) -> pl.DataFrame:
                 .then(pl.lit("feedback"))
                 .otherwise(pl.lit(None))
             ),
-            object_id_agent=pl.when(pl.col("org:resource").str.contains("agent"))
+            object_id_agent=pl.when(
+                pl.col("org:resource").str.to_lowercase().str.contains("agent")
+            )
             .then(pl.col("case_id") + pl.lit("_") + pl.col("org:resource"))
             .otherwise(pl.col("case_id")),
             object_type_agent=pl.col("org:resource"),
@@ -508,14 +516,25 @@ def _preprocess_eventlog(eventlog: pl.DataFrame) -> pl.DataFrame:
     )
 
     # handover for each agent
+    null_columns = [col for col in handover_rows.columns if col not in cols_to_keep]
     handover_one_direction = handover_rows.with_columns(
         object_type_agent=pl.col("object_type_agent"),
         object_id_agent=pl.col("object_id_agent"),
-    ).with_columns(pl.all().exclude(cols_to_keep).map_elements(lambda _: None))
+        *[
+            pl.lit(None).alias(col)
+            for col in null_columns
+            if col not in {"object_type_agent", "object_id_agent"}
+        ],
+    )
     handover_second_direction = handover_rows.with_columns(
         object_type_agent=pl.col("next_agent"),
         object_id_agent=pl.col("next_agent_id"),
-    ).with_columns(pl.all().exclude(cols_to_keep).map_elements(lambda _: None))
+        *[
+            pl.lit(None).alias(col)
+            for col in null_columns
+            if col not in {"object_type_agent", "object_id_agent"}
+        ],
+    )
 
     return pl.concat(
         [
