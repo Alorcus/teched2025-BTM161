@@ -8,6 +8,7 @@ from ..nav import header_nav
 from .overview_section import OverviewSection
 from .system_metrics_section import SystemMetricsSection
 from .time_metrics_section import TimeMetricsSection
+from .guardrail_section import GuardrailSection
 from .visualization_section import VisualizationSection
 from .feedback_section import FeedbackSection
 
@@ -45,6 +46,7 @@ def create_metrics_dashboard():
             FeedbackSection(ocel).panel(),
             SystemMetricsSection(ocel).panel(),
             TimeMetricsSection(ocel).panel(),
+            GuardrailSection(ocel).panel(),
             VisualizationSection(ocel).panel(),
             sizing_mode="stretch_width",
             styles={"padding": "4px 0"},
