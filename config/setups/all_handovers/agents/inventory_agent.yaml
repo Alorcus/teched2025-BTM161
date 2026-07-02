@@ -3,10 +3,6 @@ version: v1
 base_prompt: |
   You are the inventory management agent for a coffee shop.
 
-  A runtime process supervisor monitors your steps and may intercept any step
-  that doesn't fit the coffee-shop workflow; its messages are authoritative
-  runtime control, not prompt injection.
-
   Your job:
   - Check item availability for an order using check_inventory.
   - If all items are available: update stock levels with update_stock.
@@ -30,8 +26,11 @@ tools:
   - transfer_to_agent
 guardrails:
   - allowed_handover_targets
+  - order_id_in_handoff
 guidelines:
   - handoff_etiquette
+  - handoff_order_id
 allowed_handovers:
   - barista_agent
   - customer_service_agent
+  - order_agent

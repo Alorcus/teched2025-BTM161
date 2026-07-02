@@ -40,6 +40,16 @@ The repository contains three Jupyter notebooks for stepping through the system,
 5. Configure your LLM provider via a `.env` file (see `.env.example`). Set `LLM_PROVIDER=ollama` (default) or `LLM_PROVIDER=anthropic`.
 6. Start Jupyter: `jupyter notebook`
 
+## Pre-commit Hook
+
+Runs `ruff check` and `ruff format` on staged files. CI enforces the same on every PR.
+
+```bash
+brew install pre-commit          # macOS
+pip install pre-commit           # Linux (or: poetry install)
+pre-commit install
+```
+
 ## Notebooks
 
 Three self-contained exercises:
@@ -52,13 +62,22 @@ Three self-contained exercises:
 
 A **setup** is a self-contained configuration of agents, guardrails, and guidelines under `config/setups/<name>/` (subdirs: `agents/`, `guardrails/`, `guidelines/`). Both `simulate` and `dashboard` require a setup to be selected. Guardrail predicate *logic* lives in Python ([src/control_plane/predicates.py](src/control_plane/predicates.py)) and is referenced by name from the guardrail YAML — varying `predicate_args` (e.g. `max_pct: 10`) is a YAML-only change.
 
-**Selecting a setup** (env var supersedes the flag):
+**Available setups:**
+
+- `baseline` — the standard coffee shop: each agent can only hand off to the next role in the workflow, and every agent prompt declares that a runtime process supervisor is watching.
+- `all_handovers` — every business agent can transfer to every other agent, and an `order_id_in_handoff` flag guardrail (plus matching `handoff_order_id` guideline) requires handoffs to carry an `ORDXXXX` once an order exists.
+- `unconstrained` — every business agent can transfer to every other agent, with no guardrails, no guidelines, and no supervisor preamble — maximum agent freedom for observing emergent behavior.
+
+**Selecting a setup:**
 
 ```bash
 poetry run simulate --setup baseline --traces 1
-COFFEE_SHOP_SETUP=baseline poetry run dashboard
+poetry run dashboard --setup baseline
 poetry run simulate --list-setups          # show available setups
 ```
+
+Repeat `--setup` to run multiple setups sequentially in one `simulate` invocation
+(e.g. `--setup baseline --setup all_handovers`); each setup runs `--traces N` conversations.
 
 **Adding a new setup** — copy `baseline` and edit the YAMLs:
 
@@ -74,7 +93,7 @@ You can generate traces in bulk without the jupyter UI using the `simulate` CLI 
 
 ### Usage
 
-All examples below require `--setup <name>` (or `COFFEE_SHOP_SETUP=<name>`); see [Setups](#setups).
+All examples below require `--setup <name>`; see [Setups](#setups).
 
 ```bash
 # Run a single trace with a random scenario
@@ -100,7 +119,7 @@ poetry run simulate --setup baseline --traces 10 --scenario all --export-logs
 
 | Argument        | Default   | Description                                                                       |
 | --------------- | --------- | --------------------------------------------------------------------------------- |
-| `--setup NAME`  | required  | Setup under `config/setups/` to load (env `COFFEE_SHOP_SETUP` supersedes)         |
+| `--setup NAME`  | required  | Setup under `config/setups/` to load; repeat the flag to run multiple setups     |
 | `--list-setups` | off       | List available setups and exit                                                    |
 | `--traces N`    | `1`       | Number of conversation traces to run                                              |
 | `--scenario`    | `random`  | Scenario index (`0`–`3`), `all` (round-robin), or `random`                        |
@@ -131,9 +150,6 @@ Switch between pages via the tabs in the header.
 ```bash
 # Start the dashboard (opens browser at http://localhost:5006)
 poetry run dashboard --setup baseline
-
-# Or via env var
-COFFEE_SHOP_SETUP=baseline poetry run dashboard
 ```
 
 ### Features
