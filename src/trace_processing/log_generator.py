@@ -67,20 +67,33 @@ class LogGenerator:
 
 
     def _get_span_metadata(self, span):
-        return json.loads(span['attributes']['metadata'])
+        # Some spans (e.g. RunnableSequence, ChatOllama) have no `metadata`
+        # attribute — return an empty dict instead of raising KeyError so
+        # callers can uniformly do `.get('langgraph_node')`.
+        raw = span.get('attributes', {}).get('metadata')
+        if raw is None:
+            return {}
+        try:
+            return json.loads(raw)
+        except (TypeError, ValueError):
+            return {}
 
 
     def _is_agent_span(self, span):
         child_spans = [s for s in self.spans if s['parent_span_id'] == span['span_id']]
         for child in child_spans:
+            # Legacy create_react_agent shape: agent_* span with a call_model grandchild.
             if child['name'].startswith('agent_'):
                 grandchild_spans = [s for s in self.spans if s['parent_span_id'] == child['span_id']]
-                for grandchild in grandchild_spans:
-                    if grandchild['name'].startswith('call_model'):
-                        return True
+                if any(g['name'].startswith('call_model') for g in grandchild_spans):
+                    return True
 
+            # New guardrail control-plane subgraph: children are llm_N / tools / gateway.
             child_metadata = self._get_span_metadata(child)
-            if child_metadata['langgraph_node'] == "tools":
+            node = child_metadata.get('langgraph_node')
+            if node in ("llm", "tools"):
+                return True
+            if child['name'].startswith('llm') or child['name'].startswith('tools'):
                 return True
 
         return False
@@ -88,11 +101,17 @@ class LogGenerator:
 
     def _process_llm_span(self, span, agent_name):
         call_model_child_spans = [s for s in self.spans if s['parent_span_id'] == span['span_id'] and s['name'].startswith('call_model')]
-        if len(call_model_child_spans) != 1:
-            print(f'Expected exactly one call_model child span for agent span {span["name"]}, found {len(call_model_child_spans)}:\n{[child["name"] for child in call_model_child_spans]}')
+        if len(call_model_child_spans) == 1:
+            # Legacy create_react_agent path: the LLM call is a call_model
+            # grandchild under an agent_* span.
+            span = call_model_child_spans[0]
+        elif len(call_model_child_spans) == 0:
+            # New guardrail control-plane subgraph: the llm_N span itself
+            # carries mlflow.spanOutputs in the shape we need.
+            pass
+        else:
+            print(f'Unexpected number of call_model children for {span["name"]}: {len(call_model_child_spans)}')
             return
-
-        span = call_model_child_spans[0]
 
         raw_output = span['attributes'].get('mlflow.spanOutputs')
         # prevent keyError if the simulation froze during an LLM call and was interrupted
@@ -188,10 +207,15 @@ class LogGenerator:
             agent_child_spans = [span for span in self.spans if span['parent_span_id'] == sub_agent_span['span_id']]
 
         for child_span in agent_child_spans:
-            if child_span['name'].startswith('agent'):
+            child_meta = self._get_span_metadata(child_span)
+            node = child_meta.get('langgraph_node')
+            name = child_span['name']
+
+            if node == "llm" or name.startswith('agent') or name.startswith('llm'):
                 self._process_llm_span(child_span, agent_name)
-            elif child_span['name'].startswith('tools'):
+            elif node == "tools" or name.startswith('tools'):
                 self._process_tool_span(child_span, agent_name)
+            # gateway / route_after_* / __start__ / __end__: skip silently
 
 
     def _process_root_span(self):
