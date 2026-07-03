@@ -87,14 +87,19 @@ class LogGenerator:
 
 
     def _process_llm_span(self, span, agent_name):
-        call_model_child_spans = [s for s in self.spans if s['parent_span_id'] == span['span_id'] and s['name'].startswith('call_model')]
-        if len(call_model_child_spans) != 1:
-            print(f'Expected exactly one call_model child span for agent span {span["name"]}, found {len(call_model_child_spans)}:\n{[child["name"] for child in call_model_child_spans]}')
-            return
+        # Modern MLflow LangChain autolog names the LLM span `llm` and carries
+        # the LangChain message envelope on it directly. Legacy autolog wrapped
+        # it in an `agent_*` span with a `call_model*` grandchild instead.
+        if span['name'] == 'llm':
+            target = span
+        else:
+            call_model_child_spans = [s for s in self.spans if s['parent_span_id'] == span['span_id'] and s['name'].startswith('call_model')]
+            if len(call_model_child_spans) != 1:
+                print(f'Expected exactly one call_model child span for agent span {span["name"]}, found {len(call_model_child_spans)}:\n{[child["name"] for child in call_model_child_spans]}')
+                return
+            target = call_model_child_spans[0]
 
-        span = call_model_child_spans[0]
-
-        raw_output = span['attributes'].get('mlflow.spanOutputs')
+        raw_output = target['attributes'].get('mlflow.spanOutputs')
         # prevent keyError if the simulation froze during an LLM call and was interrupted
         if raw_output is None:
             return
@@ -117,9 +122,9 @@ class LogGenerator:
         self.process_events.append({
             'case_id': self.case_id,
             'identity:id': str(uuid.uuid4()),
-            'time:timestamp': span['start_time_unix_nano'],
-            'time_finished': span['end_time_unix_nano'],
-            'duration': span['end_time_unix_nano']-span['start_time_unix_nano'],
+            'time:timestamp': target['start_time_unix_nano'],
+            'time_finished': target['end_time_unix_nano'],
+            'duration': target['end_time_unix_nano']-target['start_time_unix_nano'],
             'concept:instance': f'{agent_name} calls llm',
             'concept:name': 'call_llm',
             'org:resource': agent_name,
@@ -148,9 +153,15 @@ class LogGenerator:
         if tool_input.get('type', None) == 'tool_call':
             tool_name = tool_input.get('name', 'unknown_tool')
 
-        if tool_name.startswith('transfer_to_'):
-            return
-        
+        # Handovers were previously dropped here, which erased every
+        # order_agent → customer_service_agent transfer from the CSV. If a
+        # conversation's only tool call was a transfer (as happened for a
+        # handful of threads that then produced text-only replies), the trace
+        # collapsed to user_prompt + user_feedback and looked empty. Emit them
+        # as execute_tool rows so they're first-class events. Their event_type
+        # (event log) / ocel_type will be the tool name itself, e.g.
+        # `transfer_to_customer_service_agent`, distinct from the synthesised
+        # `<from>_handover_<to>` type used elsewhere.
         self.process_events.append({
             'case_id': self.case_id,
             'identity:id': str(uuid.uuid4()),
@@ -187,7 +198,7 @@ class LogGenerator:
             agent_child_spans = [span for span in self.spans if span['parent_span_id'] == sub_agent_span['span_id']]
 
         for child_span in agent_child_spans:
-            if child_span['name'].startswith('agent'):
+            if child_span['name'].startswith('agent') or child_span['name'] == 'llm':
                 self._process_llm_span(child_span, agent_name)
             elif child_span['name'].startswith('tools'):
                 self._process_tool_span(child_span, agent_name)

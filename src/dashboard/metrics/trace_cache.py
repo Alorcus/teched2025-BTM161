@@ -8,7 +8,9 @@ every MLflow trace into one canonical CSV (`_all_traces.csv`) on demand and
 keeps it in sync with the MLflow store via a row-count check.
 
 Trigger: `ensure_trace_cache()` runs on Metrics Dashboard page entry.
-Staleness rule: MLflow trace count != distinct case_id count in the cache.
+Staleness rule: rebuild when MLflow trace count != distinct case_id count in
+the cache, OR the extractor schema version in the sidecar differs from the
+current one (bumped whenever LogGenerator's row shape changes).
 """
 
 from __future__ import annotations
@@ -23,12 +25,21 @@ from src.trace_processing.trace_processor import TraceProcessor
 # directory — manually-exported CSVs are intentionally not part of the data
 # source any more.
 CACHE_FILENAME = "_all_traces.csv"
-# Sidecar that records the MLflow trace count this cache was built from.
-# We can't use distinct case_id count as the staleness signal because some
-# traces produce zero events (feedback-only traces with no LangGraph root)
-# and therefore contribute no case_id rows — comparing event-side cases to
-# MLflow's trace count would always disagree and force a rebuild every load.
+# Sidecar that records the MLflow trace count this cache was built from AND
+# the extractor's schema version. We can't use distinct case_id count as the
+# staleness signal because some traces produce zero events (feedback-only
+# traces with no LangGraph root) and therefore contribute no case_id rows —
+# comparing event-side cases to MLflow's trace count would always disagree
+# and force a rebuild every load.
 META_FILENAME = "_all_traces.meta"
+# Extractor schema version. Bump when LogGenerator's row shape changes so
+# already-built caches from an older extractor are treated as stale even when
+# the MLflow trace count hasn't moved. History:
+#   1 → initial (pre-transfer-to-* fix)
+#   2 → transfer_to_* handovers emitted as execute_tool rows
+#   3 → modern MLflow LangChain autolog: `llm` spans recognised; call_llm
+#       rows now populated (previously always zero for the current autolog)
+_SCHEMA_VERSION = 3
 
 
 def _mlflow_trace_count(tracking_uri: str) -> int:
@@ -54,21 +65,35 @@ def _mlflow_trace_count(tracking_uri: str) -> int:
     return total
 
 
-def _cached_trace_count(meta_path: Path) -> int:
-    """Trace count this cache was last built from, read from the sidecar
-    metadata file. Returns 0 if the file is missing or unreadable so the
-    caller treats the cache as stale."""
+def _cached_trace_count(meta_path: Path) -> tuple[int, int]:
+    """Return (trace_count, schema_version) recorded in the sidecar. Returns
+    (0, 0) if the file is missing, unreadable, or in the old single-line
+    format — either way the caller treats the cache as stale."""
     if not meta_path.exists():
-        return 0
+        return (0, 0)
     try:
-        return int(meta_path.read_text().strip())
-    except (OSError, ValueError):
-        return 0
+        raw = meta_path.read_text().strip()
+    except OSError:
+        return (0, 0)
+    lines = [ln for ln in raw.splitlines() if ln.strip()]
+    if not lines:
+        return (0, 0)
+    try:
+        trace_count = int(lines[0].strip())
+    except ValueError:
+        return (0, 0)
+    schema_version = 0
+    if len(lines) >= 2:
+        try:
+            schema_version = int(lines[1].strip())
+        except ValueError:
+            schema_version = 0
+    return (trace_count, schema_version)
 
 
 def _write_cache_meta(meta_path: Path, trace_count: int) -> None:
     try:
-        meta_path.write_text(f"{trace_count}\n")
+        meta_path.write_text(f"{trace_count}\n{_SCHEMA_VERSION}\n")
     except OSError:
         pass
 
@@ -132,10 +157,11 @@ def ensure_trace_cache(
     caller should render the empty-state template).
 
     Staleness compares MLflow's current trace count to the count recorded in
-    `_all_traces.meta` at the last successful rebuild. Comparing against the
-    cached *case* count would always disagree because some traces produce zero
-    events (e.g. feedback-only traces with no LangGraph root), which would
-    force a rebuild on every page entry.
+    `_all_traces.meta` at the last successful rebuild AND compares the
+    recorded extractor schema version to the current one. Comparing against
+    the cached *case* count would always disagree because some traces produce
+    zero events (e.g. feedback-only traces with no LangGraph root), which
+    would force a rebuild on every page entry.
     """
     log_dir.mkdir(parents=True, exist_ok=True)
     cache_path = log_dir / CACHE_FILENAME
@@ -151,8 +177,8 @@ def ensure_trace_cache(
     if mlflow_count == 0:
         return None
 
-    cached_count = _cached_trace_count(meta_path)
-    if cached_count != mlflow_count:
+    cached_count, cached_schema = _cached_trace_count(meta_path)
+    if cached_count != mlflow_count or cached_schema != _SCHEMA_VERSION:
         _rebuild_cache(log_dir, tracking_uri, mlflow_count)
 
     return cache_path if cache_path.exists() else None

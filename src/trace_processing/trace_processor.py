@@ -159,6 +159,21 @@ class TraceProcessor:
                 skipped_ingestions += 1
                 continue
 
+            # A trace that produced ONLY user_prompt rows and nothing else is
+            # a red flag: the conversation ran, the user turned up, but no
+            # agent-side event survived extraction. Handover-only threads used
+            # to look like this before the transfer_to_* fix landed; keeping
+            # the warning around means future extraction gaps stay visible
+            # instead of silently collapsing threads to user prompts + feedback.
+            non_agent_names = {"user_prompt"}
+            trace_event_types = set(trace_event_log["concept:name"].unique())
+            if trace_event_types.issubset(non_agent_names):
+                print(
+                    f"   ⚠️  Trace {trace_id} produced no agent-side events "
+                    f"(only {sorted(trace_event_types)}). Check for extraction "
+                    f"gaps in LogGenerator."
+                )
+
             combined_logs = pd.concat([combined_logs, trace_event_log], ignore_index=True)
             successful_ingestions += 1
 
