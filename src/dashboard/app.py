@@ -9,6 +9,7 @@ import panel as pn
 from src.coffee_shop import CoffeeShop
 from src.agents import CUSTOMER_SCENARIOS, build_default_prompt
 from src.agents.barista_agent import start_coffee_machine, stop_coffee_machine
+from src.control_plane.temporal_guardrail import _traces
 from .event_bus import EventBus, EventType, DashboardEvent
 from .agent_panel import AgentPanel
 from .conversation_runner import ConversationRunner
@@ -313,12 +314,14 @@ def _dispatch_event(
     elif event.event_type == EventType.CONVERSATION_START:
         _log(log_entries, conversation_log,
              f'<span style="color:#4CAF50"><b>START</b></span> {_truncate(event.content)}')
-
+    
     elif event.event_type == EventType.CONVERSATION_END:
+        thread_id = next(iter(_traces.keys()))
+        trace = _traces[thread_id] 
+        trace.end_session()    
         _log(log_entries, conversation_log,
-             '<span style="color:#F44336"><b>END</b></span> Conversation complete')
+            '<span style="color:#F44336"><b>END</b></span> Conversation complete')  
         tray_panel.clear()
-
 
 def _log(entries: list[str], pane, html_line: str):
     ts = time.strftime("%H:%M:%S")

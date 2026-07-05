@@ -3,51 +3,44 @@
 
 temporal_constraints:
   # Order processing must happen before inventory check
-  - id: "order_before_inventory"
-    constraint_type: "sequence"
-    antecedent: "process_order"
-    consequent: "check_inventory"
-    description: "Must process order before checking inventory"
-  
-  # Inventory check must happen before stock update
-  - id: "inventory_before_stock"
-    constraint_type: "sequence"
+  - id: "inventory_and_stock_update"
+    constraint_type: "coexistence"
     antecedent: "check_inventory"
     consequent: "update_stock"
-    description: "Must check inventory before updating stock"
-  
-  # Preparation must happen after inventory confirmation
-  - id: "inventory_before_preparation"
-    constraint_type: "precedence"
-    antecedent: "update_stock"
-    consequent: "start_preparation"
-    description: "Inventory must be confirmed before starting preparation"
-  
-  # Time-bound constraint: preparation must finish within 30 seconds of starting
-  - id: "preparation_timeout"
-    constraint_type: "time_bounded"
+    description: "If inventory is checked, the stock must be updated."
+
+  - id: "start_and_end_preparation"
+    constraint_type: "responded_existence"
     antecedent: "start_preparation"
     consequent: "end_preparation"
-    time_bound_seconds: 30
-    description: "Preparation must complete within 30 seconds"
+    description: "If preparation starts, it must end."
   
-  # Chain response: proper order flow
-  - id: "full_order_flow"
+  - id: "place_on_tray_or_end_preparation"
+    constraint_type: "choice"
+    antecedent: "place_on_tray"
+    consequent: "end_preparation"
+    description: "We need to place on tray or end preparation (at least one of them must happen)."
+
+  - id: "process_order_before_update_stock"
+    constraint_type: "precedence"
+    antecedent: "process_order"
+    consequent: "update_stock"
+    description: "We need to process the order before updating stock."
+
+  - id: "check_inventory_before_update_stock"
+    constraint_type: "chain_precedence"
+    antecedent: "check_inventory"
+    consequent: "update_stock"
+    description: "update_stock must be called immediately after check_inventory (no other tool in between)"
+
+  - id: "process_order_before_check_inventory"
     constraint_type: "chain_response"
     antecedent: "process_order"
     consequent: "check_inventory"
-    description: "Complete order flow: process → check inventory → update stock → start preparation → end preparation"
+    description: "check_inventory must be called immediately after process_order (no other tool in between)"
+
+
+
   
-  # Parallel: can check tray and check order concurrently (no constraint)
-  - id: "parallel_check"
-    constraint_type: "parallel"
-    antecedent: "check_tray"
-    consequent: "get_order"
-    description: "Can check tray and get order in any order"
+
   
-  # Choice: either offer refund OR offer partial refund (exclusive)
-  - id: "refund_choice"
-    constraint_type: "choice"
-    antecedent: "offer_refund"
-    consequent: "offer_partial_refund"
-    description: "Cannot offer both full and partial refund"
