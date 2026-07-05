@@ -2,7 +2,7 @@
 import unittest
 from unittest.mock import patch
 
-from src.dashboard.coffee_machine_panel import CoffeeMachinePanel, CoffeeMachineClient
+from src.dashboard.interaction.coffee_machine_panel import CoffeeMachinePanel, CoffeeMachineClient
 
 
 class FakeClient:

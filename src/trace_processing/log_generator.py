@@ -8,6 +8,17 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _is_langgraph_root(span_name: str) -> bool:
+    """MLflow autolog appends '_<n>' to the root span when the same LangGraph
+    instance is invoked multiple times in one process (e.g. 'LangGraph_1').
+    Accept the bare name and any numeric suffix."""
+    if not span_name:
+        return False
+    if span_name == 'LangGraph':
+        return True
+    return span_name.startswith('LangGraph_') and span_name[len('LangGraph_'):].isdigit()
+
+
 class LogGenerator:
     def generate_event_log_df(self, trace_source, coffee_machine_log_path=None) -> pd.DataFrame:
         self.process_events = []
@@ -34,7 +45,10 @@ class LogGenerator:
             raise Exception('Cannot locate spans in trace data!')
 
         # This is the root node of the LangGraph trace
-        self.langgraph_root_span = [span for span in self.spans if span['name'] == 'LangGraph'][0]
+        langgraph_roots = [span for span in self.spans if _is_langgraph_root(span['name'])]
+        if not langgraph_roots:
+            return pd.DataFrame()
+        self.langgraph_root_span = langgraph_roots[0]
         self.case_id = json.loads(self.langgraph_root_span['attributes']['metadata'])['thread_id']
 
         self._process_root_span()
@@ -49,21 +63,11 @@ class LogGenerator:
 
         # Create DataFrame from agent events
         dataframe = pd.DataFrame(self.process_events).sort_values(["time:timestamp"], ascending=True)
-        
-        # Load and merge coffee machine logs if provided
-        if coffee_machine_log_path:
-            coffee_machine_events = self._load_coffee_machine_logs(coffee_machine_log_path)
-            if coffee_machine_events:
-                # Convert coffee machine events to same format
-                coffee_df = pd.DataFrame(coffee_machine_events)
-                # Merge with main dataframe
-                dataframe = pd.concat([dataframe, coffee_df], ignore_index=True)
-                # Sort by timestamp again
-                dataframe = dataframe.sort_values(["time:timestamp"], ascending=True)
-        
-        # Format timestamps for output
-        dataframe['time_finished'] = ((dataframe['time:timestamp'] + dataframe['duration'].fillna(0))).apply(lambda t: pd.to_datetime(t, unit='ns').strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3])
-        dataframe['time:timestamp'] = dataframe['time:timestamp'].apply(lambda t: pd.to_datetime(t, unit='ns').strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3])
+        # if the trace was canceled before LLM answers
+        if 'duration' not in dataframe.columns:
+            dataframe['duration'] = None
+        dataframe['time_finished'] = ((dataframe['time:timestamp'] + dataframe['duration'].fillna(0))).apply(lambda t: pd.to_datetime(t).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3])
+        dataframe['time:timestamp'] = dataframe['time:timestamp'].apply(lambda t: pd.to_datetime(t).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3])
 
         return dataframe
 
@@ -135,7 +139,11 @@ class LogGenerator:
 
         span = call_model_child_spans[0]
 
-        span_output = json.loads(span['attributes']['mlflow.spanOutputs'])['messages'][0]
+        raw_output = span['attributes'].get('mlflow.spanOutputs')
+        # prevent keyError if the simulation froze during an LLM call and was interrupted
+        if raw_output is None:
+            return
+        span_output = json.loads(raw_output)['messages'][0]
 
         model_name = span_output.get('response_metadata', {}).get('model_name', None)
 
@@ -167,9 +175,20 @@ class LogGenerator:
         })
 
     def _process_tool_span(self, span, agent_name):
-        tool_input = json.loads(span['attributes'].get('mlflow.spanInputs', '[]'))[0]
+        parsed = json.loads(span['attributes'].get('mlflow.spanInputs', '[]'))
+        tool_input = None
+        if isinstance(parsed, list):
+            tool_input = parsed[0] if parsed else None
+        elif isinstance(parsed, dict) and 'messages' in parsed:
+            for msg in reversed(parsed['messages']):
+                if msg.get('type') == 'ai' and msg.get('tool_calls'):
+                    tool_input = msg['tool_calls'][0]
+                    break
+
+        if tool_input is None:
+            return
+
         tool_name = 'unknown_tool'
-        
         if tool_input.get('type', None) == 'tool_call':
             tool_name = tool_input.get('name', 'unknown_tool')
 
@@ -194,7 +213,7 @@ class LogGenerator:
 
         agent_name = None
 
-        if agent_span['name'] == 'LangGraph':
+        if _is_langgraph_root(agent_span['name']):
             agent_name = 'Agent'
         else:
             agent_name = agent_metadata['langgraph_node']

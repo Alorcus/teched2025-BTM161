@@ -41,7 +41,11 @@ tools:
   - transfer_to_agent
 guardrails:
   - allowed_handover_targets
+  - order_id_in_handoff
 guidelines:
   - handoff_etiquette
+  - handoff_order_id
 allowed_handovers:
   - customer_service_agent
+  - inventory_agent
+  - order_agent

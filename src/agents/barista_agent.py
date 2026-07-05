@@ -1,7 +1,10 @@
 import requests
 import json
+import os
+import signal
 import subprocess
 import socket
+import sys
 import time
 import threading
 from typing import Dict
@@ -11,6 +14,7 @@ from pathlib import Path
 logger = logging.getLogger("coffee_shop.barista_agent")
 
 from langchain_core.tools import tool
+from langchain_core.runnables import RunnableConfig
 
 from .shared_components import (
     OrderIdSchema,
@@ -18,6 +22,18 @@ from .shared_components import (
 )
 from .order_store import load_order
 from .order_state_machine import state_machine, InvalidTransitionError
+
+
+def _thread_id(config: RunnableConfig | None) -> str | None:
+    """Pull the LangGraph thread_id (== MLflow case_id) out of an injected config.
+
+    Production tools are invoked through `tool_node.invoke(state, config=config)`
+    so the config is always present. Tests that call `.invoke({...})` directly
+    skip the config; callers handle the None case explicitly.
+    """
+    if config is None:
+        return None
+    return (config.get("configurable") or {}).get("thread_id")
 
 
 COFFEE_MACHINE_URL = "http://127.0.0.1:8001"
@@ -65,10 +81,20 @@ def start_coffee_machine() -> bool:
             return False
 
         try:
-            import sys
-            # Use the current Python interpreter directly
-            python_executable = sys.executable
-            
+            # Run the server in its own process group / session so we can
+            # signal the whole group on shutdown. We launch via `poetry run
+            # uvicorn`, so a plain terminate() would only signal the poetry
+            # wrapper and leave the uvicorn grandchild listening on the port.
+            popen_kwargs: dict = {
+                "cwd": str(COFFEE_MACHINE_PATH),
+                "stdout": subprocess.PIPE,
+                "stderr": subprocess.PIPE,
+            }
+            if sys.platform == "win32":
+                popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+            else:
+                popen_kwargs["start_new_session"] = True
+
             COFFEE_MACHINE_PROCESS = subprocess.Popen(
                 [
                     python_executable,
@@ -80,12 +106,7 @@ def start_coffee_machine() -> bool:
                     "--host",
                     "127.0.0.1",
                 ],
-                cwd=str(COFFEE_MACHINE_PATH),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
-                if hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP")
-                else 0,
+                **popen_kwargs,
             )
 
             # Wait for startup
@@ -106,17 +127,59 @@ def start_coffee_machine() -> bool:
             return False
 
 
+def _kill_process_on_port(port: int) -> None:
+    """Kill any process listening on `port`. Best-effort; silent on failure.
+
+    Catches the cross-run leak where COFFEE_MACHINE_PROCESS is None (a previous
+    Python process started the server) but a uvicorn is still bound to the port.
+    """
+    if sys.platform == "win32":
+        return
+    try:
+        out = subprocess.run(
+            ["fuser", "-k", f"{port}/tcp"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return
+
+
 def stop_coffee_machine():
     """Stop the coffee machine subprocess (optional, for cleanup)."""
     global COFFEE_MACHINE_PROCESS
     with _MACHINE_LOCK:
         if COFFEE_MACHINE_PROCESS:
-            COFFEE_MACHINE_PROCESS.terminate()
+            proc = COFFEE_MACHINE_PROCESS
+            # Signal the whole process group so the uvicorn grandchild dies
+            # together with the `poetry run` wrapper.
             try:
-                COFFEE_MACHINE_PROCESS.wait(timeout=5)
+                if sys.platform == "win32":
+                    proc.send_signal(signal.CTRL_BREAK_EVENT)
+                else:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            except (ProcessLookupError, OSError):
+                # Group already gone; fall through to wait().
+                pass
+
+            try:
+                proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                COFFEE_MACHINE_PROCESS.kill()
+                try:
+                    if sys.platform == "win32":
+                        proc.kill()
+                    else:
+                        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                except (ProcessLookupError, OSError):
+                    pass
+                proc.wait(timeout=2)
             COFFEE_MACHINE_PROCESS = None
+
+        # Cross-run safety: if the port is still bound (e.g. a leak from a
+        # previous Python process), nuke whoever's holding it.
+        if check_port_in_use(COFFEE_MACHINE_PORT):
+            _kill_process_on_port(COFFEE_MACHINE_PORT)
 
 
 # ----------------------------
@@ -158,7 +221,7 @@ def tool_response(status, message, order_id: str, extra=None):
 # MACHINE TOOLS
 # ----------------------------
 @tool(args_schema=OrderIdSchema)
-def start_preparation(order_id: str) -> str:
+def start_preparation(order_id: str, config: RunnableConfig = None) -> str:
     """Start coffee preparation and automatically wait for completion."""
     logger.debug("start_preparation called for %s", order_id)
 
@@ -195,8 +258,21 @@ def start_preparation(order_id: str) -> str:
 
     # Start brewing — use the first item's name as the drink type
     drink_name = order.items[0].name if order.items else "coffee"
+    # The coffee machine writes events to its CSV keyed by `correlation_id` —
+    # which the trace processor merges into the export only if it matches a
+    # LangGraph thread_id (the MLflow case_id). Pass thread_id, not order_id.
+    thread_id = _thread_id(config)
+    if thread_id is None:
+        logger.warning(
+            "start_preparation invoked without thread_id in config; "
+            "coffee-machine rows for order %s will not merge into the export.",
+            order_id,
+        )
+        correlation_id = order_id
+    else:
+        correlation_id = thread_id
     response = safe_post(
-        f"{COFFEE_MACHINE_URL}/brew", {"drink": drink_name, "correlation_id": order_id}
+        f"{COFFEE_MACHINE_URL}/brew", {"drink": drink_name, "correlation_id": correlation_id}
     )
 
     if response is None:
@@ -366,14 +442,23 @@ def estimate_prep_time(order_id: str) -> str:
 
 
 @tool
-def clean_machine() -> str:
+def clean_machine(config: RunnableConfig = None) -> str:
     """Clean the coffee machine after a brew failure to prevent contamination."""
     logger.debug("clean_machine called")
 
     if not is_machine_running():
         return json.dumps({"status": "error", "message": "Coffee machine is not available."})
 
-    response = safe_post(f"{COFFEE_MACHINE_URL}/clean", {})
+    thread_id = _thread_id(config)
+    if thread_id is None:
+        logger.warning(
+            "clean_machine invoked without thread_id in config; "
+            "clean event will not merge into the export."
+        )
+        correlation_id = "unknown"
+    else:
+        correlation_id = thread_id
+    response = safe_post(f"{COFFEE_MACHINE_URL}/clean", {"correlation_id": correlation_id})
     if response is None:
         return json.dumps({"status": "error", "message": "Coffee machine unreachable."})
 

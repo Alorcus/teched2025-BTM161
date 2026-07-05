@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-SAP TechEd 2025 hands-on session (BTM161): a multi-agent coffee shop system that demonstrates process mining of LLM-based agents using SAP Signavio Process Intelligence. Five specialized agents (Order, Inventory, Barista, Customer Service, Customer) collaborate via LangGraph Swarm, with interactions logged via MLflow for trace analysis.
+A multi-agent coffee shop system that demonstrates process mining of LLM-based agents. Five specialized agents (Order, Inventory, Barista, Customer Service, Customer) collaborate via LangGraph Swarm, with interactions logged via MLflow for trace analysis.
 
 ## Tech Stack
 
@@ -64,6 +64,22 @@ LLM provider is configured via a `.env` file (see `.env.example`). Set `LLM_PROV
 - The Customer Agent drives conversations externally — it is not part of the swarm graph
 - Order status lifecycle: `pending → inventory_confirmed → completed/preparation_error → refunded`
 - MLflow traces are stored under `./mlruns/` and converted to XES-compatible CSV event logs in `./generated_event_log/`
+
+## Customer Feedback
+
+After each conversation, `CustomerAgent.get_feedback()` invokes the LLM to rate service quality from the customer perspective. The result is a structured record with:
+
+- `feedback_score` — float `0.0–1.0` (anchors: `1.0` excellent, `0.5` acceptable, `0.0` poor)
+- `feedback_reason` — short free-text explanation
+- `valid` — whether the LLM response parsed cleanly (falls back to `0.5` if not)
+
+Feedback is persisted to `./feedback_store.json` keyed by `thread_id` (the conversation UUID, identical to `case_id` in the event log). During log export, `TraceProcessor` injects exactly one `customer_feedback` event at the end of each case. Both the headless `simulate` path and the `dashboard` runner capture feedback.
+
+To export event logs with feedback after a dashboard session:
+
+```bash
+python3 -c "from src.trace_processing import TraceProcessor; TraceProcessor().process_all_traces()"
+```
 
 ## Branch Naming
 

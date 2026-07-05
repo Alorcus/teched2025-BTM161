@@ -1,0 +1,111 @@
+name: coffee_shop_order_v3
+# Activities mirror docs/order-process-w-compliant.bpmn (BPMN: Coffee Shop pool).
+# IDs A01..A07 follow the order-processing branch; A08..A10 cover the
+# complaint sub-process introduced by the XOR after Identify Customer Request.
+#
+# Disambiguation notes (handled in supervisor._deterministic_pick):
+#   - (order_agent, message): A01 (entry) vs A07 (handout, terminal)
+#       → A07 once any AND-split branch (A04/A05/A05b/A06) has fired.
+#   - (customer_service_agent, message): A08 (investigate, entry) vs A10 (reject, terminal)
+#       → A10 once an Execution:A08 has fired (i.e. investigation already started).
+
+activities:
+  # --- Order-processing branch ---
+
+  - id: A01
+    name: identify_customer_request
+    display_name: Identify Customer Request
+    agent: order_agent
+    trigger: message
+    terminal: false
+
+  - id: A02
+    name: create_order
+    display_name: Create Order
+    agent: order_agent
+    trigger: tool_call
+    tool: process_order
+    terminal: false
+
+  - id: A03
+    name: check_stock
+    display_name: Check Stock
+    agent: inventory_agent
+    trigger: tool_call
+    tool: check_inventory
+    terminal: false
+
+  # --- AND-split: A04, A05, A06 run in parallel after Check Stock ---
+
+  - id: A04
+    name: place_food_on_tray
+    display_name: Place Food on Tray
+    agent: inventory_agent
+    trigger: tool_call
+    tool: place_on_tray
+    terminal: false
+
+  - id: A05
+    name: brew_coffee
+    display_name: Brew Coffee
+    agent: barista_agent
+    trigger: tool_call
+    tool: start_preparation
+    terminal: false
+
+  - id: A05b
+    name: brew_coffee
+    display_name: Brew Coffee
+    agent: barista_agent
+    trigger: tool_call
+    tool: end_preparation
+    terminal: false
+
+  - id: A06
+    name: purchase_order
+    display_name: Purchase Order
+    agent: order_agent
+    trigger: tool_call
+    tool: calculate_total
+    terminal: false
+
+  # --- AND-join, then sequential suffix ---
+
+  - id: A07
+    name: handout_order
+    display_name: Handout Order
+    agent: order_agent
+    trigger: message
+    terminal: true
+
+  # --- Complaint branch (Customer Service Agent lane) ---
+
+  - id: A08
+    name: investigate_complaint
+    display_name: Investigate into Customer Complaint
+    agent: customer_service_agent
+    trigger: message
+    terminal: false
+
+  - id: A09
+    name: offer_refund
+    display_name: Offer Refund
+    agent: customer_service_agent
+    trigger: tool_call
+    tool: offer_refund
+    terminal: true
+
+  - id: A09b
+    name: offer_refund
+    display_name: Offer Refund
+    agent: customer_service_agent
+    trigger: tool_call
+    tool: offer_partial_refund
+    terminal: true
+
+  - id: A10
+    name: reject_complaint
+    display_name: Reject Complaint
+    agent: customer_service_agent
+    trigger: message
+    terminal: true

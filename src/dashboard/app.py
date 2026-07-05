@@ -1,357 +1,148 @@
-import atexit
-import html as html_mod
-import json
 import logging
+import argparse
+import os
+import signal
+import sys
 import time
 
 import panel as pn
+import psutil
 
-from src.coffee_shop import CoffeeShop
-from src.agents import CUSTOMER_SCENARIOS, build_default_prompt
-from src.agents.barista_agent import start_coffee_machine, stop_coffee_machine
-from src.control_plane.temporal_guardrail import _traces
-from .event_bus import EventBus, EventType, DashboardEvent
-from .agent_panel import AgentPanel
-from .conversation_runner import ConversationRunner
-from .stock_panel import StockPanel
-from .coffee_machine_panel import CoffeeMachinePanel
-from .tray_panel import TrayPanel
+from src.setups import list_setups, resolve_setup_name, setup_dir
 
-logger = logging.getLogger("coffee_shop.dashboard")
+from .interaction import create_observatory_dashboard
+from .metrics import create_metrics_dashboard
+from .trace_app import create_trace_dashboard
 
 
-class _EventBusLogHandler(logging.Handler):
-    """Forwards Python log records to the dashboard event bus."""
+DASHBOARD_PORT = 5006
 
-    def __init__(self, event_bus: EventBus):
-        super().__init__(level=logging.DEBUG)
-        self._event_bus = event_bus
-
-    def emit(self, record: logging.LogRecord):
-        agent = record.name.replace("coffee_shop.", "").split(".")[0]
-        self._event_bus.publish(DashboardEvent(
-            event_type=EventType.LOG_MESSAGE,
-            agent_name=agent,
-            content=record.getMessage(),
-            log_level=record.levelno,
-        ))
-
-def _agent_registry_from_repo(shop: CoffeeShop) -> dict[str, dict]:
-    """Read agent prompts/tool-names from the Agent Repo set up during open_shop()."""
-    repo = shop.agent_repo
-    if repo is None:
-        return {}
-    return {
-        agent_id: {
-            "prompt": d.base_prompt,
-            "tools": list(d.tools),
-        }
-        for agent_id, d in repo.all().items()
-    }
+logger = logging.getLogger("coffee_shop.dashboard.app")
 
 
-def create_dashboard():
-    pn.extension(sizing_mode="stretch_both")
+def _reclaim_port_if_orphaned(port: int) -> None:
+    """If `port` is held by a leaked previous dashboard owned by the current
+    user, kill it. If held by an unrelated process, raise SystemExit with a
+    clear message instead of letting bind() fail with a cryptic OSError 98.
+    """
+    holders: list[psutil.Process] = []
+    try:
+        tcp_connections = psutil.net_connections(kind="tcp")
+    except psutil.AccessDenied:
+        return
+    for conn in tcp_connections:
+        if (
+            conn.status == psutil.CONN_LISTEN
+            and conn.laddr
+            and conn.laddr.port == port
+            and conn.pid is not None
+        ):
+            try:
+                holders.append(psutil.Process(conn.pid))
+            except psutil.NoSuchProcess:
+                pass
 
-    shop = CoffeeShop()
-    shop.open_shop()
-    event_bus = EventBus()
-    runner = ConversationRunner(shop, event_bus)
-    agent_registry = _agent_registry_from_repo(shop)
-
-    coffee_shop_logger = logging.getLogger("coffee_shop")
-    coffee_shop_logger.setLevel(logging.DEBUG)
-    coffee_shop_logger.addHandler(_EventBusLogHandler(event_bus))
-
-    start_coffee_machine()
-    atexit.register(stop_coffee_machine)
-
-    stock_panel = StockPanel()
-    coffee_machine_panel = CoffeeMachinePanel()
-    tray_panel = TrayPanel()
-
-    agent_panels: dict[str, AgentPanel] = {}
-    for agent_name, config in shop.agent_config.items():
-        if agent_name == "user":
-            continue
-        reg = agent_registry.get(agent_name, {})
-        agent_panels[agent_name] = AgentPanel(
-            agent_name=agent_name,
-            config=config,
-            system_prompt=reg.get("prompt", ""),
-            tools=reg.get("tools", []),
-        )
-
-    grid = pn.GridSpec(ncols=2, nrows=2, sizing_mode="stretch_both",
-                       styles={"gap": "5px"})
-    positions = [(0, 0), (0, 1), (1, 0), (1, 1)]
-    for (agent_name, panel_obj), (r, c) in zip(agent_panels.items(), positions):
-        grid[r, c] = panel_obj.panel()
-
-    scenario_labels = [
-        "Latte & croissant (friendly)",
-        "2 espressos (in a hurry)",
-        "Complaint (cold cappuccino)",
-        "Ask for a recommendation",
-    ]
-    scenario_options = {
-        f"{i}: {scenario_labels[i]}": i for i in range(len(CUSTOMER_SCENARIOS))
-    }
-    scenario_select = pn.widgets.Select(
-        name="", options=scenario_options, sizing_mode="stretch_width",
-        margin=(0, 0, 5, 0),
-    )
-
-    log_level_options = {"DEBUG": 10, "INFO": 20, "WARNING": 30, "ERROR": 40}
-    log_level_select = pn.widgets.Select(
-        name="", options=log_level_options, value=20,
-        sizing_mode="stretch_width", margin=(0, 0, 5, 0),
-    )
-    prompt_textarea = pn.widgets.TextAreaInput(
-        name="Customer Prompt",
-        value=build_default_prompt(0),
-        height=200,
-        sizing_mode="stretch_width",
-        margin=(0, 0, 10, 0),
-    )
-
-    def on_scenario_change(event):
-        prompt_textarea.value = build_default_prompt(event.new)
-
-    scenario_select.param.watch(on_scenario_change, "value")
-
-    run_button = pn.widgets.Button(
-        name="Run Conversation", button_type="primary", sizing_mode="stretch_width"
-    )
-    status_indicator = pn.indicators.LoadingSpinner(value=False, size=25)
-    conversation_log = pn.pane.HTML(
-        '<div style="font-size:12px;color:#999;">No conversation yet.</div>',
-        sizing_mode="stretch_both",
-        styles={"overflow-y": "auto", "flex": "1"},
-    )
-    log_entries: list[str] = []
-
-    def on_run(event):
-        if runner.is_running:
-            return
-        for p in agent_panels.values():
-            p.reset()
-        log_entries.clear()
-        conversation_log.object = ""
-        status_indicator.value = True
-        runner.start(scenario_index=scenario_select.value, custom_prompt=prompt_textarea.value)
-
-    run_button.on_click(on_run)
-
-    def poll_events():
-        events = event_bus.drain()
-        for ev in events:
-            _dispatch_event(ev, agent_panels, log_entries, conversation_log,
-                            coffee_machine_panel, tray_panel, log_level_select.value)
-        if not runner.is_running and not events:
-            status_indicator.value = False
-        stock_panel.refresh()
-        coffee_machine_panel.update_progress()
-
-    sidebar = pn.Column(
-        pn.Row(
-            pn.Column(
-                pn.pane.HTML('<label style="font-size:13px;font-weight:500;">Scenario</label>',
-                             sizing_mode="stretch_width", margin=(0, 0, 2, 0)),
-                scenario_select,
-                sizing_mode="stretch_width", styles={"flex": "2"},
-            ),
-            pn.Column(
-                pn.pane.HTML('<label style="font-size:13px;font-weight:500;">Log Level</label>',
-                             sizing_mode="stretch_width", margin=(0, 0, 2, 0)),
-                log_level_select,
-                sizing_mode="stretch_width", styles={"flex": "1"},
-            ),
-            sizing_mode="stretch_width", margin=(0, 0, 5, 0),
-            styles={"gap": "5px"},
-        ),
-        prompt_textarea,
-        run_button,
-        pn.Row(status_indicator, pn.pane.Markdown("", width=10)),
-        pn.layout.Divider(),
-        pn.pane.HTML('<label style="font-size:14px;font-weight:600;margin-bottom:8px;display:block;">Conversation Log</label>',
-                     sizing_mode="stretch_width"),
-        conversation_log,
-        width=340,
-        sizing_mode="stretch_height",
-        styles={"display": "flex", "flex-direction": "column"},
-    )
-
-    template = pn.template.FastListTemplate(
-        title="Coffee Shop Agent Observatory",
-        sidebar=[sidebar],
-        main=[pn.Column(
-            pn.Row(
-                pn.Column(tray_panel.panel(), width=160, height=160),
-                pn.Column(stock_panel.panel(), sizing_mode="stretch_both", styles={"flex": "2"}),
-                pn.Column(coffee_machine_panel.panel(), sizing_mode="stretch_width", styles={"flex": "1"}),
-                sizing_mode="stretch_width",
-            ),
-            grid, sizing_mode="stretch_both",
-        )],
-        accent_base_color="#795548",
-        header_background="#4E342E",
-        theme="default",
-    )
-
-    # Register periodic callback after template is built — Panel will attach it
-    # to the document when served.
-    pn.state.add_periodic_callback(poll_events, period=100)
-
-    return template
-
-
-def _dispatch_event(
-    event, agent_panels: dict[str, AgentPanel],
-    log_entries: list[str], conversation_log,
-    coffee_machine_panel: CoffeeMachinePanel,
-    tray_panel: TrayPanel,
-    min_log_level: int = 20,
-):
-    panel = agent_panels.get(event.agent_name)
-
-    if event.event_type == EventType.LOG_MESSAGE:
-        if event.log_level >= min_log_level:
-            level_name = logging.getLevelName(event.log_level)
-            color = {
-                "DEBUG": "#9E9E9E",
-                "INFO": "#2196F3",
-                "WARNING": "#FF9800",
-                "ERROR": "#F44336",
-            }.get(level_name, "#666")
-            _log(log_entries, conversation_log,
-                 f'<span style="font-family:monospace;font-size:11px;color:{color};'
-                 f'border-left:3px solid {color};padding-left:6px;">'
-                 f'[{level_name}] {event.agent_name}: '
-                 f'{_truncate(event.content, 120)}</span>')
+    if not holders:
         return
 
-    if event.event_type == EventType.AGENT_THINKING:
-        if panel:
-            if event.content == "thinking":
-                panel.set_status("thinking")
-            else:
-                panel.set_status("idle")
+    current_uid = os.getuid() if hasattr(os, "getuid") else None
+    for proc in holders:
+        try:
+            cmdline = " ".join(proc.cmdline())
+            owner_uid = proc.uids().real if hasattr(proc, "uids") else None
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
 
-    elif event.event_type == EventType.AGENT_MESSAGE:
-        if panel:
-            panel.set_status("idle")
-            panel.add_message("ai", event.content)
-        _log(log_entries, conversation_log,
-             f'<span style="color:{panel.color if panel else "#333"}">'
-             f'<b>{event.agent_name}</b></span>: {_truncate(event.content)}')
+        is_ours = current_uid is None or owner_uid == current_uid
+        looks_like_dashboard = "dashboard" in cmdline and "python" in cmdline.lower()
 
-    elif event.event_type == EventType.TOOL_CALL:
-        if panel:
-            panel.set_status("executing_tool")
-            panel.add_tool_call(event.tool_name or "?", event.tool_args)
-        if event.tool_name == "start_preparation":
-            coffee_machine_panel.start_brewing("coffee")
-
-    elif event.event_type == EventType.TOOL_RESULT:
-        if panel:
-            panel.set_status("idle")
-            panel.set_tool_result(event.tool_name or "?", event.tool_result or "")
-            panel.add_message("tool", f"{event.tool_name}: {_truncate(event.tool_result or '', 100)}")
-        if event.tool_name == "end_preparation" and event.tool_result:
-            try:
-                result_data = json.loads(event.tool_result)
-                status = result_data.get("status", "")
-                if status == "ready":
-                    coffee_machine_panel.complete(True)
-                elif status == "contaminated":
-                    coffee_machine_panel.complete(True)
-                elif status in ("failed", "error"):
-                    coffee_machine_panel.complete(False)
-                    coffee_machine_panel.mark_dirty()
-            except (json.JSONDecodeError, TypeError):
-                pass
-        elif event.tool_name == "clean_machine" and event.tool_result:
-            try:
-                result_data = json.loads(event.tool_result)
-                if result_data.get("status") in ("cleaned", "already_clean"):
-                    coffee_machine_panel.reset()
-            except (json.JSONDecodeError, TypeError):
-                pass
-        elif event.tool_name == "place_on_tray" and event.tool_result:
-            try:
-                result_data = json.loads(event.tool_result)
-                order_id = result_data.get("order_id")
-                if order_id:
-                    tray_panel.refresh(order_id)
-            except (json.JSONDecodeError, TypeError):
-                pass
-
-    elif event.event_type == EventType.HANDOFF:
-        if panel:
-            panel.set_status("handed_off")
-        target = agent_panels.get(event.target_agent or "")
-        if target and event.handoff_context:
-            target.set_handoff(event.handoff_context)
-            target.add_message(
-                "handoff",
-                f"[From {event.handoff_context.get('from_agent', '?')}] "
-                f"{event.handoff_context.get('context_summary', '')}",
+        if is_ours and looks_like_dashboard:
+            logger.warning(
+                "Found orphaned dashboard pid=%s on port %s; killing it.",
+                proc.pid,
+                port,
             )
-        _log(log_entries, conversation_log,
-             f'<span style="color:#9C27B0"><b>HANDOFF</b></span> '
-             f'{event.agent_name} → {event.target_agent}')
+            try:
+                proc.send_signal(signal.SIGTERM)
+                proc.wait(timeout=5)
+            except psutil.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=2)
+            except psutil.NoSuchProcess:
+                pass
+        else:
+            raise SystemExit(
+                f"Port {port} is held by an unrelated process "
+                f"(pid={proc.pid}, cmd={cmdline!r}). "
+                f"Free the port (e.g. `kill {proc.pid}`) before starting the dashboard."
+            )
 
-    elif event.event_type == EventType.CUSTOMER_MESSAGE:
-        _log(log_entries, conversation_log,
-             f'<span style="color:#424242"><b>Customer</b></span>: '
-             f'{_truncate(event.content)}')
-
-    elif event.event_type == EventType.USER_VISIBLE:
-        if panel:
-            panel.add_message("user", event.content)
-
-    elif event.event_type == EventType.CONVERSATION_START:
-        _log(log_entries, conversation_log,
-             f'<span style="color:#4CAF50"><b>START</b></span> {_truncate(event.content)}')
-    
-    elif event.event_type == EventType.CONVERSATION_END:
-        thread_id = next(iter(_traces.keys()))
-        trace = _traces[thread_id] 
-        trace.end_session()    
-        _log(log_entries, conversation_log,
-            '<span style="color:#F44336"><b>END</b></span> Conversation complete')  
-        tray_panel.clear()
-
-def _log(entries: list[str], pane, html_line: str):
-    ts = time.strftime("%H:%M:%S")
-    entries.append(
-        f'<div style="padding:2px 0;border-bottom:1px solid #f0f0f0;font-size:12px;">'
-        f'<span style="color:#999;margin-right:6px;">{ts}</span>{html_line}</div>'
-    )
-    pane.object = "\n".join(entries[-50:])
-
-
-def _truncate(text: str, max_len: int = 150) -> str:
-    text = text.replace("\n", " ").strip()
-    full_escaped = html_mod.escape(text)
-    if len(text) > max_len:
-        short = html_mod.escape(text[:max_len]) + "..."
-        return f'<span title="{full_escaped}">{short}</span>'
-    return full_escaped
+    # Give the kernel a moment to release the socket.
+    for _ in range(20):
+        if not any(
+            c.status == psutil.CONN_LISTEN and c.laddr and c.laddr.port == port
+            for c in psutil.net_connections(kind="tcp")
+        ):
+            return
+        time.sleep(0.1)
 
 
 def main():
+    """Start the multi-page Panel dashboard server."""
+    parser = argparse.ArgumentParser(
+        description="Coffee Shop Agent Observatory dashboard"
+    )
+    parser.add_argument(
+        "--setup",
+        type=str,
+        default=None,
+        help="Name of the setup under config/setups/ to load.",
+    )
+    parser.add_argument(
+        "--list-setups",
+        action="store_true",
+        help="List available setups under config/setups/ and exit.",
+    )
+    args = parser.parse_args()
+
+    if args.list_setups:
+        names = list_setups()
+        if not names:
+            print("(no setups found in config/setups/)")
+        else:
+            for name in names:
+                print(name)
+        return 0
+
+    setup_name = resolve_setup_name(args.setup)
+    setup_dir(setup_name)  # fail fast if the setup is missing or malformed
+
     logging.getLogger("bokeh.server.views.static_handler").setLevel(logging.WARNING)
     logging.getLogger("tornado.access").setLevel(logging.WARNING)
+
+    _reclaim_port_if_orphaned(DASHBOARD_PORT)
+
+    # Multi-page routing
+    routes = {
+        "/": lambda: create_observatory_dashboard(setup_name),
+        "/metrics": create_metrics_dashboard,
+        "/trace": create_trace_dashboard,
+    }
+
     pn.serve(
-        create_dashboard,
-        port=5006,
+        routes,
+        port=DASHBOARD_PORT,
         show=False,
-        title="Coffee Shop Agent Observatory",
+        title=f"Coffee Shop Agent Observatory — {setup_name}",
     )
-    print("Dashboard running at http://localhost:5006")
+    print(
+        f"Dashboard running at http://localhost:{DASHBOARD_PORT} (setup: {setup_name})"
+    )
+    print(f"  - Interaction: http://localhost:{DASHBOARD_PORT}/")
+    print(f"  - Metrics:     http://localhost:{DASHBOARD_PORT}/metrics")
+    print(f"  - Trace:       http://localhost:{DASHBOARD_PORT}/trace")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

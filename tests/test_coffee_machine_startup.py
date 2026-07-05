@@ -67,7 +67,11 @@ class TestCoffeeMachineStartup(unittest.TestCase):
         self.assertIn(resp.json()["status"], ("brewing", "ready", "failed"))
 
     def test_clean_endpoint(self):
-        resp = requests.post(f"{COFFEE_MACHINE_URL}/clean", json={}, timeout=3)
+        resp = requests.post(
+            f"{COFFEE_MACHINE_URL}/clean",
+            json={"correlation_id": "test-clean"},
+            timeout=3,
+        )
         self.assertEqual(resp.status_code, 200)
         self.assertIn(resp.json()["status"], ("cleaned", "already_clean"))
 
@@ -88,10 +92,18 @@ class TestCoffeeMachineShutdown(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
 
         stop_coffee_machine()
-        time.sleep(1)
 
-        with self.assertRaises(requests.ConnectionError):
-            requests.get(f"{COFFEE_MACHINE_URL}/healthz", timeout=2)
+        # Poll until the server stops listening — fixed sleeps were flaky on
+        # slow shutdowns (process teardown + OS port release can exceed 1 s).
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            try:
+                requests.get(f"{COFFEE_MACHINE_URL}/healthz", timeout=1)
+            except requests.ConnectionError:
+                return
+            time.sleep(0.1)
+
+        self.fail("server still accepting connections 5s after stop_coffee_machine()")
 
 
 if __name__ == "__main__":

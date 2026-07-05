@@ -5,7 +5,7 @@ Validates publish/drain ordering and thread safety.
 import threading
 import unittest
 
-from src.dashboard.event_bus import EventBus, DashboardEvent, EventType
+from src.dashboard.interaction.event_bus import EventBus, DashboardEvent, EventType
 
 
 class TestEventBusPublishAndDrain(unittest.TestCase):

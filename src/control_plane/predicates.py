@@ -1,4 +1,8 @@
+import re
+
 from .types import Effect, GuardrailContext, Verdict
+
+_ORDER_ID_RE = re.compile(r"\bORD\d{3,}\b")
 
 
 def allowed_handover_targets_predicate(context: GuardrailContext) -> Verdict:
@@ -44,3 +48,34 @@ def discount_within_limit_predicate(max_pct: int):
         )
 
     return _eval
+
+
+def transfer_includes_order_id_predicate(context: GuardrailContext) -> Verdict:
+    """Hard guardrail: FLAG if transfer_to_agent does not include an ORD#### order id."""
+
+    summary = str(context.tool_args.get("context_summary", ""))
+    if _ORDER_ID_RE.search(summary):
+        return Verdict(
+            effect=Effect.ALLOW,
+            guardrail_name="",
+            guardrail_type="",
+            reason_internal="transfer includes order_id",
+        )
+    return Verdict(
+        effect=Effect.FLAG,
+        guardrail_name="",
+        guardrail_type="",
+        reason_internal="transfer missing order_id (flagged, not blocked)",
+        reason_for_llm=(
+            "When transferring to another agent, always include the order id so the next agent can look up order details."
+            " Include the order id when handing over in this pattern: ORDXXXX"
+        ),
+    )
+
+
+PREDICATE_REGISTRY = {
+    "allowed_handover_targets": allowed_handover_targets_predicate,
+    "discount_within_limit": discount_within_limit_predicate,
+    "transfer_includes_order_id": transfer_includes_order_id_predicate,
+    "transfer_includes_order_id": transfer_includes_order_id_predicate,
+}

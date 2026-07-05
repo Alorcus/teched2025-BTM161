@@ -13,11 +13,17 @@ services/coffee_machine/logs/
 generated_visualizations/
 
 event_logs/
+process_log/
+
+feedback_store.json
 
 # Python cache
 __pycache__/
 *.pyc
 *.pyo
+
+# uv lockfile
+uv.lock
 
 .DS_Store
 dev.ipynb

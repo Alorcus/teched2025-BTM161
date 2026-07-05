@@ -1,4 +1,8 @@
-from dataclasses import dataclass, field, asdict
+import logging
+
+from dataclasses import dataclass, asdict
+
+logger = logging.getLogger("coffee_shop.tray")
 
 _trays: dict[str, list["TrayEntry"]] = {}
 
@@ -16,6 +20,7 @@ def place_on_tray(order_id: str, item_name: str, quantity: int, category: str, c
     if order_id not in _trays:
         _trays[order_id] = []
     _trays[order_id].append(entry)
+    logger.debug(f"Item placed on tray for order {order_id}: {entry}")
     return tray_as_list(order_id)
 
 
@@ -24,6 +29,7 @@ def get_tray(order_id: str) -> list[TrayEntry]:
 
 
 def clear_tray(order_id: str) -> None:
+    logger.debug(f"Clearing tray for order {order_id}")
     _trays.pop(order_id, None)
 
 

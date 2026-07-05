@@ -1,7 +1,10 @@
+import json
+import re
 import random
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 
 from ..llm import normalize_content
+
 
 CUSTOMER_SCENARIOS = [
     "You want to order a large latte and a croissant. Be friendly.",
@@ -41,8 +44,10 @@ class CustomerAgent:
         self.custom_prompt = custom_prompt
         if scenario_index is not None and 0 <= scenario_index < len(CUSTOMER_SCENARIOS):
             self.scenario = CUSTOMER_SCENARIOS[scenario_index]
+            self.scenario_index = scenario_index
         else:
             self.scenario = random.choice(CUSTOMER_SCENARIOS)
+            self.scenario_index = CUSTOMER_SCENARIOS.index(self.scenario)
 
     def _system_prompt(self):
         if self.custom_prompt:
@@ -57,6 +62,58 @@ Guidelines:
 - Respond directly to what the staff last said.
 - When your order is confirmed ready OR your complaint is fully resolved, reply with exactly one word: DONE
 """
+
+    def get_feedback(self) -> dict:
+        """Generate a subjective customer satisfaction rating based on the completed conversation."""
+        history_text = "\n".join(
+            f"{'You' if r == 'customer' else 'Staff'}: {c}"
+            for r, c in self.history
+            if r in ("customer", "agent")
+        )
+        messages = [
+            SystemMessage(content=(
+                "You are a customer at a coffee shop. You just finished a conversation with the staff.\n"
+                "Rate the quality of service from your subjective customer perspective on a scale from 0.0 to 1.0.\n"
+                "Use these anchors to calibrate your score:\n"
+                "- 1.0: excellent — smooth and successful, received exactly what was requested or a well-communicated alternative\n"
+                "- 0.5: acceptable — minor issues, small substitutions, or slight friction, but still okay overall\n"
+                "- 0.0: poor — wrong item, no communication about substitution, long wait, confusing interaction, or unresolved complaint\n"
+                "You may use any value between 0.0 and 1.0, e.g. 0.7 for mostly good but one small issue.\n"
+                'Return only valid JSON in this exact format:\n'
+                '{"score": 0.85, "reason": "short explanation"}'
+            )),
+            HumanMessage(content=f"Your conversation:\n{history_text}\n\nYour rating:"),
+        ]
+        response = self.llm.invoke(messages)
+        raw = normalize_content(response.content).strip()
+
+        score = None
+        reason = "No reason provided."
+        try:
+            text = re.sub(r"```(?:json)?\s*", "", raw).strip().rstrip("`").strip()
+            start = text.find("{")
+            end = text.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                parsed = json.loads(text[start : end + 1])
+                score = float(parsed.get("score", -1))
+                reason = parsed.get("reason", "No reason provided.")
+        except (json.JSONDecodeError, AttributeError, ValueError, TypeError):
+            pass
+
+        if score is not None and 0.0 <= score <= 1.0:
+            return {
+                "feedback_score": round(score, 2),
+                "feedback_reason": reason,
+                "raw_feedback_response": raw,
+                "valid": True,
+            }
+
+        return {
+            "feedback_score": 0.5,
+            "feedback_reason": "Fallback used because the model response was invalid.",
+            "raw_feedback_response": raw,
+            "valid": False,
+        }
 
     def inject_experience(self, text: str):
         """Inject a mid-conversation experience note (e.g. contaminated coffee)."""

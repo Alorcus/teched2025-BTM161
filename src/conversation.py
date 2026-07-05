@@ -1,5 +1,8 @@
+import json
 import logging
+import re
 import uuid
+from pathlib import Path
 from typing import Callable
 
 import mlflow
@@ -7,12 +10,14 @@ import mlflow
 from src.agents import reset_inventory
 from src.agents.customer_agent import CustomerAgent
 from src.agents.tray import get_tray, clear_tray
-from src.agents.order_store import load_recent_order, save_order
+from src.agents.order_store import load_recent_order
 from src.agents.shared_components import OrderStatus
 from src.agents.order_state_machine import state_machine, InvalidTransitionError
 from src.stream import extract_messages
 
 logger = logging.getLogger("coffee_shop.conversation")
+
+FEEDBACK_STORE_PATH = Path("./feedback_store.json")
 
 
 class ConversationEngine:
@@ -22,6 +27,7 @@ class ConversationEngine:
         self.app = app
         self.mlflow_enabled = mlflow_enabled
         self.traces_of_latest_conversations: list[str] = []
+        self.feedback_log: dict[str, dict] = {}
 
     def _get_config(self, thread_id):
         return {"configurable": {"thread_id": thread_id}}
@@ -79,7 +85,29 @@ class ConversationEngine:
 
         self._consume_tray(customer_agent)
 
+        order_id = _extract_order_id_from_history(customer_agent.history)
+        feedback = customer_agent.get_feedback()
+        self.feedback_log[thread_id] = {
+            "thread_id": thread_id,
+            "order_id": order_id,
+            "scenario_index": getattr(customer_agent, "scenario_index", None),
+            **feedback,
+        }
+        self._save_feedback_store()
+        logger.info(
+            "Customer feedback [%.2f]: %s", feedback["feedback_score"], feedback["feedback_reason"]
+        )
+
         return self.traces_of_latest_conversations[trace_start:]
+
+    def _save_feedback_store(self):
+        existing = {}
+        if FEEDBACK_STORE_PATH.exists():
+            with open(FEEDBACK_STORE_PATH) as f:
+                existing = json.load(f)
+        existing.update(self.feedback_log)
+        with open(FEEDBACK_STORE_PATH, "w") as f:
+            json.dump(existing, f, indent=2)
 
     def _consume_tray(self, customer_agent: CustomerAgent):
         """Customer takes the tray — apply effects and mark order complete."""
@@ -105,3 +133,14 @@ class ConversationEngine:
                 pass
 
         clear_tray(order_id)
+
+
+def _extract_order_id_from_history(history: list) -> str | None:
+    """Return the last order ID (e.g. ORD0001) mentioned in agent messages."""
+    order_id = None
+    for role, content in history:
+        if role == "agent":
+            match = re.search(r"ORD\d{4}", content)
+            if match:
+                order_id = match.group()
+    return order_id

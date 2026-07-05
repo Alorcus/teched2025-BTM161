@@ -111,14 +111,16 @@ class TestGraphCompilation(unittest.TestCase):
     def test_coffee_shop_compiles(self):
         """CoffeeShop.open_shop() must compile without error."""
         from src.coffee_shop import CoffeeShop
-        shop = CoffeeShop()
+        from src.config import CoffeeShopConfig
+        shop = CoffeeShop(CoffeeShopConfig(setup_name="baseline"))
         shop.open_shop()
         self.assertIsNotNone(shop.app)
 
     def test_graph_nodes(self):
         """Graph must contain all expected agent nodes."""
         from src.coffee_shop import CoffeeShop
-        shop = CoffeeShop()
+        from src.config import CoffeeShopConfig
+        shop = CoffeeShop(CoffeeShopConfig(setup_name="baseline"))
         shop.open_shop()
         nodes = set(shop.app.get_graph().nodes.keys())
         expected = {"__start__", "order_agent", "inventory_agent", "barista_agent", "customer_service_agent"}
@@ -127,7 +129,8 @@ class TestGraphCompilation(unittest.TestCase):
     def test_graph_routing_edges(self):
         """Each agent must have correct outgoing edges (destinations)."""
         from src.coffee_shop import CoffeeShop
-        shop = CoffeeShop()
+        from src.config import CoffeeShopConfig
+        shop = CoffeeShop(CoffeeShopConfig(setup_name="baseline"))
         shop.open_shop()
         edges = shop.app.get_graph().edges
         edge_map = {}

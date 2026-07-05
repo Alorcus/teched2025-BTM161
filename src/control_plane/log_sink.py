@@ -10,15 +10,20 @@ logger = logging.getLogger("coffee_shop.control_plane.log_sink")
 
 
 class JsonlLogSink:
-    """Append-only JSONL log. Thread-safe via a process-local lock."""
+    """Append-only JSONL log. Thread-safe via a process-local lock.
 
-    def __init__(self, path: str | os.PathLike):
+    Every record is stamped with `setup_name` so events from different
+    experiment runs can be filtered apart in the log.
+    """
+
+    def __init__(self, path: str | os.PathLike, setup_name: str):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.setup_name = setup_name
         self._lock = threading.Lock()
 
     def append(self, event: dict[str, Any]) -> None:
-        record = {"ts": time.time(), **event}
+        record = {"ts": time.time(), "setup_name": self.setup_name, **event}
         line = json.dumps(record, default=str, sort_keys=True)
         with self._lock:
             with self.path.open("a", encoding="utf-8") as f:

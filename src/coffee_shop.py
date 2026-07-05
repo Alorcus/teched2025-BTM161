@@ -5,12 +5,13 @@ import mlflow
 
 from src.llm import create_chat_llm
 from src.config import CoffeeShopConfig
+from src.setups import setup_dir
 from src.agents.order_store import create_order_store_engine, set_engine
 from src.agents import (
     init_db, reset_inventory, set_item_stock, get_all_inventory,
     CustomerAgent, CUSTOMER_SCENARIOS,
 )
-from src.control_plane import AgentRepo, Catalog, JsonlLogSink
+from src.control_plane import AgentRepo, Catalog, JsonlLogSink, ProcessSupervisor
 from src.graph import build_coffee_shop_graph
 from src.conversation import ConversationEngine
 from src.notebook_ui import NotebookUI, AGENT_CONFIG
@@ -52,6 +53,7 @@ class CoffeeShop:
         self.agent_repo: AgentRepo | None = None
         self.catalog: Catalog | None = None
         self.log_sink: JsonlLogSink | None = None
+        self.process_supervisor: ProcessSupervisor | None = None
 
     def open_shop(self, reset_inventory_first=True):
         """Start the coffee shop application after potentially updating agent definitions"""
@@ -69,21 +71,42 @@ class CoffeeShop:
         self.customer_agent = CustomerAgent(llm)
 
         if self.config.mlflow_enabled:
+            mlflow.set_tracking_uri(self.config.mlflow_tracking_uri)
             mlflow.langchain.autolog()
             if not mlflow.get_experiment_by_name(self.config.mlflow_experiment):
                 mlflow.create_experiment(self.config.mlflow_experiment)
             mlflow.set_experiment(self.config.mlflow_experiment)
 
-        config_dir = Path(self.config.control_plane_config_dir)
+        if not self.config.setup_name:
+            raise ValueError(
+                "CoffeeShopConfig.setup_name is required — pick a setup from config/setups/"
+            )
+        config_dir = setup_dir(self.config.setup_name)
         self.agent_repo = AgentRepo(config_dir)
         self.catalog = Catalog(config_dir)
-        self.log_sink = JsonlLogSink(self.config.guardrail_log_path)
+        self.log_sink = JsonlLogSink(self.config.guardrail_log_path, setup_name=self.config.setup_name)
         _coffee_shop_logger.info(
-            "control plane: agents=%s | log=%s",
-            self.agent_repo.ids(), self.config.guardrail_log_path,
+            f"control plane: setup={self.config.setup_name} | agents={self.agent_repo.ids()} | log={self.config.guardrail_log_path}"
         )
 
         self.app = build_coffee_shop_graph(llm, self.agent_repo, self.catalog, self.log_sink)
+
+        if self.config.process_supervisor_enabled:
+            self.process_supervisor = ProcessSupervisor(
+                process_model_path=self.config.process_model_path,
+                log_path=self.config.process_log_path,
+                llm=llm,
+                prompt_template=self.agent_repo.get("process_supervisor").base_prompt,
+            )
+            _coffee_shop_logger.info(
+                "process supervisor: model=%s | log=%s",
+                self.config.process_model_path,
+                self.config.process_log_path,
+            )
+        else:
+            _coffee_shop_logger.info(
+                "process supervisor: DISABLED — no observation, no critique, no process_meta.log entries"
+            )
 
         self._conversation_engine = ConversationEngine(
             self.app, mlflow_enabled=self.config.mlflow_enabled
@@ -116,6 +139,23 @@ class CoffeeShop:
         )
         self._ui.traces_of_latest_conversations = self.traces_of_latest_conversations
         return self._ui.create_interactive_interface(success_only=success_only)
+
+    def capture_feedback(self, thread_id: str, order_id: str | None = None) -> dict:
+        """Capture customer feedback for a completed conversation and persist it."""
+        feedback = self.customer_agent.get_feedback()
+        self._conversation_engine.feedback_log[thread_id] = {
+            "thread_id": thread_id,
+            "order_id": order_id,
+            "scenario_index": self.customer_agent.scenario_index,
+            **feedback,
+        }
+        self._conversation_engine._save_feedback_store()
+        return feedback
+
+    def get_last_feedback(self) -> dict | None:
+        """Return the most recently recorded customer feedback entry."""
+        log = self._conversation_engine.feedback_log
+        return next(reversed(log.values()), None) if log else None
 
     def display_current_inventory(self):
         if self._ui:
