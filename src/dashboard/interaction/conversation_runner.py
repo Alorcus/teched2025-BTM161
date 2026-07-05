@@ -207,10 +207,11 @@ class ConversationRunner:
             trace.end_session()  # Logs all unfulfilled responses
         else:
             logger.debug(f"No temporal trace found for thread {thread_id}")
-            self.event_bus.publish(DashboardEvent(
-                event_type=EventType.CONVERSATION_END,
-                agent_name="system",
-            ))
+            
+        self.event_bus.publish(DashboardEvent(
+            event_type=EventType.CONVERSATION_END,
+            agent_name="system",
+        ))
 
     def _consume_tray(self):
         """Customer takes the tray — apply effects, mark order complete, clear tray."""

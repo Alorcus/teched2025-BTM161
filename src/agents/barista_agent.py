@@ -23,6 +23,8 @@ from .shared_components import (
 from .order_store import load_order
 from .order_state_machine import state_machine, InvalidTransitionError
 
+python_executable = sys.executable
+
 
 def _thread_id(config: RunnableConfig | None) -> str | None:
     """Pull the LangGraph thread_id (== MLflow case_id) out of an injected config.

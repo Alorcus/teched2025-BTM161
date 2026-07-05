@@ -618,9 +618,9 @@ class TemporalConstraintGuardrail:
             all_choice_tools.extend(constraint.additional_activities)
         
         if constraint.constraint_type == ConstraintType.EXCLUSIVE_CHOICE:
-            logger.info(f"Exclusive choice made: {current_tool} selected from options: {', '.join(all_choice_tools)}")
+            logger.debug(f"Exclusive choice made: {current_tool} selected from options: {', '.join(all_choice_tools)}")
         else:
-            logger.info(f"Choice made: {current_tool} selected from options: {', '.join(all_choice_tools)}")
+            logger.debug(f"Choice made: {current_tool} selected from options: {', '.join(all_choice_tools)}")
     
 
 
@@ -639,12 +639,12 @@ def create_temporal_guardrail(config_path: str) -> TemporalConstraintGuardrail:
         constraint = TemporalConstraint.from_dict(c_data)
         constraints.append(constraint)
     
-    logger.info(f"Loaded {len(constraints)} DECLARE constraints from {config_path}")
+    logger.debug(f"Loaded {len(constraints)} DECLARE constraints from {config_path}")
     
     type_counts = defaultdict(int)
     for c in constraints:
         type_counts[c.constraint_type.value] += 1
     
-    logger.info(f"Constraint types: {dict(type_counts)}")
+    logger.debug(f"Constraint types: {dict(type_counts)}")
     
     return TemporalConstraintGuardrail(constraints)
