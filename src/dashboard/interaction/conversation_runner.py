@@ -4,6 +4,7 @@ import time
 import uuid
 import logging
 
+import mlflow
 from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage, ToolMessage
 
 from src.coffee_shop import CoffeeShop
@@ -11,6 +12,7 @@ from src.agents import CUSTOMER_SCENARIOS
 from src.agents.tray import get_tray, clear_tray
 from src.agents.order_store import load_order, save_order
 from src.agents.shared_components import OrderStatus
+from src.conversation import _tag_trace
 from src.stream import SWARM_AGENTS
 from .event_bus import EventBus, DashboardEvent, EventType
 
@@ -94,6 +96,7 @@ class ConversationRunner:
         self.is_running = False
         self._active_agent = "order_agent"
         self._current_order_id: str | None = None
+        self._current_scenario_index: int | None = None
         cfg = getattr(shop, "config", None)
         from src.config import CoffeeShopConfig as _CoffeeShopConfig
         if isinstance(cfg, _CoffeeShopConfig):
@@ -163,6 +166,7 @@ class ConversationRunner:
         self.shop.customer_agent.reset(scenario_index, custom_prompt=custom_prompt)
         self._active_agent = "order_agent"
         self._current_order_id = None
+        self._current_scenario_index = scenario_index
         thread_id = str(uuid.uuid4())
 
         if scenario_index is None:
@@ -449,6 +453,7 @@ class ConversationRunner:
                             "turn for the offending agent."
                         ),
                     ))
+                self._tag_last_trace()
                 break  # normal completion (or exhaustion)
 
             # We got a rejection: patch the graph state and resume.
@@ -467,6 +472,17 @@ class ConversationRunner:
             ))
 
         return last_agent_message
+
+    def _tag_last_trace(self) -> None:
+        """Attach setup + scenario tags to the MLflow trace produced by the
+        just-completed `app.stream(...)` call. No-op when mlflow is disabled or
+        no trace was produced (e.g. autolog off, or a stream that errored)."""
+        if not self.shop.config.mlflow_enabled:
+            return
+        trace_id = mlflow.get_last_active_trace_id()
+        if trace_id is None:
+            return
+        _tag_trace(trace_id, self.shop.config.setup_name, self._current_scenario_index)
 
     def _apply_state_patch_for_rejection(self, config: dict, rejection: dict) -> None:
         """Inject the supervisor's quoted-critique HumanMessage into the

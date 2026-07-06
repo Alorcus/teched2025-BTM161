@@ -109,7 +109,9 @@ class CoffeeShop:
             )
 
         self._conversation_engine = ConversationEngine(
-            self.app, mlflow_enabled=self.config.mlflow_enabled
+            self.app,
+            mlflow_enabled=self.config.mlflow_enabled,
+            setup_name=self.config.setup_name,
         )
 
     def _get_config(self, thread_id):
@@ -135,7 +137,9 @@ class CoffeeShop:
     def create_interactive_interface(self, success_only=False):
         """Create an enhanced interactive widget interface for the coffee shop"""
         self._ui = NotebookUI(
-            self.app, self.customer_agent, mlflow_enabled=self.config.mlflow_enabled
+            self.app, self.customer_agent,
+            mlflow_enabled=self.config.mlflow_enabled,
+            setup_name=self.config.setup_name,
         )
         self._ui.traces_of_latest_conversations = self.traces_of_latest_conversations
         return self._ui.create_interactive_interface(success_only=success_only)
