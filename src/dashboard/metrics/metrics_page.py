@@ -17,6 +17,22 @@ from .visualization_section import VisualizationSection
 
 _TIMESTAMP_COL = "time:timestamp"
 
+# Scenario labels mirror src/dashboard/interaction/interaction_page.py:93-98 so
+# both dashboards refer to the same customer-scenario shorthand. -1 is the
+# "no preset scenario" sentinel used at trace-tag time.
+_SCENARIO_LABELS = {
+    0: "Latte & croissant (friendly)",
+    1: "2 espressos (in a hurry)",
+    2: "Complaint (cold cappuccino)",
+    3: "Ask for a recommendation",
+    -1: "Custom / Unspecified",
+}
+# Setup filter's option label for cases whose MLflow trace carried no `setup`
+# tag (older traces, or a conversation that crashed before tagging). Kept as a
+# named constant because it's the string that both populates the checkbox and
+# encodes "null" in the applied-state tuple — one place to change.
+_UNKNOWN_SETUP_LABEL = "(unknown)"
+
 
 def create_metrics_dashboard():
     """Create the Metrics Dashboard page."""
@@ -27,7 +43,7 @@ def create_metrics_dashboard():
     if cache_path is None:
         return _empty_template(LOG_DIR)
 
-    combined = _load_combined_eventlog([cache_path])
+    combined, case_metadata = _load_combined_eventlog([cache_path])
     if combined.is_empty() or _TIMESTAMP_COL not in combined.columns:
         return _empty_template(LOG_DIR)
 
@@ -37,55 +53,225 @@ def create_metrics_dashboard():
 
     full_start: datetime = ts_series.min()
     full_end: datetime = ts_series.max()
-    # Slider's start/end must differ; if a single timestamp exists, pad by 1s.
+    # DatetimePicker's start/end must differ; if a single timestamp exists,
+    # pad by 1s. Extend end past `now` so anchored-at-now presets ("Last 10
+    # min") don't push the picker's value outside its bounds when data is
+    # stale.
     if full_end <= full_start:
         full_end = full_start + timedelta(seconds=1)
+    pick_min = full_start
+    pick_max = max(full_end, datetime.now())
 
-    time_slider = pn.widgets.DatetimeRangeSlider(
-        name="",
-        start=full_start,
-        end=full_end,
-        value=(full_start, full_end),
-        step=1000,  # 1 second
-        format="%Y-%m-%d %H:%M:%S",
+    # Discover scenario / setup options from data. Options are data-driven so
+    # a new setup added later shows up automatically; scenario labels come
+    # from _SCENARIO_LABELS with a fallback to the raw int for anything
+    # outside the known range.
+    scenarios_present = sorted(
+        int(v) for v in case_metadata["case_scenario_index"].drop_nulls().unique().to_list()
+    ) if not case_metadata.is_empty() else []
+    scenario_options = {
+        _SCENARIO_LABELS.get(v, f"Scenario {v}"): v for v in scenarios_present
+    }
+    setups_present_raw = (
+        case_metadata["case_setup"].unique().to_list()
+        if not case_metadata.is_empty() else []
+    )
+    setup_options = {}
+    for s in setups_present_raw:
+        if s is None:
+            setup_options[_UNKNOWN_SETUP_LABEL] = None
+        else:
+            setup_options[s] = s
+
+    # ---- widgets -----------------------------------------------------------
+    start_picker = pn.widgets.DatetimePicker(
+        name="From",
+        value=full_start,
+        start=pick_min,
+        end=pick_max,
+        enable_time=True,
+        enable_seconds=True,
+        military_time=True,
+        sizing_mode="stretch_width",
+    )
+    end_picker = pn.widgets.DatetimePicker(
+        name="To",
+        value=full_end,
+        start=pick_min,
+        end=pick_max,
+        enable_time=True,
+        enable_seconds=True,
+        military_time=True,
+        sizing_mode="stretch_width",
+    )
+
+    def _preset_button(label: str, on_click) -> pn.widgets.Button:
+        btn = pn.widgets.Button(name=label, button_type="light", height=28, sizing_mode="stretch_width")
+        btn.on_click(on_click)
+        return btn
+
+    def _set_range(start: datetime, end: datetime) -> None:
+        """Write both pickers, clamped to the picker bounds so we never blow
+        param validation. Live-update watchers fire naturally on assignment."""
+        start = max(pick_min, min(pick_max, start))
+        end = max(pick_min, min(pick_max, end))
+        if end < start:
+            end = start
+        start_picker.value = start
+        end_picker.value = end
+
+    def _preset_all(_e=None):
+        _set_range(full_start, full_end)
+
+    def _preset_today(_e=None):
+        now = datetime.now()
+        _set_range(now.replace(hour=0, minute=0, second=0, microsecond=0), now)
+
+    def _preset_last_24h(_e=None):
+        now = datetime.now()
+        _set_range(now - timedelta(hours=24), now)
+
+    def _preset_last_hour(_e=None):
+        now = datetime.now()
+        _set_range(now - timedelta(hours=1), now)
+
+    def _preset_last_10min(_e=None):
+        now = datetime.now()
+        _set_range(now - timedelta(minutes=10), now)
+
+    preset_row_top = pn.Row(
+        _preset_button("Last 10 min", _preset_last_10min),
+        _preset_button("Last hour", _preset_last_hour),
         sizing_mode="stretch_width",
         margin=(0, 0, 4, 0),
     )
-
-    slider_label = pn.pane.HTML(
-        '<div style="font-size:12px;font-weight:600;color:#444;'
-        'margin-bottom:2px;">Trace Timeframe</div>',
+    preset_row_mid = pn.Row(
+        _preset_button("Last 24h", _preset_last_24h),
+        _preset_button("Today", _preset_today),
         sizing_mode="stretch_width",
-        margin=(0, 0, 0, 0),
+        margin=(0, 0, 4, 0),
+    )
+    preset_row_bot = pn.Row(
+        _preset_button("All", _preset_all),
+        sizing_mode="stretch_width",
+        margin=(0, 0, 6, 0),
+    )
+
+    scenario_group = pn.widgets.CheckBoxGroup(
+        name="",
+        options=scenario_options,
+        value=[],
+        inline=False,
+        sizing_mode="stretch_width",
+    )
+    setup_group = pn.widgets.CheckBoxGroup(
+        name="",
+        options=setup_options,
+        value=[],
+        inline=False,
+        sizing_mode="stretch_width",
     )
 
     trace_count_label = pn.pane.HTML(
-        _format_count_label(*_case_counts(combined, full_start, full_end)),
+        _format_count_label(*_case_counts(case_metadata, full_start, full_end, [], [])),
         sizing_mode="stretch_width",
-        margin=(0, 0, 10, 0),
+        margin=(0, 0, 4, 0),
+    )
+    span_hint_label = pn.pane.HTML(
+        _format_span_hint(case_metadata, full_start, full_end, [], []),
+        sizing_mode="stretch_width",
+        margin=(0, 0, 8, 0),
+    )
+    apply_button = pn.widgets.Button(
+        name="Apply filters",
+        button_type="primary",
+        disabled=True,
+        sizing_mode="stretch_width",
     )
 
+    # ---- cards -------------------------------------------------------------
+    time_card = pn.Card(
+        preset_row_top, preset_row_mid, preset_row_bot,
+        start_picker, end_picker,
+        title="Time",
+        collapsed=False,
+        sizing_mode="stretch_width",
+        styles={"margin-bottom": "6px"},
+    )
+    scenario_card = pn.Card(
+        scenario_group if scenario_options else pn.pane.HTML(
+            '<div style="font-size:11px;color:#999;">No scenarios found.</div>'
+        ),
+        title="Scenario",
+        collapsed=False,
+        sizing_mode="stretch_width",
+        styles={"margin-bottom": "6px"},
+    )
+    setup_card = pn.Card(
+        setup_group if setup_options else pn.pane.HTML(
+            '<div style="font-size:11px;color:#999;">No configurations found.</div>'
+        ),
+        title="Configuration",
+        collapsed=False,
+        sizing_mode="stretch_width",
+        styles={"margin-bottom": "6px"},
+    )
+
+    # ---- staged vs applied state -----------------------------------------
+    # Applied state = filter values currently reflected by the metrics pane.
+    # Staged state = whatever the widgets say right now. Apply button is
+    # enabled iff the two diverge.
+    applied: dict = {
+        "start": full_start,
+        "end": full_end,
+        "scenarios": [],
+        "setups": [],
+    }
+
+    def _staged() -> dict:
+        return {
+            "start": start_picker.value,
+            "end": end_picker.value,
+            "scenarios": list(scenario_group.value),
+            "setups": list(setup_group.value),
+        }
+
+    def _restage(_event=None) -> None:
+        s = _staged()
+        trace_count_label.object = _format_count_label(
+            *_case_counts(case_metadata, s["start"], s["end"], s["scenarios"], s["setups"])
+        )
+        span_hint_label.object = _format_span_hint(
+            case_metadata, s["start"], s["end"], s["scenarios"], s["setups"]
+        )
+        apply_button.disabled = _same_filter(s, applied)
+
+    def _render_from_applied() -> pn.viewable.Viewable:
+        return _render_metrics(
+            combined, case_metadata,
+            applied["start"], applied["end"],
+            applied["scenarios"], applied["setups"],
+        )
+
     metrics_pane = pn.Column(
-        _render_metrics(combined, full_start, full_end),
+        _render_from_applied(),
         sizing_mode="stretch_width",
         styles={"padding": "4px 0"},
     )
 
-    def _on_range_change(event):
-        start, end = event.new
-        trace_count_label.object = _format_count_label(
-            *_case_counts(combined, start, end)
-        )
+    def _on_apply(_event=None) -> None:
+        applied.update(_staged())
+        metrics_pane[:] = [_render_from_applied()]
+        _restage()
 
-    def _on_range_commit(event):
-        start, end = event.new
-        metrics_pane[:] = [_render_metrics(combined, start, end)]
-
-    time_slider.param.watch(_on_range_change, "value")
-    time_slider.param.watch(_on_range_commit, "value_throttled")
+    start_picker.param.watch(_restage, "value")
+    end_picker.param.watch(_restage, "value")
+    scenario_group.param.watch(_restage, "value")
+    setup_group.param.watch(_restage, "value")
+    apply_button.on_click(_on_apply)
 
     total_cases = (
-        combined["case_id"].n_unique() if "case_id" in combined.columns else 0
+        case_metadata.height if not case_metadata.is_empty() else 0
     )
     sidebar = pn.Column(
         pn.pane.HTML(
@@ -97,9 +283,12 @@ def create_metrics_dashboard():
             f"Across {total_cases} trace(s) in MLflow store</div>",
             sizing_mode="stretch_width",
         ),
-        slider_label,
-        time_slider,
+        time_card,
+        scenario_card,
+        setup_card,
         trace_count_label,
+        span_hint_label,
+        apply_button,
         width=320,
         styles={"padding": "10px 12px 10px 16px"},
     )
@@ -117,10 +306,14 @@ def create_metrics_dashboard():
     )
 
 
-def _load_combined_eventlog(csv_files: list[Path]) -> pl.DataFrame:
-    """Read every CSV in `csv_files` and return a single DataFrame with a
-    parsed datetime `time:timestamp` column. Files that fail to read are
-    skipped silently — the dashboard renders from whatever loaded.
+def _load_combined_eventlog(csv_files: list[Path]) -> tuple[pl.DataFrame, pl.DataFrame]:
+    """Read every CSV in `csv_files` and return `(combined, case_metadata)`.
+
+    `combined` is the concatenated event log with a parsed datetime
+    `time:timestamp`. `case_metadata` is one row per case with columns
+    `case_id`, `case_setup`, `case_scenario_index`, `first_t`, `last_t` — the
+    small lookup table the filter joins against. Files that fail to read are
+    skipped silently; empty inputs yield empty frames.
     """
     frames: list[pl.DataFrame] = []
     for path in csv_files:
@@ -132,64 +325,121 @@ def _load_combined_eventlog(csv_files: list[Path]) -> pl.DataFrame:
             continue
         frames.append(df)
     if not frames:
-        return pl.DataFrame()
-    combined = pl.concat(frames, how="diagonal_relaxed")
-    return combined.with_columns(
+        return pl.DataFrame(), pl.DataFrame()
+    combined = pl.concat(frames, how="diagonal_relaxed").with_columns(
         pl.col(_TIMESTAMP_COL).str.to_datetime(strict=False)
     )
+    case_metadata = _build_case_metadata(combined)
+    return combined, case_metadata
 
 
-def _case_bounds(eventlog: pl.DataFrame) -> pl.DataFrame:
-    """Return one row per `case_id` with `first_t` / `last_t` timestamps."""
-    if "case_id" not in eventlog.columns:
+def _build_case_metadata(eventlog: pl.DataFrame) -> pl.DataFrame:
+    """One row per case_id with setup, scenario, and first/last timestamps.
+
+    Case-level attributes (`case_setup`, `case_scenario_index`) are already
+    broadcast onto every event row by the extractor, so `.first()` per case
+    is authoritative. Missing columns fall back to null / -1 so older caches
+    without the extractor's schema-v4 columns keep loading.
+    """
+    if eventlog.is_empty() or "case_id" not in eventlog.columns:
         return pl.DataFrame(
-            schema={"case_id": pl.Utf8, "first_t": pl.Datetime, "last_t": pl.Datetime}
+            schema={
+                "case_id": pl.Utf8,
+                "case_setup": pl.Utf8,
+                "case_scenario_index": pl.Int64,
+                "first_t": pl.Datetime,
+                "last_t": pl.Datetime,
+            }
         )
+    setup_expr = (
+        pl.col("case_setup").first().alias("case_setup")
+        if "case_setup" in eventlog.columns
+        else pl.lit(None, dtype=pl.Utf8).alias("case_setup")
+    )
+    scenario_expr = (
+        pl.col("case_scenario_index").first().cast(pl.Int64).alias("case_scenario_index")
+        if "case_scenario_index" in eventlog.columns
+        else pl.lit(-1, dtype=pl.Int64).alias("case_scenario_index")
+    )
     return (
         eventlog.drop_nulls(_TIMESTAMP_COL)
         .group_by("case_id")
         .agg(
+            setup_expr,
+            scenario_expr,
             pl.col(_TIMESTAMP_COL).min().alias("first_t"),
             pl.col(_TIMESTAMP_COL).max().alias("last_t"),
         )
     )
 
 
-def _contained_case_ids(
-    eventlog: pl.DataFrame, start: datetime, end: datetime
-) -> pl.Series:
-    """Cases whose entire span lies inside [start, end] — first event at or
-    after `start` AND last event at or before `end`. Partially-overlapping
-    cases are excluded so the rendered metrics see only whole traces."""
-    bounds = _case_bounds(eventlog)
-    return bounds.filter(
-        (pl.col("first_t") >= start) & (pl.col("last_t") <= end)
-    )["case_id"]
-
-
-def _filter_by_range(
-    eventlog: pl.DataFrame, start: datetime, end: datetime
+def _apply_filters(
+    case_metadata: pl.DataFrame,
+    start: datetime,
+    end: datetime,
+    scenarios: list[int],
+    setups: list[str | None],
 ) -> pl.DataFrame:
-    if "case_id" not in eventlog.columns:
-        return eventlog.clear()
-    contained = _contained_case_ids(eventlog, start, end)
-    return eventlog.filter(pl.col("case_id").is_in(contained))
+    """Return the subset of `case_metadata` matching all filter groups.
+
+    Empty scenarios / setups mean "no filter" (all pass). Non-empty means
+    "whitelist". Time keeps the existing 'fully-contained case' semantics.
+    """
+    if case_metadata.is_empty():
+        return case_metadata
+    filt = (pl.col("first_t") >= start) & (pl.col("last_t") <= end)
+    if scenarios:
+        filt = filt & pl.col("case_scenario_index").is_in(scenarios)
+    if setups:
+        has_unknown = None in setups
+        concrete = [s for s in setups if s is not None]
+        setup_filt = pl.lit(False)
+        if concrete:
+            setup_filt = setup_filt | pl.col("case_setup").is_in(concrete)
+        if has_unknown:
+            setup_filt = setup_filt | pl.col("case_setup").is_null()
+        filt = filt & setup_filt
+    return case_metadata.filter(filt)
+
+
+def _same_filter(a: dict, b: dict) -> bool:
+    return (
+        a["start"] == b["start"]
+        and a["end"] == b["end"]
+        and sorted(a["scenarios"]) == sorted(b["scenarios"])
+        and sorted(a["setups"], key=lambda x: (x is None, x)) == sorted(b["setups"], key=lambda x: (x is None, x))
+    )
 
 
 def _case_counts(
-    eventlog: pl.DataFrame, start: datetime, end: datetime
+    case_metadata: pl.DataFrame,
+    start: datetime,
+    end: datetime,
+    scenarios: list[int],
+    setups: list[str | None],
 ) -> tuple[int, int]:
-    """Return (contained, partial) case counts for the window. A *partial*
-    case is one that overlaps the window but is not fully contained — its
-    conversation started before `start` or ended after `end`. These are
-    excluded from the dashboard so durations stay meaningful."""
-    bounds = _case_bounds(eventlog)
-    contained = bounds.filter(
-        (pl.col("first_t") >= start) & (pl.col("last_t") <= end)
-    ).height
-    overlapping = bounds.filter(
-        (pl.col("first_t") <= end) & (pl.col("last_t") >= start)
-    ).height
+    """Return (contained, partial) case counts for the current filter set.
+
+    Contained cases pass all filters (time fully-contained AND scenario AND
+    setup). Partial counts cases that overlap the time window without full
+    containment; scenario/setup are still applied so the "excluded" number
+    reflects what a widened time window would rescue."""
+    if case_metadata.is_empty():
+        return 0, 0
+    contained = _apply_filters(case_metadata, start, end, scenarios, setups).height
+    overlap_filt = (pl.col("first_t") <= end) & (pl.col("last_t") >= start)
+    if scenarios:
+        overlap_filt = overlap_filt & pl.col("case_scenario_index").is_in(scenarios)
+    if setups:
+        has_unknown = None in setups
+        concrete = [s for s in setups if s is not None]
+        s_filt = pl.lit(False)
+        if concrete:
+            s_filt = s_filt | pl.col("case_setup").is_in(concrete)
+        if has_unknown:
+            s_filt = s_filt | pl.col("case_setup").is_null()
+        overlap_filt = overlap_filt & s_filt
+    overlapping = case_metadata.filter(overlap_filt).height
     return contained, overlapping - contained
 
 
@@ -206,19 +456,55 @@ def _format_count_label(contained: int, partial: int) -> str:
     return (
         f'<div style="padding:4px 0;">'
         f'<div style="font-size:12px;color:#444;">'
-        f"<b>{contained}</b> {plural} fully in selected timeframe</div>"
+        f"<b>{contained}</b> {plural} match current filters</div>"
         f"{excluded_line}"
         f"</div>"
     )
 
 
+def _format_span_hint(
+    case_metadata: pl.DataFrame,
+    start: datetime,
+    end: datetime,
+    scenarios: list[int],
+    setups: list[str | None],
+) -> str:
+    """Show the actual time-span the currently-staged filter selects. Helps
+    users understand "why is my Last-10-min preset empty" without needing
+    them to zoom the picker."""
+    filtered = _apply_filters(case_metadata, start, end, scenarios, setups)
+    if filtered.is_empty():
+        return (
+            '<div style="font-size:11px;color:#999;padding-top:2px;">'
+            "Selected cases: none.</div>"
+        )
+    span_start = filtered["first_t"].min()
+    span_end = filtered["last_t"].max()
+    return (
+        f'<div style="font-size:11px;color:#666;padding-top:2px;">'
+        f"Selected cases span "
+        f"<b>{span_start:%Y-%m-%d %H:%M:%S}</b> → "
+        f"<b>{span_end:%Y-%m-%d %H:%M:%S}</b></div>"
+    )
+
+
 def _render_metrics(
-    eventlog: pl.DataFrame, start: datetime, end: datetime
+    eventlog: pl.DataFrame,
+    case_metadata: pl.DataFrame,
+    start: datetime,
+    end: datetime,
+    scenarios: list[int],
+    setups: list[str | None],
 ) -> pn.viewable.Viewable:
-    filtered = _filter_by_range(eventlog, start, end)
+    keep_ids = _apply_filters(case_metadata, start, end, scenarios, setups)["case_id"]
+    if keep_ids.is_empty():
+        return pn.pane.Alert(
+            "No traces match the current filters.", alert_type="warning"
+        )
+    filtered = eventlog.filter(pl.col("case_id").is_in(keep_ids))
     if filtered.is_empty():
         return pn.pane.Alert(
-            "No events in the selected timeframe.", alert_type="warning"
+            "No traces match the current filters.", alert_type="warning"
         )
     try:
         ocel = ObjectCentricEventlog.from_eventlog(filtered)
