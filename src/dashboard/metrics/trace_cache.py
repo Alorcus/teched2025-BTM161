@@ -39,7 +39,9 @@ META_FILENAME = "_all_traces.meta"
 #   2 → transfer_to_* handovers emitted as execute_tool rows
 #   3 → modern MLflow LangChain autolog: `llm` spans recognised; call_llm
 #       rows now populated (previously always zero for the current autolog)
-_SCHEMA_VERSION = 3
+#   4 → case_setup + case_scenario_index columns propagated from MLflow
+#       trace tags so the metrics dashboard can filter by them
+_SCHEMA_VERSION = 4
 
 
 def _mlflow_trace_count(tracking_uri: str) -> int:

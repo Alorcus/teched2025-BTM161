@@ -137,10 +137,16 @@ class TraceProcessor:
         skipped_ingestions = 0  # processed without error but produced 0 events
 
         combined_logs = pd.DataFrame()
+        # case_id -> (setup_name, scenario_index) from MLflow trace tags. Filled
+        # while iterating traces; broadcast onto every event row (all sources)
+        # after all concats complete, so filter/aggregate queries can slice by
+        # setup or scenario without joining an extra table.
+        case_tags: dict[str, tuple[str | None, int]] = {}
 
         for i, trace in enumerate(traces, 1):
             trace_dict = trace.to_dict()
             trace_id = trace_dict.get('info', {}).get('trace_id', f'trace-{i}')
+            trace_tags = trace_dict.get('info', {}).get('tags', {}) or {}
             print(f"\t📂 Processing trace {i}/{len(traces)}: {trace_id}")
 
             log_generator = LogGenerator()
@@ -176,6 +182,22 @@ class TraceProcessor:
 
             combined_logs = pd.concat([combined_logs, trace_event_log], ignore_index=True)
             successful_ingestions += 1
+
+            # Stash the trace's tag values under this trace's case_id. Multiple
+            # traces share a case_id (each user turn = one MLflow trace); every
+            # tagged trace in the same case carries the same setup/scenario, so
+            # last-write-wins is fine. Missing tags → setup=None, scenario=-1
+            # (the "unspecified" sentinel used across the pipeline).
+            case_ids_in_trace = trace_event_log["case_id"].dropna().unique()
+            if len(case_ids_in_trace) > 0:
+                setup_tag = trace_tags.get("setup")
+                scenario_tag_raw = trace_tags.get("scenario_index")
+                try:
+                    scenario_tag = int(scenario_tag_raw) if scenario_tag_raw not in (None, "", "None") else -1
+                except (TypeError, ValueError):
+                    scenario_tag = -1
+                for cid in case_ids_in_trace:
+                    case_tags[cid] = (setup_tag, scenario_tag)
 
         # Sort combined logs by timestamp. combined_logs starts as an empty
         # DataFrame with no columns; if every trace either failed ingestion or
@@ -242,6 +264,21 @@ class TraceProcessor:
                 combined_logs = pd.concat(
                     [combined_logs, machine_rows], ignore_index=True
                 ).sort_values(by="time:timestamp")
+
+        # Broadcast per-case setup/scenario tags to every row so downstream
+        # readers (e.g. the metrics dashboard) can filter without joining an
+        # extra table. Cases without tagged traces show setup=None (rendered
+        # as an "(unknown)" bucket in the dashboard) and scenario=-1.
+        if case_tags and not combined_logs.empty and "case_id" in combined_logs.columns:
+            combined_logs["case_setup"] = combined_logs["case_id"].map(
+                lambda cid: case_tags.get(cid, (None, -1))[0]
+            )
+            combined_logs["case_scenario_index"] = combined_logs["case_id"].map(
+                lambda cid: case_tags.get(cid, (None, -1))[1]
+            )
+        else:
+            combined_logs["case_setup"] = None
+            combined_logs["case_scenario_index"] = -1
 
         self._generate_log_file(
             combined_logs, "./generated_event_log", json_format=export_as_json
