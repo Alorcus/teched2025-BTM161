@@ -445,6 +445,7 @@ def _case_counts(
 
 def _format_count_label(contained: int, partial: int) -> str:
     plural = "trace" if contained == 1 else "traces"
+    verb = "matches" if contained == 1 else "match"
     excluded_line = ""
     if partial > 0:
         excluded_plural = "trace" if partial == 1 else "traces"
@@ -456,7 +457,7 @@ def _format_count_label(contained: int, partial: int) -> str:
     return (
         f'<div style="padding:4px 0;">'
         f'<div style="font-size:12px;color:#444;">'
-        f"<b>{contained}</b> {plural} match current filters</div>"
+        f"<b>{contained}</b> {plural} {verb} current filters</div>"
         f"{excluded_line}"
         f"</div>"
     )
