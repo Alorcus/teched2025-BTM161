@@ -8,11 +8,14 @@ render. They cover:
   - empty-checkbox = pass-all
   - the "(unknown)" setup bucket (mapped to None)
   - _case_counts returning (contained, partial) with filters applied
+  - _load_combined_eventlog's UTC → local timezone shift
 """
 from __future__ import annotations
 
+import tempfile
 import unittest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import polars as pl
 
@@ -20,6 +23,8 @@ from src.dashboard.metrics.metrics_page import (
     _apply_filters,
     _build_case_metadata,
     _case_counts,
+    _load_combined_eventlog,
+    _local_tz_name,
     _same_filter,
 )
 
@@ -243,6 +248,42 @@ class SameFilterTests(unittest.TestCase):
         d = {"start": t0, "end": t0, "scenarios": [], "setups": [None, "baseline"]}
         e = {"start": t0, "end": t0, "scenarios": [], "setups": ["baseline", None]}
         self.assertTrue(_same_filter(d, e))
+
+
+class TimezoneShiftTests(unittest.TestCase):
+    """Test 5: _load_combined_eventlog shifts naive-UTC CSV strings into
+    naive-local datetimes so preset arithmetic (datetime.now() - 10min)
+    lines up with the data. Guards against the CET/CEST-vs-UTC-2h bug the
+    "Last 10 min" preset had at first ship."""
+
+    def test_utc_string_shifted_to_local(self):
+        # Skip when the host runs in UTC — the shift is a no-op there and
+        # this test can't distinguish "shift applied" from "no shift needed".
+        tz = _local_tz_name()
+        if tz == "UTC":
+            self.skipTest("Local timezone is UTC; shift is a no-op.")
+        # Compose a naive-UTC timestamp and the local-time value it should
+        # become after the shift.
+        utc_naive = datetime(2026, 7, 6, 13, 30, 0)
+        utc_aware = utc_naive.replace(tzinfo=timezone.utc)
+        try:
+            from zoneinfo import ZoneInfo
+            expected_local = utc_aware.astimezone(ZoneInfo(tz)).replace(tzinfo=None)
+        except Exception:
+            self.skipTest(f"zoneinfo can't resolve {tz!r}")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            csv_path = Path(tmp) / "trace.csv"
+            csv_path.write_text(
+                "case_id,time:timestamp,case_setup,case_scenario_index\n"
+                f"c0,{utc_naive.isoformat(timespec='milliseconds')},baseline,0\n"
+                f"c0,{(utc_naive + timedelta(seconds=30)).isoformat(timespec='milliseconds')},baseline,0\n"
+            )
+            _, cm = _load_combined_eventlog([csv_path])
+        self.assertEqual(cm.height, 1)
+        # first_t should equal the local equivalent of 13:30 UTC (e.g.
+        # 15:30 in Europe/Berlin during CEST).
+        self.assertEqual(cm["first_t"][0], expected_local)
 
 
 if __name__ == "__main__":

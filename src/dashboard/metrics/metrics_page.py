@@ -314,6 +314,14 @@ def _load_combined_eventlog(csv_files: list[Path]) -> tuple[pl.DataFrame, pl.Dat
     `case_id`, `case_setup`, `case_scenario_index`, `first_t`, `last_t` — the
     small lookup table the filter joins against. Files that fail to read are
     skipped silently; empty inputs yield empty frames.
+
+    OpenTelemetry `start_time_unix_nano` is UTC, and `log_generator.py`
+    writes the CSV strings as naive-UTC (no offset marker). The rest of the
+    dashboard — preset buttons via `datetime.now()`, `DatetimePicker` values,
+    `_apply_filters` — all use naive-local datetimes. To keep the comparison
+    honest we convert UTC → local here on load. Naive datetimes throughout
+    the dashboard match the user's clock; a CET user sees CET times, and
+    "Last 10 min" arithmetic just works.
     """
     frames: list[pl.DataFrame] = []
     for path in csv_files:
@@ -326,11 +334,60 @@ def _load_combined_eventlog(csv_files: list[Path]) -> tuple[pl.DataFrame, pl.Dat
         frames.append(df)
     if not frames:
         return pl.DataFrame(), pl.DataFrame()
+    local_tz = _local_tz_name()
     combined = pl.concat(frames, how="diagonal_relaxed").with_columns(
-        pl.col(_TIMESTAMP_COL).str.to_datetime(strict=False)
+        pl.col(_TIMESTAMP_COL)
+        .str.to_datetime(strict=False)
+        .dt.replace_time_zone("UTC")
+        .dt.convert_time_zone(local_tz)
+        .dt.replace_time_zone(None)
     )
     case_metadata = _build_case_metadata(combined)
     return combined, case_metadata
+
+
+def _local_tz_name() -> str:
+    """Best-effort IANA name for the local timezone (e.g. 'Europe/Berlin').
+
+    Tries three sources in order:
+    1. `datetime.now().astimezone().tzinfo.key` — set when the OS resolved
+       into a `ZoneInfo`, typically on macOS and modern Linux distros with
+       `TZ` set. On WSL and some containers this returns a plain
+       `datetime.timezone` with no `.key` attribute.
+    2. `/etc/timezone` — the canonical file on Debian-family systems and
+       WSL. One line, the IANA name.
+    3. `/etc/localtime` symlink target under `/usr/share/zoneinfo/…`.
+
+    Falls back to UTC when none of the above yields a name. Comparisons
+    still work in that case because both sides end up naive-UTC.
+    """
+    try:
+        from datetime import datetime as _dt
+        tz = _dt.now().astimezone().tzinfo
+        key = getattr(tz, "key", None)
+        if key:
+            return key
+    except Exception:
+        pass
+    try:
+        etc = Path("/etc/timezone")
+        if etc.exists():
+            name = etc.read_text().strip()
+            if name:
+                return name
+    except Exception:
+        pass
+    try:
+        localtime = Path("/etc/localtime")
+        if localtime.is_symlink():
+            target = str(localtime.resolve())
+            marker = "/zoneinfo/"
+            idx = target.find(marker)
+            if idx >= 0:
+                return target[idx + len(marker):]
+    except Exception:
+        pass
+    return "UTC"
 
 
 def _build_case_metadata(eventlog: pl.DataFrame) -> pl.DataFrame:
