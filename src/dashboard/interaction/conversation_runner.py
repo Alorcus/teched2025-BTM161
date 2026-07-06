@@ -63,6 +63,28 @@ def _rejected_content(msg: AIMessage) -> str:
     return _summarize_tool_calls(getattr(msg, "tool_calls", None) or [])
 
 
+def _extract_text(content) -> str:
+    """Flatten an AIMessage.content field into a plain string.
+
+    Anthropic tool-call turns yield a list of content blocks
+    (e.g. [{"type": "text", "text": "..."}, {"type": "tool_use", ...}]);
+    text-only turns yield a str. Callers that just want the model's prose
+    should use this rather than str(content), which would render list
+    repr syntax into the panel.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "text":
+                text = item.get("text", "")
+                if text:
+                    parts.append(text)
+        return "\n".join(parts)
+    return ""
+
+
 class ConversationRunner:
     def __init__(self, shop: CoffeeShop, event_bus: EventBus):
         self.shop = shop
@@ -699,6 +721,14 @@ class ConversationRunner:
 
         if isinstance(msg, AIMessage):
             if msg.tool_calls:
+                thought_text = _extract_text(msg.content).strip()
+                if thought_text:
+                    self.event_bus.publish(DashboardEvent(
+                        event_type=EventType.AGENT_THOUGHT,
+                        agent_name=agent_name,
+                        content=thought_text,
+                        tool_name=msg.tool_calls[0].get("name"),
+                    ))
                 for tc in msg.tool_calls:
                     self.event_bus.publish(DashboardEvent(
                         event_type=EventType.TOOL_CALL,

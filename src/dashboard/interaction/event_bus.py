@@ -10,6 +10,7 @@ class EventType(Enum):
     CUSTOMER_MESSAGE = auto()
     USER_VISIBLE = auto()
     AGENT_THINKING = auto()
+    AGENT_THOUGHT = auto()
     AGENT_MESSAGE = auto()
     AGENT_MESSAGE_REJECTED = auto()
     TOOL_CALL = auto()

@@ -325,6 +325,16 @@ def _dispatch_event(
             else:
                 panel.set_status("idle")
 
+    elif event.event_type == EventType.AGENT_THOUGHT:
+        # Thoughts (LLM narration bundled with a tool call) are rendered only in
+        # the per-agent panel on the right. They are intentionally excluded from
+        # the left-hand Conversation Log: the CustomerAgent never sees them
+        # (src/stream.py filters AIMessages with tool_calls out of the reply
+        # stream), so showing them in the customer-facing chat would misrepresent
+        # what the customer is actually reacting to.
+        if panel:
+            panel.add_message("thought", event.content, tool_name=event.tool_name)
+
     elif event.event_type == EventType.AGENT_MESSAGE:
         if panel:
             panel.set_status("idle")
