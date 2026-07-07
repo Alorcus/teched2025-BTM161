@@ -374,8 +374,7 @@ def create_observatory_dashboard(setup_name: str):
         ),
         export_button,
         export_status,
-        pn.Row(status_indicator, pn.pane.Markdown("", width=10)),
-        pn.layout.Divider(margin=(18, 0, 0, 0)),
+        pn.layout.Divider(margin=(0, 0, 0, 0)),
         pn.pane.HTML(
             '<label style="font-size:14px;font-weight:600;">Conversation Log</label>',
             sizing_mode="stretch_width",
@@ -397,7 +396,6 @@ def create_observatory_dashboard(setup_name: str):
         button_type="primary",
         sizing_mode="stretch_width",
     )
-    chat_status = pn.indicators.LoadingSpinner(value=False, size=25)
 
     def on_send(event):
         msg = chat_input.value.strip()
@@ -448,11 +446,6 @@ def create_observatory_dashboard(setup_name: str):
         sizing_mode="stretch_width",
     )
     feedback_panel = pn.Column(
-        # pn.pane.HTML(
-        #     '<label style="font-size:13px;font-weight:500;">Feedback Score</label>',
-        #     sizing_mode="stretch_width",
-        #     margin=(0, 0, 2, 0),
-        # ),
         feedback_score_input,
         pn.pane.HTML(
             '<label style="font-size:13px;font-weight:500;">Reason</label>',
@@ -498,7 +491,6 @@ def create_observatory_dashboard(setup_name: str):
         take_tray_button,
         pn.layout.Divider(margin=(18, 0, 0, 0)),
         feedback_panel,
-        pn.Row(chat_status, pn.pane.Markdown("", width=10)),
         pn.layout.Divider(),
         pn.pane.HTML(
             '<label style="font-size:14px;font-weight:600;">Conversation Log</label>',
