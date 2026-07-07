@@ -14,6 +14,8 @@ generated_visualizations/
 
 event_logs/
 process_log/
+docs/
+
 
 feedback_store.json
 
