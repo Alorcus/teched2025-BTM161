@@ -61,6 +61,29 @@ def small_kpi_card(label: str, value: str) -> str:
     )
 
 
+def subtitled_kpi_card(title: str, subtitle: str, value: str) -> str:
+    """KPI card with title, one-sentence subtitle, and a single value.
+
+    Visually matches ``per_order_kpi_card`` (title + subtitle + value column),
+    so a grid of these lines up with the Time Metrics per-order cards.
+    """
+    title_style = "font-size:12px;font-weight:600;color:#4E342E;margin-bottom:2px;"
+    subtitle_style = "font-size:10px;color:#777;margin-bottom:6px;line-height:1.35;"
+    value_style = (
+        "font-weight:600;font-size:18px;color:#333;line-height:1.2;"
+        "margin-top:auto;"
+    )
+    return (
+        '<div style="padding:8px 10px;border:1px solid #e0e0e0;border-radius:6px;'
+        'background:#fafafa;display:flex;flex-direction:column;height:100%;'
+        'box-sizing:border-box;">'
+        f'<div style="{title_style}">{title}</div>'
+        f'<div style="{subtitle_style}">{subtitle}</div>'
+        f'<div style="{value_style}">{value}</div>'
+        '</div>'
+    )
+
+
 def per_order_kpi_card(title: str, subtitle: str, durations: pl.Series,
                        unit: str = "orders") -> str:
     """Per-order KPI card with title, human-readable subtitle, avg/med/n.

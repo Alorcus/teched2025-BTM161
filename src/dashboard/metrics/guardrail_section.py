@@ -4,7 +4,7 @@ import polars as pl
 
 from src.trace_processing.eventlog_conversion import ObjectCentricEventlog
 
-from .styling_helpers import COLOR_SCHEME, section_header, small_kpi_card, subsection_header
+from .styling_helpers import COLOR_SCHEME, section_header, subsection_header, subtitled_kpi_card
 
 
 _DENY_COLOR = COLOR_SCHEME["dark_red"]
@@ -106,7 +106,6 @@ class GuardrailSection:
     def _kpi_row(self, gw: pl.DataFrame, triggers: pl.DataFrame) -> pn.pane.HTML:
         denies = int(gw.filter(pl.col("decision") == "deny").height)
         flags = int(gw.filter(pl.col("decision") == "flag").height)
-        total = denies + flags
         unique_guardrails = int(triggers["guardrail_id"].n_unique()) if triggers.height else 0
         unique_tools = (
             int(gw.filter(pl.col("tool_name").is_not_null() & (pl.col("tool_name") != ""))
@@ -114,23 +113,61 @@ class GuardrailSection:
             if "tool_name" in gw.columns else 0
         )
 
+        # `object_tool_call` gets one row per `gateway_decision` record (allow,
+        # flag, or deny — see guardrail_log_loader._project), so its height is
+        # the count of every tool call the gateway consulted on. `total` is
+        # every decision; `allows` is what's left after subtracting the emitted
+        # deny/flag events.
         tool_call_tbl = self._ocel.object_tables.get("object_tool_call")
         if tool_call_tbl is None or tool_call_tbl.is_empty():
+            total = denies + flags
+            allows = 0
             deny_rate_str = "—"
         else:
-            deny_rate_str = f"{denies / tool_call_tbl.height:.1%}"
+            total = int(tool_call_tbl.height)
+            allows = max(0, total - denies - flags)
+            deny_rate_str = f"{denies / total:.1%}"
 
         cards = [
-            ("Total evaluations", str(total)),
-            ("Denies", str(denies)),
-            ("Flags", str(flags)),
-            ("Guardrails triggered", str(unique_guardrails)),
-            ("Tools intercepted", str(unique_tools)),
-            ("Deny rate", deny_rate_str),
+            (
+                "Total evaluations",
+                f"Every tool call the gateway consulted on ({allows} allowed, "
+                f"{flags} flagged, {denies} denied).",
+                str(total),
+            ),
+            (
+                "Denies",
+                "Tool calls the gateway hard-blocked before they could run.",
+                str(denies),
+            ),
+            (
+                "Flags",
+                "Allowed tool calls that at least one guardrail voted to flag.",
+                str(flags),
+            ),
+            (
+                "Guardrails triggered",
+                "Distinct guardrails that produced a deny or flag verdict.",
+                str(unique_guardrails),
+            ),
+            (
+                "Tools intercepted",
+                "Distinct tools that were denied or flagged at least once.",
+                str(unique_tools),
+            ),
+            (
+                "Deny rate",
+                "Share of gateway-evaluated tool calls that ended in a deny.",
+                deny_rate_str,
+            ),
         ]
-        cards_html = "".join(small_kpi_card(label, value) for label, value in cards)
+        cards_html = "".join(
+            subtitled_kpi_card(label, subtitle, value)
+            for label, subtitle, value in cards
+        )
         return pn.pane.HTML(
-            f'<div style="padding:2px 0;display:flex;flex-wrap:wrap;">{cards_html}</div>',
+            f'<div style="padding:12px 0 2px;display:grid;grid-template-columns:repeat(6, 1fr);'
+            f'gap:8px;width:100%;">{cards_html}</div>',
             sizing_mode="stretch_width",
         )
 
