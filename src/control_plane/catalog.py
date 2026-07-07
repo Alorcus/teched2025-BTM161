@@ -69,7 +69,6 @@ class Catalog:
         self._guidelines: dict[str, Guideline] = {}
         self._temporal_guardrail: TemporalConstraintGuardrail | None = None
 
-        # Load guardrails from YAML
         guardrails_dir = Path(config_dir) / "guardrails"
         if not guardrails_dir.exists():
             raise FileNotFoundError(f"Guardrails directory not found: {guardrails_dir}")
@@ -80,7 +79,6 @@ class Catalog:
                     guardrail = _build_guardrail(entry)
                     self._guardrails[guardrail.name] = guardrail
 
-        # Load guidelines from YAML
         guidelines_dir = Path(config_dir) / "guidelines"
         if not guidelines_dir.exists():
             raise FileNotFoundError(f"Guidelines directory not found: {guidelines_dir}")
@@ -95,7 +93,6 @@ class Catalog:
                     )
                     self._guidelines[guideline.id] = guideline
 
-        # Load temporal constraints if they exist (YOUR ADDITION)
         constraints_path = Path(config_dir) / "constraints" / "temporal_order.yaml"
         print(f"🔍 Looking for temporal constraints at: {constraints_path}")
         print(f"📁 File exists: {constraints_path.exists()}")
