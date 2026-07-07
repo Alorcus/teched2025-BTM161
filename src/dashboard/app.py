@@ -106,8 +106,6 @@ def main():
     parser.add_argument(
         "--list-setups",
         action="store_true",
-        "--list-setups",
-        action="store_true",
         help="List available setups under config/setups/ and exit.",
     )
     args = parser.parse_args()
