@@ -61,6 +61,8 @@ def _reclaim_port_if_orphaned(port: int) -> None:
                 "Found orphaned dashboard pid=%s on port %s; killing it.",
                 proc.pid,
                 port,
+                proc.pid,
+                port,
             )
             try:
                 proc.send_signal(signal.SIGTERM)
@@ -89,6 +91,9 @@ def _reclaim_port_if_orphaned(port: int) -> None:
 
 def main():
     """Start the multi-page Panel dashboard server."""
+    parser = argparse.ArgumentParser(
+        description="Coffee Shop Agent Observatory dashboard"
+    )
     parser = argparse.ArgumentParser(
         description="Coffee Shop Agent Observatory dashboard"
     )
