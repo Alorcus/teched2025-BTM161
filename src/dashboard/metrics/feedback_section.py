@@ -34,21 +34,28 @@ class FeedbackSection:
         )
 
     def _load_data(self) -> pl.DataFrame | None:
-        # Pull the user_feedback events straight from the OCEL — every other
-        # metrics section sources from `ocel` and we want a single source of
-        # truth. TraceProcessor injects exactly one user_feedback event per
-        # case during export (see trace_processor.py).
-        df = self._ocel.event_tables.get("event_user_feedback")
-        if df is None or df.is_empty():
-            return None
-        return df
+        # Feedback is stored in event_tables under event_user_feedback
+        if hasattr(self._ocel, "event_tables"):
+            if "event_user_feedback" in self._ocel.event_tables:
+                df = self._ocel.event_tables["event_user_feedback"]
+                if df is not None and not df.is_empty():
+                    # Convert feedback_score to float
+                    if "feedback_score" in df.columns:
+                        df = df.with_columns(pl.col("feedback_score").cast(pl.Float64))
+                    return df
+
+        return None
 
     def _build_kpi_row(self) -> pn.pane.HTML:
         df = self._data
         n = df.height
         avg_score = float(df["feedback_score"].mean())
         excellent = int(df.filter(pl.col("feedback_score") >= 0.75).height)
-        normal = int(df.filter((pl.col("feedback_score") >= 0.25) & (pl.col("feedback_score") < 0.75)).height)
+        normal = int(
+            df.filter(
+                (pl.col("feedback_score") >= 0.25) & (pl.col("feedback_score") < 0.75)
+            ).height
+        )
         not_satisfied = int(df.filter(pl.col("feedback_score") < 0.25).height)
 
         if avg_score >= 0.75:
@@ -81,8 +88,7 @@ class FeedbackSection:
             return pn.pane.HTML("")
 
         agg = (
-            df_with_scenario
-            .group_by("scenario_index")
+            df_with_scenario.group_by("scenario_index")
             .agg(
                 pl.col("feedback_score").mean().alias("avg_score"),
                 pl.col("feedback_score").count().alias("count"),
@@ -97,7 +103,13 @@ class FeedbackSection:
             score = row["avg_score"]
             count = row["count"]
             bar_width = int(score * 100)
-            color = "#4CAF50" if score >= 0.75 else "#FF9800" if score >= 0.25 else "#F44336"
+            color = (
+                "#4CAF50"
+                if score >= 0.75
+                else "#FF9800"
+                if score >= 0.25
+                else "#F44336"
+            )
             rows_html += (
                 f'<div style="margin:3px 0;">'
                 f'<div style="font-size:10px;color:#555;margin-bottom:2px;">'
@@ -105,10 +117,10 @@ class FeedbackSection:
                 f'<div style="display:flex;align-items:center;gap:6px;">'
                 f'<div style="flex:1;background:#eee;border-radius:3px;height:10px;">'
                 f'<div style="width:{bar_width}%;background:{color};height:10px;border-radius:3px;"></div>'
-                f'</div>'
+                f"</div>"
                 f'<div style="font-size:11px;font-weight:600;color:#333;min-width:32px;">{score:.2f}</div>'
-                f'</div>'
-                f'</div>'
+                f"</div>"
+                f"</div>"
             )
 
         return pn.Column(

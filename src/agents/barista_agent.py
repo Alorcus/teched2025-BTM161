@@ -24,7 +24,6 @@ from .order_store import load_order
 from .order_state_machine import state_machine, InvalidTransitionError
 
 
-
 def _thread_id(config: RunnableConfig | None) -> str | None:
     """Pull the LangGraph thread_id (== MLflow case_id) out of an injected config.
 
@@ -74,11 +73,15 @@ def start_coffee_machine() -> bool:
     global COFFEE_MACHINE_PROCESS
 
     with _MACHINE_LOCK:
+        # Check if already running
         if is_machine_running():
             return True
 
+        # Check if port is in use but machine not responding (stuck process)
         if check_port_in_use(COFFEE_MACHINE_PORT):
-            logger.warning(f"Port {COFFEE_MACHINE_PORT} is in use but machine not responding")
+            logger.warning(
+                f"Port {COFFEE_MACHINE_PORT} is in use but machine not responding"
+            )
             return False
 
         try:
@@ -98,8 +101,8 @@ def start_coffee_machine() -> bool:
 
             COFFEE_MACHINE_PROCESS = subprocess.Popen(
                 [
-                    python_executable,
-                    "-m",
+                    "poetry",
+                    "run",
                     "uvicorn",
                     "services.coffee_machine.main:app",
                     "--port",
@@ -110,17 +113,11 @@ def start_coffee_machine() -> bool:
                 **popen_kwargs,
             )
 
-            # Wait for startup
             for _ in range(10):
                 time.sleep(1)
                 if is_machine_running():
-                    logger.info("Coffee machine started successfully")
                     return True
 
-            # Check if process failed
-            if COFFEE_MACHINE_PROCESS.poll() is not None:
-                stderr = COFFEE_MACHINE_PROCESS.stderr.read().decode()
-                logger.error(f"Coffee machine failed to start: {stderr}")
             return False
 
         except Exception as e:
@@ -468,5 +465,3 @@ def clean_machine(config: RunnableConfig = None) -> str:
         return json.dumps(data)
     except Exception:
         return json.dumps({"status": "error", "message": "Invalid response from machine."})
-
-

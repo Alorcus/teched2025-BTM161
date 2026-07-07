@@ -32,12 +32,14 @@ class _EventBusLogHandler(logging.Handler):
 
     def emit(self, record: logging.LogRecord):
         agent = record.name.replace("coffee_shop.", "").split(".")[0]
-        self._event_bus.publish(DashboardEvent(
-            event_type=EventType.LOG_MESSAGE,
-            agent_name=agent,
-            content=record.getMessage(),
-            log_level=record.levelno,
-        ))
+        self._event_bus.publish(
+            DashboardEvent(
+                event_type=EventType.LOG_MESSAGE,
+                agent_name=agent,
+                content=record.getMessage(),
+                log_level=record.levelno,
+            )
+        )
 
 
 def _agent_registry_from_repo(shop: CoffeeShop) -> dict[str, dict]:
@@ -87,8 +89,9 @@ def create_observatory_dashboard(setup_name: str):
             tools=reg.get("tools", []),
         )
 
-    grid = pn.GridSpec(ncols=2, nrows=2, sizing_mode="stretch_both",
-                       styles={"gap": "5px"})
+    grid = pn.GridSpec(
+        ncols=2, nrows=2, sizing_mode="stretch_both", styles={"gap": "5px"}
+    )
     positions = [(0, 0), (0, 1), (1, 0), (1, 1)]
     for (agent_name, panel_obj), (r, c) in zip(agent_panels.items(), positions):
         grid[r, c] = panel_obj.panel()
@@ -104,21 +107,26 @@ def create_observatory_dashboard(setup_name: str):
     }
     scenario_options["Custom"] = -1
     scenario_select = pn.widgets.Select(
-        name="", options=scenario_options, sizing_mode="stretch_width",
+        name="",
+        options=scenario_options,
+        sizing_mode="stretch_width",
         margin=(0, 0, 5, 0),
     )
 
     log_level_options = {"DEBUG": 10, "INFO": 20, "WARNING": 30, "ERROR": 40}
     log_level_select = pn.widgets.Select(
-        name="", options=log_level_options, value=20,
-        sizing_mode="stretch_width", margin=(0, 0, 5, 0),
+        name="",
+        options=log_level_options,
+        value=20,
+        sizing_mode="stretch_width",
+        margin=(0, 0, 5, 0),
     )
     prompt_textarea = pn.widgets.TextAreaInput(
-        name="Customer Prompt",
+        # name="Customer Prompt",
         value=build_default_prompt(0),
         height=200,
         sizing_mode="stretch_width",
-        margin=(0, 0, 10, 0),
+        margin=(0, 4, 10, 0),
     )
 
     # Guards re-entrant updates between the two watchers below: each callback
@@ -142,8 +150,11 @@ def create_observatory_dashboard(setup_name: str):
         if _suppress_watchers[0]:
             return
         matched = next(
-            (i for i in range(len(CUSTOMER_SCENARIOS))
-             if event.new == build_default_prompt(i)),
+            (
+                i
+                for i in range(len(CUSTOMER_SCENARIOS))
+                if event.new == build_default_prompt(i)
+            ),
             None,
         )
         target = -1 if matched is None else matched
@@ -158,8 +169,10 @@ def create_observatory_dashboard(setup_name: str):
     prompt_textarea.param.watch(on_prompt_change, "value")
 
     run_button = pn.widgets.Button(
-        name="Run Conversation", button_type="primary",
-        sizing_mode="stretch_width", height=36,
+        name="Run Conversation",
+        button_type="primary",
+        sizing_mode="stretch_width",
+        height=36,
         margin=(0, 0, 0, 0),
     )
     # Pause/Go toggle: square button (36x36), height matches run_button so
@@ -216,15 +229,24 @@ def create_observatory_dashboard(setup_name: str):
         sizing_mode="stretch_width",
         styles={"font-size": "11px", "min-height": "16px"},
     )
-    _export_done_flag: list[str] = []   # thread-safe message queue: ["ok"] or ["err: …"]
-    _conversation_has_run: list[bool] = [False]  # mutable container so closure can write to it
+    _export_done_flag: list[str] = []  # thread-safe message queue: ["ok"] or ["err: …"]
+    _conversation_has_run: list[bool] = [
+        False
+    ]  # mutable container so closure can write to it
     _export_in_progress = threading.Event()  # set while a daemon export is running
 
     status_indicator = pn.indicators.LoadingSpinner(value=False, size=25)
     conversation_log = pn.pane.HTML(
         '<div style="font-size:12px;color:#999;">No conversation yet.</div>',
-        sizing_mode="stretch_both",
-        styles={"overflow-y": "auto", "flex": "1"},
+        sizing_mode="stretch_width",
+        styles={
+            "overflow-y": "auto",
+            "border": "1px solid #D7CCC8",
+            "border-radius": "6px",
+            "padding": "6px 8px",
+            "flex": "1 1 0",
+            "min-height": "150px",
+        },
     )
     log_entries: list[str] = []
 
@@ -236,7 +258,9 @@ def create_observatory_dashboard(setup_name: str):
         log_entries.clear()
         conversation_log.object = ""
         status_indicator.value = True
-        runner.start(scenario_index=scenario_select.value, custom_prompt=prompt_textarea.value)
+        runner.start(
+            scenario_index=scenario_select.value, custom_prompt=prompt_textarea.value
+        )
 
     run_button.on_click(on_run)
 
@@ -269,9 +293,19 @@ def create_observatory_dashboard(setup_name: str):
     def poll_events():
         events = event_bus.drain()
         for ev in events:
-            _dispatch_event(ev, agent_panels, log_entries, conversation_log,
-                            coffee_machine_panel, tray_panel, log_level_select.value,
-                            export_button, _conversation_has_run)
+            _dispatch_event(
+                ev,
+                agent_panels,
+                log_entries,
+                conversation_log,
+                coffee_machine_panel,
+                tray_panel,
+                take_tray_button,
+                current_tray_order,
+                log_level_select.value,
+                export_button,
+                _conversation_has_run,
+            )
         if not runner.is_running and not events:
             status_indicator.value = False
         stock_panel.refresh()
@@ -282,40 +316,216 @@ def create_observatory_dashboard(setup_name: str):
             if msg == "ok":
                 export_status.object = '<span style="color:#4CAF50;">✅ Export complete — saved to ./generated_event_log/</span>'
             else:
-                export_status.object = f'<span style="color:#F44336;">❌ {msg[4:]}</span>'
+                export_status.object = (
+                    f'<span style="color:#F44336;">❌ {msg[4:]}</span>'
+                )
             if not runner.is_running and _conversation_has_run[0]:
                 export_button.disabled = False
 
-    sidebar = pn.Column(
+    # ── Mode Toggle (als nativer HTML-Switch, wie der Theme-Toggle in der Navbar) ──
+    mode_toggle = pn.widgets.RadioButtonGroup(
+        name="Customer mode",
+        options={"🤖  AI agent": "ai", "👤  Manuell": "manual"},
+        value="ai",
+        button_type="light",
+        sizing_mode="stretch_width",
+        margin=(0, 4, 10, 0),
+    )
+
+    # ── AI-Panel ─────────────────────────────────────
+    ai_panel = pn.Column(
         pn.Row(
             pn.Column(
-                pn.pane.HTML('<label style="font-size:13px;font-weight:500;">Scenario</label>',
-                             sizing_mode="stretch_width", margin=(0, 0, 2, 0)),
+                pn.pane.HTML(
+                    '<label style="font-size:13px;font-weight:500;">Scenario</label>',
+                    sizing_mode="stretch_width",
+                    margin=(0, 0, 2, 0),
+                ),
                 scenario_select,
-                sizing_mode="stretch_width", styles={"flex": "2"},
+                sizing_mode="stretch_width",
+                styles={"flex": "2"},
             ),
             pn.Column(
-                pn.pane.HTML('<label style="font-size:13px;font-weight:500;">Log Level</label>',
-                             sizing_mode="stretch_width", margin=(0, 0, 2, 0)),
+                pn.pane.HTML(
+                    '<label style="font-size:13px;font-weight:500;">Log Level</label>',
+                    sizing_mode="stretch_width",
+                    margin=(0, 0, 2, 0),
+                ),
                 log_level_select,
-                sizing_mode="stretch_width", styles={"flex": "1"},
+                sizing_mode="stretch_width",
+                styles={"flex": "1"},
             ),
-            sizing_mode="stretch_width", margin=(0, 0, 5, 0),
+            sizing_mode="stretch_width",
+            margin=(0, 0, 5, 0),
             styles={"gap": "5px"},
         ),
+        pn.pane.HTML(
+            '<label style="font-size:13px;font-weight:500;">Customer Prompt</label>',
+            sizing_mode="stretch_width",
+            margin=(0, 0, 2, 0),
+        ),
         prompt_textarea,
-        pn.Row(pause_toggle, run_button, sizing_mode="stretch_width",
-               margin=(0, 0, 0, 0), styles={"align-items": "center"}),
+        pn.Row(
+            pause_toggle,
+            run_button,
+            sizing_mode="stretch_width",
+            margin=(0, 0, 0, 0),
+            styles={"align-items": "center"},
+        ),
         export_button,
         export_status,
-        pn.Row(status_indicator, pn.pane.Markdown("", width=10)),
-        pn.layout.Divider(),
-        pn.pane.HTML('<label style="font-size:14px;font-weight:600;margin-bottom:8px;display:block;">Conversation Log</label>',
-                     sizing_mode="stretch_width"),
+        pn.layout.Divider(margin=(0, 0, 0, 0)),
+        pn.pane.HTML(
+            '<label style="font-size:14px;font-weight:600;">Conversation Log</label>',
+            sizing_mode="stretch_width",
+            margin=(10, 0, 8, 0),
+        ),
         conversation_log,
+        sizing_mode="stretch_width",
+    )
+
+    # ── Manual-Panel ─────────────────────────────────
+    chat_input = pn.widgets.TextAreaInput(
+        placeholder="Nachricht eingeben…",
+        height=120,
+        sizing_mode="stretch_width",
+        margin=(0, 4, 5, 0),
+    )
+    send_button = pn.widgets.Button(
+        name="Send Message",
+        button_type="primary",
+        sizing_mode="stretch_width",
+    )
+
+    def on_send(event):
+        msg = chat_input.value.strip()
+        if not msg:
+            return
+        chat_input.value = ""
+        runner.send_manual_message(msg)
+
+    send_button.on_click(on_send)
+
+    take_tray_button = pn.widgets.Button(
+        name="Take Order From Tray",
+        button_type="success",
+        sizing_mode="stretch_width",
+        disabled=True,
+    )
+
+    current_tray_order = {"id": None}
+
+    def on_take_tray(event):
+        if not current_tray_order["id"]:
+            return
+
+        runner.take_tray()
+
+        current_tray_order["id"] = None
+        take_tray_button.disabled = True
+
+    take_tray_button.on_click(on_take_tray)
+
+    feedback_score_input = pn.widgets.FloatSlider(
+        name="Feedback Score",
+        start=0.0,
+        end=1.0,
+        step=0.1,
+        value=0.8,
+        sizing_mode="stretch_width",
+        margin=(10, 4, 5, 0),
+    )
+    feedback_reason_input = pn.widgets.TextInput(
+        placeholder="Reason (optional)…",
+        sizing_mode="stretch_width",
+        margin=(0, 4, 5, 0),
+    )
+    end_conversation_button = pn.widgets.Button(
+        name="End Conversation & Submit Feedback",
+        button_type="warning",
+        sizing_mode="stretch_width",
+    )
+    feedback_panel = pn.Column(
+        feedback_score_input,
+        pn.pane.HTML(
+            '<label style="font-size:13px;font-weight:500;">Reason</label>',
+            sizing_mode="stretch_width",
+            margin=(0, 0, 2, 0),
+        ),
+        feedback_reason_input,
+        end_conversation_button,
+        sizing_mode="stretch_width",
+    )
+
+    def on_end_conversation(event):
+        runner.end_manual_conversation(
+            feedback_score=feedback_score_input.value,
+            feedback_reason=feedback_reason_input.value,
+        )
+        feedback_score_input.value = 0.8
+        feedback_reason_input.value = ""
+
+    end_conversation_button.on_click(on_end_conversation)
+
+    manual_panel = pn.Column(
+        pn.Row(
+            pn.Column(
+                pn.pane.HTML(
+                    '<label style="font-size:13px;font-weight:500;">Log Level</label>',
+                    sizing_mode="stretch_width",
+                    margin=(0, 0, 2, 0),
+                ),
+                log_level_select,
+                sizing_mode="stretch_width",
+            ),
+            sizing_mode="stretch_width",
+            margin=(0, 0, 5, 0),
+        ),
+        pn.pane.HTML(
+            '<label style="font-size:13px;font-weight:500;">Message</label>',
+            sizing_mode="stretch_width",
+            margin=(0, 0, 2, 0),
+        ),
+        chat_input,
+        send_button,
+        take_tray_button,
+        pn.layout.Divider(margin=(18, 0, 0, 0)),
+        feedback_panel,
+        pn.layout.Divider(),
+        pn.pane.HTML(
+            '<label style="font-size:14px;font-weight:600;">Conversation Log</label>',
+            sizing_mode="stretch_width",
+            margin=(10, 0, 8, 0),
+        ),
+        conversation_log,
+        sizing_mode="stretch_width",
+    )
+
+    # ── Reaktiver Wechsel: visible statt pn.bind ──────────────────────────────
+    def on_mode_change(event):
+        ai_panel.visible = event.new == "ai"
+        manual_panel.visible = event.new == "manual"
+
+    mode_toggle.param.watch(on_mode_change, "value")
+
+    manual_panel.visible = False
+
+    content_panel = pn.Column(
+        ai_panel,
+        manual_panel,
+        sizing_mode="stretch_width",
+    )
+
+    sidebar = pn.Column(
+        pn.pane.HTML(
+            '<label style="font-size:13px;font-weight:500;">Customer mode</label>',
+            sizing_mode="stretch_width",
+            margin=(0, 0, 4, 0),
+        ),
+        mode_toggle,
+        content_panel,
         width=340,
         sizing_mode="stretch_height",
-        styles={"display": "flex", "flex-direction": "column"},
     )
 
     # Navigation tabs for header
@@ -325,17 +535,27 @@ def create_observatory_dashboard(setup_name: str):
         title=f"Coffee Shop Agent Observatory — {setup_name}",
         sidebar=[sidebar],
         header=[nav_tabs],
-        main=[pn.Column(
-            pn.Row(
-                pn.Column(tray_panel.panel(), width=160, height=160),
-                pn.Column(stock_panel.panel(), sizing_mode="stretch_both", styles={"flex": "2"}),
-                pn.Column(coffee_machine_panel.panel(), sizing_mode="stretch_width", styles={"flex": "1"}),
-                sizing_mode="stretch_width",
-            ),
-            grid,
-            sizing_mode="stretch_both",
-            styles={"gap": "5px"},
-        )],
+        main=[
+            pn.Column(
+                pn.Row(
+                    pn.Column(tray_panel.panel(), width=160, height=160),
+                    pn.Column(
+                        stock_panel.panel(),
+                        sizing_mode="stretch_both",
+                        styles={"flex": "2"},
+                    ),
+                    pn.Column(
+                        coffee_machine_panel.panel(),
+                        sizing_mode="stretch_width",
+                        styles={"flex": "1"},
+                    ),
+                    sizing_mode="stretch_width",
+                ),
+                grid,
+                sizing_mode="stretch_both",
+                styles={"gap": "5px"},
+            )
+        ],
         accent_base_color="#795548",
         header_background="#4E342E",
         theme="default",
@@ -349,13 +569,17 @@ def create_observatory_dashboard(setup_name: str):
 
 
 def _dispatch_event(
-    event, agent_panels: dict[str, AgentPanel],
-    log_entries: list[str], conversation_log,
+    event,
+    agent_panels: dict[str, AgentPanel],
+    log_entries: list[str],
+    conversation_log,
     coffee_machine_panel: CoffeeMachinePanel,
     tray_panel: TrayPanel,
+    take_tray_button,
+    current_tray_order,
     min_log_level: int = 20,
-    export_button = None,
-    conversation_has_run: Optional[list[bool]] = None
+    export_button=None,
+    conversation_has_run: Optional[list[bool]] = None,
 ):
     panel = agent_panels.get(event.agent_name)
 
@@ -368,11 +592,14 @@ def _dispatch_event(
                 "WARNING": "#FF9800",
                 "ERROR": "#F44336",
             }.get(level_name, "#666")
-            _log(log_entries, conversation_log,
-                 f'<span style="font-family:monospace;font-size:11px;color:{color};'
-                 f'border-left:3px solid {color};padding-left:6px;">'
-                 f'[{level_name}] {event.agent_name}: '
-                 f'{_truncate(event.content, 120)}</span>')
+            _log(
+                log_entries,
+                conversation_log,
+                f'<span style="font-family:monospace;font-size:11px;color:{color};'
+                f'border-left:3px solid {color};padding-left:6px;">'
+                f"[{level_name}] {event.agent_name}: "
+                f"{_truncate(event.content, 120)}</span>",
+            )
         return
 
     if event.event_type == EventType.AGENT_THINKING:
@@ -386,24 +613,32 @@ def _dispatch_event(
         if panel:
             panel.set_status("idle")
             panel.add_message("ai", event.content)
-        _log(log_entries, conversation_log,
-             f'<span style="color:{panel.color if panel else "#333"}">'
-             f'<b>{event.agent_name}</b></span>: {_truncate(event.content)}')
+        _log(
+            log_entries,
+            conversation_log,
+            f'<span style="color:{panel.color if panel else "#333"}">'
+            f"<b>{event.agent_name}</b></span>: {_truncate(event.content)}",
+        )
 
     elif event.event_type == EventType.AGENT_MESSAGE_REJECTED:
         if panel:
             panel.set_status("idle")
-            panel.add_message("ai_rejected", event.content, reason=event.rejection_reason)
+            panel.add_message(
+                "ai_rejected", event.content, reason=event.rejection_reason
+            )
         reason_short = ""
         if event.rejection_reason:
             reason_short = (
                 f' <span style="color:#8a3a34;font-style:italic;font-size:11px;">'
-                f'⚠ {_truncate(event.rejection_reason, 160)}</span>'
+                f"⚠ {_truncate(event.rejection_reason, 160)}</span>"
             )
-        _log(log_entries, conversation_log,
-             f'<span style="color:#b3261e"><b>{event.agent_name} [REJECTED]</b></span>: '
-             f'<span style="color:#b3261e;">'
-             f'{_truncate(event.content)}</span>{reason_short}')
+        _log(
+            log_entries,
+            conversation_log,
+            f'<span style="color:#b3261e"><b>{event.agent_name} [REJECTED]</b></span>: '
+            f'<span style="color:#b3261e;">'
+            f"{_truncate(event.content)}</span>{reason_short}",
+        )
 
     elif event.event_type == EventType.TOOL_CALL:
         # Render-only TOOL_CALL events for rejected attempts: show in agent
@@ -452,26 +687,60 @@ def _dispatch_event(
     elif event.event_type == EventType.HANDOFF:
         if panel:
             panel.set_status("handed_off")
-        _log(log_entries, conversation_log,
-             f'<span style="color:#9C27B0"><b>HANDOFF</b></span> '
-             f'{event.agent_name} → {event.target_agent}')
+        _log(
+            log_entries,
+            conversation_log,
+            f'<span style="color:#9C27B0"><b>HANDOFF</b></span> '
+            f"{event.agent_name} → {event.target_agent}",
+        )
 
     elif event.event_type == EventType.CUSTOMER_MESSAGE:
-        _log(log_entries, conversation_log,
-             f'<span style="color:#424242"><b>Customer</b></span>: '
-             f'{_truncate(event.content)}')
+        _log(
+            log_entries,
+            conversation_log,
+            f'<span style="color:#424242"><b>Customer</b></span>: '
+            f"{_truncate(event.content)}",
+        )
 
     elif event.event_type == EventType.USER_VISIBLE:
         if panel:
             panel.add_message("user", event.content)
 
     elif event.event_type == EventType.CONVERSATION_START:
-        _log(log_entries, conversation_log,
-             f'<span style="color:#4CAF50"><b>START</b></span> {_truncate(event.content)}')
+        _log(
+            log_entries,
+            conversation_log,
+            f'<span style="color:#4CAF50"><b>START</b></span> {_truncate(event.content)}',
+        )
 
     elif event.event_type == EventType.CONVERSATION_END:
-        _log(log_entries, conversation_log,
-             '<span style="color:#F44336"><b>END</b></span> Conversation complete')
+        _log(
+            log_entries,
+            conversation_log,
+            '<span style="color:#F44336"><b>END</b></span> Conversation complete',
+        )
+        tray_panel.clear()
+        if conversation_has_run is not None:
+            conversation_has_run[0] = True
+        if export_button is not None:
+            export_button.disabled = False
+
+    elif event.event_type == EventType.TRAY_READY:
+        current_tray_order["id"] = event.content
+        take_tray_button.disabled = False
+
+    elif event.event_type == EventType.TRAY_TAKEN:
+        current_tray_order["id"] = None
+        take_tray_button.disabled = True
+        tray_panel.clear()
+
+    elif event.event_type == EventType.TRAY_READY:
+        current_tray_order["id"] = event.content
+        take_tray_button.disabled = False
+
+    elif event.event_type == EventType.TRAY_TAKEN:
+        current_tray_order["id"] = None
+        take_tray_button.disabled = True
         tray_panel.clear()
         if conversation_has_run is not None:
             conversation_has_run[0] = True

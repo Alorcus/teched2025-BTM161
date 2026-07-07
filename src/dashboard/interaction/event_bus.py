@@ -16,6 +16,8 @@ class EventType(Enum):
     TOOL_RESULT = auto()
     HANDOFF = auto()
     LOG_MESSAGE = auto()
+    TRAY_READY = auto()
+    TRAY_TAKEN = auto()
 
 
 @dataclass
