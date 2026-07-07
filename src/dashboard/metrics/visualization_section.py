@@ -81,6 +81,13 @@ class VisualizationSection:
                 )
                 .unique()
             )
+            # Display name: "customer_service_agent" -> "Customer Service", "barista_agent" -> "Barista"
+            agent_display = (
+                pl.col("agent_type")
+                .str.replace(r"_agent$", "")
+                .str.replace_all("_", " ")
+                .str.to_titlecase()
+            )
             flat_log = (
                 flat
                 .join(eo, left_on="ocel_id", right_on="ocel_event_id", how="inner")
@@ -89,7 +96,7 @@ class VisualizationSection:
                 .with_columns(
                     activity=pl.when(pl.col("ocel_type") == "user_feedback")
                     .then(pl.lit("User: feedback"))
-                    .otherwise(pl.format("{}: {}", pl.col("agent_type"), pl.col("ocel_type")))
+                    .otherwise(pl.format("{}: {}", agent_display, pl.col("ocel_type")))
                 )
             )
             if flat_log.is_empty():
