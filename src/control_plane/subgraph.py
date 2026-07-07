@@ -14,8 +14,8 @@ tool_call_id in the AIMessage so the Anthropic tool_use↔tool_result invariant
 holds, and control returns to the LLM with denial reasons. Only when every
 proposed call is allowed (or flagged) does the batch reach `tools`.
 """
+
 import logging
-from typing import Callable
 
 from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
@@ -65,6 +65,17 @@ def create_agent_subgraph(
         # create_react_agent set this for us; we need to set it explicitly so
         # _resolve_from_agent and context-isolation boundary detection keep working.
         ai.name = agent_id
+        # On a final user-facing reply (no tool calls), run on_output-stage
+        # guardrails (e.g. NeMo output rails). A DENY rewrites the reply text.
+        if not getattr(ai, "tool_calls", None):
+            text = ai.content if isinstance(ai.content, str) else str(ai.content)
+            decision = gateway.evaluate_output(
+                text, dict(state), thread_id=_thread_id_of(config)
+            )
+            if decision.final_decision == Effect.DENY:
+                ai.content = (
+                    decision.deny_reason_for_llm or "I'm sorry, I can't help with that."
+                )
         return {"messages": [ai]}
 
     def route_after_llm(state: CoffeeShopState) -> str:
@@ -102,12 +113,14 @@ def create_agent_subgraph(
                     f"Tool call {d.tool_name!r} was not executed because a sibling tool "
                     f"call in the same batch was denied by a guardrail: {sibling_blurb}"
                 )
-            synth.append(ToolMessage(
-                content=content,
-                name=d.tool_name,
-                tool_call_id=d.tool_call_id,
-                status="error",
-            ))
+            synth.append(
+                ToolMessage(
+                    content=content,
+                    name=d.tool_name,
+                    tool_call_id=d.tool_call_id,
+                    status="error",
+                )
+            )
         return {"messages": synth}
 
     def route_after_gateway(state: CoffeeShopState) -> str:
@@ -146,6 +159,8 @@ def create_agent_subgraph(
     g.add_node("tools", tools_node_wrapped)
     g.add_edge(START, "llm")
     g.add_conditional_edges("llm", route_after_llm, {"gateway": "gateway", END: END})
-    g.add_conditional_edges("gateway", route_after_gateway, {"tools": "tools", "llm": "llm", END: END})
+    g.add_conditional_edges(
+        "gateway", route_after_gateway, {"tools": "tools", "llm": "llm", END: END}
+    )
     g.add_edge("tools", "llm")
     return g.compile()

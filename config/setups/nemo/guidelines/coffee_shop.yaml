@@ -1,0 +1,14 @@
+guidelines:
+  - id: handoff_etiquette
+    version: v1
+    prompt: |
+      When you hand off to another agent, always provide a context_summary
+      and an explicit expectation. The next agent only sees a synthetic briefing
+      built from these two fields plus the messages after the handoff boundary.
+  - id: order_number_handoff
+    version: v1
+    prompt: |
+      When you hand off to another agent, and an order has been processed, include the order_number
+      in this format: Order Number: ORDXXXX.
+      Make absolutely sure to include it if the order has been processed successfully.
+      If no order has been processed, do not include an order number.

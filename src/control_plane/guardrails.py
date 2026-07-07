@@ -14,6 +14,10 @@ class Guardrail(ABC):
     tools: list[str] = field(default_factory=list)
     effect: Effect = Effect.DENY
     description: str = ""
+    # When the gateway evaluates this guardrail: "pre_call" (before a tool call,
+    # the default and only stage the existing guardrails use) or "on_output"
+    # (on the agent's final user-facing reply, via Gateway.evaluate_output).
+    stage: str = "pre_call"
 
     @abstractmethod
     def eval(self, context: GuardrailContext) -> Verdict: ...

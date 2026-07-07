@@ -1,0 +1,19 @@
+# NeMo Guardrails configuration used by the `type: nemo` guardrails in this setup.
+#
+# No `models:` are declared here on purpose — the control plane injects the
+# agents' own LangChain LLM at runtime (LLMRails(config, llm=...)), so NeMo's
+# LLM-based rails share the same model the agents use.
+#
+# Only input + output rails are enabled. They are invoked via LLMRails.check()
+# (validation-only), never the full generate() loop, so no dialog/retrieval
+# rails run. Topical restriction is folded into the self_check_input prompt
+# (see prompts.yml) rather than authored as separate Colang dialog rails.
+models: []
+
+rails:
+  input:
+    flows:
+      - self check input
+  output:
+    flows:
+      - self check output

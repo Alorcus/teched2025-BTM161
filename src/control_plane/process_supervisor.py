@@ -29,6 +29,7 @@ Activities mirror docs/order-process-flow.md (BPMN model):
   AND-split { A04 Place Food on Tray, A05 Brew Coffee, A06 Purchase Order } →
   AND-join → A07 Handout Order (terminal).
 """
+
 from __future__ import annotations
 
 import logging
@@ -210,13 +211,17 @@ class ProcessSupervisor:
         decision = self._llm_decide(msg, agent_name, trigger, tool, target)
         return f"{decision} | {serialized}"
 
-    def _terminate_for_handoff(self, source_agent: str, target_agent: str | None) -> str:
+    def _terminate_for_handoff(
+        self, source_agent: str, target_agent: str | None
+    ) -> str:
         """Find the most recent non-terminated activity by source_agent and
         emit a Termination line for it. If none is found, that's a violation."""
         prior = self._last_open_activity_for(source_agent)
         target = target_agent or "?"
         if prior is None:
-            return f"Violation:handoff_without_prior_activity_{source_agent}_to_{target}"
+            return (
+                f"Violation:handoff_without_prior_activity_{source_agent}_to_{target}"
+            )
         return f"Termination:{prior[0]}:{prior[1]}:via_handoff_to_{target}"
 
     def _last_open_activity_for(self, agent: str) -> tuple[str, str] | None:
@@ -226,10 +231,10 @@ class ProcessSupervisor:
         terminated_ids: set[str] = set()
         for line in reversed(self._lines):
             head = line.split(" | ", 1)[0]
-            if (m := _TERMINATION_RE.match(head)):
+            if m := _TERMINATION_RE.match(head):
                 terminated_ids.add(m.group("id"))
                 continue
-            if (m := _EXECUTION_RE.match(head)):
+            if m := _EXECUTION_RE.match(head):
                 act_id = m.group("id")
                 if act_id in terminated_ids:
                     continue
@@ -254,7 +259,7 @@ class ProcessSupervisor:
             f"{' [terminal]' if a.terminal else ''}"
             for a in self.activities
         )
-        prior_tail = "\n".join(self._lines[-self.recent_tail:]) or "(empty)"
+        prior_tail = "\n".join(self._lines[-self.recent_tail :]) or "(empty)"
         msg_brief = (
             f"agent={agent_name} trigger={trigger} "
             f"tool={tool or '-'} target={target or '-'} "
@@ -269,17 +274,21 @@ class ProcessSupervisor:
         text = result.content if hasattr(result, "content") else str(result)
         if isinstance(text, list):
             text = next(
-                (c.get("text", "") for c in text if isinstance(c, dict) and c.get("type") == "text"),
+                (
+                    c.get("text", "")
+                    for c in text
+                    if isinstance(c, dict) and c.get("type") == "text"
+                ),
                 "",
             )
         text = str(text).strip().splitlines()[0] if text else ""
         validated = self._validate_llm_line(text)
         if validated is None:
-            return f"Violation:llm_unparseable_output"
+            return "Violation:llm_unparseable_output"
         return validated
 
     def _validate_llm_line(self, text: str) -> str | None:
-        if (m := _EXECUTION_RE.match(text)):
+        if m := _EXECUTION_RE.match(text):
             act_id, name = m.group("id"), m.group("name")
             known = self._activities_by_id.get(act_id)
             if known and name in (known.name, known.display_name):
@@ -287,7 +296,7 @@ class ProcessSupervisor:
                     return f"Termination:{act_id}:{known.name}:terminal"
                 return f"Execution:{act_id}:{known.name}"
             return f"Violation:llm_unknown_activity_{act_id}"
-        if (m := _TERMINATION_RE.match(text)):
+        if m := _TERMINATION_RE.match(text):
             act_id, name, reason = m.group("id"), m.group("name"), m.group("reason")
             known = self._activities_by_id.get(act_id)
             if known and name in (known.name, known.display_name):
@@ -295,7 +304,7 @@ class ProcessSupervisor:
                     return f"Execution:{act_id}:{known.name}"
                 return f"Termination:{act_id}:{known.name}:{reason}"
             return f"Violation:llm_unknown_activity_{act_id}"
-        if (v := _VIOLATION_RE.match(text)):
+        if v := _VIOLATION_RE.match(text):
             reason = re.sub(r"\s+", "_", v.group("reason").strip())
             return f"Violation:{reason}"
         return None
@@ -354,7 +363,7 @@ class ProcessSupervisor:
         else:
             allowed_str = "  (none defined for this lane)"
 
-        prior_tail = "\n".join(self._lines[-self.recent_tail:]) or "(empty)"
+        prior_tail = "\n".join(self._lines[-self.recent_tail :]) or "(empty)"
         message_brief = _serialize_input_message(msg, agent_name)
 
         prompt = (
@@ -389,9 +398,12 @@ class ProcessSupervisor:
         text = result.content if hasattr(result, "content") else str(result)
         if isinstance(text, list):
             text = next(
-                (c.get("text", "") for c in text if isinstance(c, dict) and c.get("type") == "text"),
+                (
+                    c.get("text", "")
+                    for c in text
+                    if isinstance(c, dict) and c.get("type") == "text"
+                ),
                 "",
             )
         text = str(text or "").strip()
         return text
-

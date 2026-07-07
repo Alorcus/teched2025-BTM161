@@ -4,10 +4,12 @@ Resolves an AgentDefinition from the Agent Repo, builds the Gateway with the
 applicable guardrails and Log Sink, composes the base prompt with applicable
 guideline prompts, and returns a compiled per-agent subgraph.
 """
+
 from .agent_repo import AgentDefinition, AgentRepo
 from .catalog import Catalog
 from .gateway import Gateway
 from .log_sink import JsonlLogSink, NullLogSink
+from .nemo_guardrail import bind_llm_to_nemo
 from .snapshot import snapshot_id as compute_snapshot_id
 from .subgraph import create_agent_subgraph
 from .tool_registry import resolve_tools
@@ -25,6 +27,10 @@ def build(
     tools = resolve_tools(list(definition.tools))
     guardrails = catalog.guardrails(list(definition.guardrail_ids))
     guidelines = catalog.guidelines(list(definition.guideline_ids))
+
+    # NeMo guardrails need the agents' LLM to back their LLM-based rails. Bind it
+    # now (also warms the shared LLMRails cache so config errors surface early).
+    bind_llm_to_nemo(guardrails, llm)
 
     composed_prompt = definition.base_prompt
     if guidelines:

@@ -26,7 +26,8 @@ dependencies = [
     "fastapi (>=0.118.0,<0.119.0)",
     "uvicorn (>=0.37.0,<0.38.0)",
     "pydantic (>=2.11.0,<3.0.0)",
-    "requests (>=2.32.0,<3.0.0)"
+    "requests (>=2.32.0,<3.0.0)",
+    "nemoguardrails (>=0.23.0,<0.24.0)"
 ]
 
 [project.scripts]

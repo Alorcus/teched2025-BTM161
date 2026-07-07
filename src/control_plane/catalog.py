@@ -4,12 +4,14 @@ Guardrails and guidelines are both loaded from YAML at construction time.
 Predicate logic itself lives in `predicates.py` and is referenced by name
 through `PREDICATE_REGISTRY` so YAML stays declarative.
 """
+
 from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
 
 from .guardrails import Guardrail, HardGuardrail, SoftGuardrail
+from .nemo_guardrail import NeMoGuardrail
 from .predicates import PREDICATE_REGISTRY
 from .types import Effect
 
@@ -21,16 +23,20 @@ class Guideline:
     version: str = "v1"
 
 
-def _build_guardrail(entry: dict) -> Guardrail:
+def _build_guardrail(entry: dict, config_dir: Path) -> Guardrail:
     guardrail_id = entry["id"]
     guardrail_type = entry.get("type")
-    if guardrail_type not in ("hard", "soft"):
-        raise ValueError(f"Guardrail {guardrail_id!r}: type must be 'hard' or 'soft', got {guardrail_type!r}")
+    if guardrail_type not in ("hard", "soft", "nemo"):
+        raise ValueError(
+            f"Guardrail {guardrail_id!r}: type must be 'hard', 'soft', or 'nemo', got {guardrail_type!r}"
+        )
 
     try:
         effect = Effect(entry.get("effect", "flag"))
     except ValueError as exc:
-        raise ValueError(f"Guardrail {guardrail_id!r}: invalid effect {entry.get('effect')!r}") from exc
+        raise ValueError(
+            f"Guardrail {guardrail_id!r}: invalid effect {entry.get('effect')!r}"
+        ) from exc
 
     common = {
         "name": guardrail_id,
@@ -38,7 +44,20 @@ def _build_guardrail(entry: dict) -> Guardrail:
         "tools": list(entry.get("tools", [])),
         "effect": effect,
         "description": entry.get("description", ""),
+        "stage": entry.get("stage", "pre_call"),
     }
+
+    if guardrail_type == "nemo":
+        config_rel = entry.get("config")
+        if not config_rel:
+            raise ValueError(
+                f"Guardrail {guardrail_id!r}: nemo type requires a 'config' dir (relative to the setup)"
+            )
+        return NeMoGuardrail(
+            config_path=(Path(config_dir) / config_rel).resolve(),
+            rail_types=list(entry.get("rails", ["input"])),
+            **common,
+        )
 
     if guardrail_type == "hard":
         predicate_name = entry.get("predicate")
@@ -50,7 +69,9 @@ def _build_guardrail(entry: dict) -> Guardrail:
         predicate_args = entry.get("predicate_args") or None
         callable_ = PREDICATE_REGISTRY[predicate_name]
         predicate = callable_(**predicate_args) if predicate_args else callable_
-        return HardGuardrail(predicate=predicate, predicate_args=predicate_args, **common)
+        return HardGuardrail(
+            predicate=predicate, predicate_args=predicate_args, **common
+        )
 
     return SoftGuardrail(
         judge_prompt=entry.get("judge_prompt", ""),
@@ -73,7 +94,7 @@ class Catalog:
             for yaml_path in sorted(guardrails_dir.glob("*.yaml")):
                 data = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
                 for entry in data.get("guardrails", []):
-                    guardrail = _build_guardrail(entry)
+                    guardrail = _build_guardrail(entry, config_dir)
                     self._guardrails[guardrail.name] = guardrail
 
         guidelines_dir = Path(config_dir) / "guidelines"

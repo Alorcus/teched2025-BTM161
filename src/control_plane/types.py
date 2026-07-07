@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Optional
+from typing import Any
 
 
 class Effect(str, Enum):
@@ -25,3 +25,6 @@ class GuardrailContext:
     tool_args: dict[str, Any]
     state: dict[str, Any] = field(default_factory=dict)
     allowed_handovers: list[str] = field(default_factory=list)
+    # Set only for "on_output" stage evaluation: the agent's final reply text
+    # to be checked (e.g. by NeMo output rails). Empty for pre-call evaluation.
+    output_text: str = ""
