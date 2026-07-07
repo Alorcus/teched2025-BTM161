@@ -162,6 +162,7 @@ poetry run dashboard --setup baseline
 - **Tool call log**: arguments and results for every tool invocation
 - **Context-isolated messages**: the same filtered view each agent's LLM actually sees
 - **Sidebar controls**: scenario selector, log-level filter, customizable customer prompt, run button, and global conversation log
+- **Customer mode toggle**: switch between the simulated AI customer and a manual customer mode where you can type messages yourself and submit feedback at the end of the conversation
 
 #### Metrics Observatory (/metrics)
 
@@ -178,7 +179,8 @@ The Interaction Observatory does **not** save event logs. Generate logs separate
 1. **Generate logs** via the CLI: `poetry run simulate --traces 10 --scenario all --export-logs` — this produces CSVs in `generated_event_log/` from MLflow traces (with full token counts and durations).
 2. **Open the dashboard** with `poetry run dashboard`.
 3. **Explore conversations live** in the Interaction Observatory (run a scenario, watch agents collaborate).
-4. **Switch to the Metrics Observatory** tab and pick any generated log to analyze.
+4. **Use the Customer mode toggle** to switch to manual mode and type customer messages yourself for ad-hoc conversations.
+5. **Switch to the Metrics Observatory** tab and pick any generated log to analyze.
 
 ### How It Works
 
@@ -268,12 +270,17 @@ Orders and inventory are persisted in a local SQLite database (`coffee_shop.db`)
 
 ### Customer Agent
 
-**Role**: Simulates a customer interacting with the coffee shop
+**Role**: Simulates a customer interacting with the coffee shop, and can also be driven manually from the dashboard
 **Scenarios**:
 
 - Ordering a latte and croissant
 - Quickly ordering two espressos
 - Complaining about a cold drink and seeking resolution
+
+**Manual mode**:
+
+- Use the dashboard's Customer mode switch to switch from the simulated AI customer to a manual experience.
+- Type customer messages directly in the sidebar, send them to the swarm, and submit feedback once the conversation is finished.
 - Asking for a recommendation and ordering based on the suggestion
 
 **Behavior**:
