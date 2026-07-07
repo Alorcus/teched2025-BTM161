@@ -13,9 +13,6 @@ from .guardrail_log_loader import (
     GuardrailOcelExtension,
     load_guardrail_events,
 )
-
-
-DEFAULT_GUARDRAIL_LOG_PATH = Path("./guardrail_log/events.jsonl")
 EVENT_ATTRIBUTES = {
     "agent_response": ["ocel_time", "duration", "input_tokens", "response_tokens"],
     "call_llm": ["ocel_time", "model", "duration", "input_tokens", "response_tokens"],
@@ -211,7 +208,7 @@ class ObjectCentricEventlog:
     def from_eventlog(
         cls,
         eventlog: str | pl.DataFrame,
-        guardrail_log_path: str | Path | None = DEFAULT_GUARDRAIL_LOG_PATH,
+        guardrail_log_path: str | Path | None = None,
     ) -> "ObjectCentricEventlog":
         """
         Create an ObjectCentricEventlog according to the OCEL 2.0 standard from a flat event log.

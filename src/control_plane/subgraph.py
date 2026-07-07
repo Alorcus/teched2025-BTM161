@@ -123,27 +123,10 @@ def create_agent_subgraph(
             return "tools"
         return END
 
-    def tools_node_wrapped(state: CoffeeShopState, config: RunnableConfig):
-        # Log tool_execution for each call before running. Result preview comes
-        # post-execution; for MVP we log the args here and rely on MLflow span
-        # mirroring later for the actual outputs.
-        ai = _last_ai_with_tool_calls(state.get("messages", []))
-        thread_id = _thread_id_of(config)
-        if ai is not None:
-            for tc in ai.tool_calls:
-                gateway.log_tool_execution(
-                    tool_call_id=tc.get("id", ""),
-                    tool_name=tc.get("name", ""),
-                    tool_args=dict(tc.get("args", {})),
-                    result_preview="(see MLflow trace for tool output)",
-                    thread_id=thread_id,
-                )
-        return tool_node.invoke(state, config=config)
-
     g = StateGraph(CoffeeShopState)
     g.add_node("llm", llm_node)
     g.add_node("gateway", gateway_node)
-    g.add_node("tools", tools_node_wrapped)
+    g.add_node("tools", tool_node)
     g.add_edge(START, "llm")
     g.add_conditional_edges("llm", route_after_llm, {"gateway": "gateway", END: END})
     g.add_conditional_edges("gateway", route_after_gateway, {"tools": "tools", "llm": "llm", END: END})

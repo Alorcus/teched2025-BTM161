@@ -43,7 +43,8 @@ def _gateway_events(ocel: ObjectCentricEventlog) -> pl.DataFrame:
 def _long_triggers(gw: pl.DataFrame) -> pl.DataFrame:
     """Explode `denied_by` / `flagged_by` into one row per (event, guardrail, decision).
 
-    Handles null cells, comma-separated strings, and stray whitespace. Rows
+    Handles null cells, `|`-separated strings (see the join site in
+    src/trace_processing/guardrail_log_loader.py), and stray whitespace. Rows
     where the source column was empty become empty guardrail-id strings and
     are filtered out.
     """
@@ -55,7 +56,7 @@ def _long_triggers(gw: pl.DataFrame) -> pl.DataFrame:
         return (
             gw.select(
                 pl.col("ocel_id").alias("event_id"),
-                pl.col(col).fill_null("").str.split(",").alias("guardrail_id"),
+                pl.col(col).fill_null("").str.split("|").alias("guardrail_id"),
             )
             .explode("guardrail_id")
             .with_columns(

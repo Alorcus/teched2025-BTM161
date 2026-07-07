@@ -4,6 +4,7 @@ from pathlib import Path
 import panel as pn
 import polars as pl
 
+from src.config import CoffeeShopConfig
 from src.trace_processing.eventlog_conversion import ObjectCentricEventlog
 
 from ..nav import header_nav
@@ -17,6 +18,7 @@ from .visualization_section import VisualizationSection
 
 
 _TIMESTAMP_COL = "time:timestamp"
+_GUARDRAIL_LOG_PATH = Path(CoffeeShopConfig.__dataclass_fields__["guardrail_log_path"].default)
 
 # Scenario labels mirror src/dashboard/interaction/interaction_page.py:93-98 so
 # both dashboards refer to the same customer-scenario shorthand. -1 is the
@@ -566,7 +568,9 @@ def _render_metrics(
             "No traces match the current filters.", alert_type="warning"
         )
     try:
-        ocel = ObjectCentricEventlog.from_eventlog(filtered)
+        ocel = ObjectCentricEventlog.from_eventlog(
+            filtered, guardrail_log_path=_GUARDRAIL_LOG_PATH
+        )
     except Exception as e:
         return pn.pane.Alert(f"Error processing events: {e}", alert_type="danger")
 

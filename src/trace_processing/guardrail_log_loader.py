@@ -142,8 +142,7 @@ def load_guardrail_events(path: str | Path) -> GuardrailOcelExtension:
     if not records:
         return GuardrailOcelExtension()
 
-    # We only care about gateway_decision rows; tool_execution rows would
-    # duplicate the MLflow tool events and are dropped here.
+    # Only gateway_decision rows are meaningful here.
     decisions = [r for r in records if r.get("event_type") == "gateway_decision"]
     if not decisions:
         return GuardrailOcelExtension()
@@ -194,6 +193,9 @@ def _project(decisions: list[dict[str, Any]]) -> GuardrailOcelExtension:
             continue
 
         ocel_time = _ts_to_datetime(ts)
+        if ocel_time is None:
+            logger.warning("guardrail_log: skipping record with unparseable ts=%r", ts)
+            continue
 
         # --- backfill maps -------------------------------------------
         prior = case_setup_map.get(thread_id)
@@ -283,9 +285,9 @@ def _project(decisions: list[dict[str, Any]]) -> GuardrailOcelExtension:
             "setup_name": setup_name,
             "snapshot_id": snapshot_id,
             "agent_id": agent_id,
-            "denied_by": ", ".join(denied_by),
-            "flagged_by": ", ".join(flagged_by),
-            "consulted": ", ".join(consulted),
+            "denied_by": "|".join(denied_by),
+            "flagged_by": "|".join(flagged_by),
+            "consulted": "|".join(consulted),
             "n_verdicts": len(verdicts),
             "reason_for_llm": " | ".join(reasons),
         }
@@ -459,16 +461,15 @@ def _parse_snapshot_id(snapshot_id: str) -> tuple[str, str, str]:
     return agent, version, snap_hash
 
 
-def _ts_to_datetime(ts: Any) -> datetime:
+def _ts_to_datetime(ts: Any) -> datetime | None:
     """Convert the JSONL `ts` (epoch float seconds) to a Python datetime.
 
     Matches the dtype produced by `_preprocess_eventlog`'s
     `pl.col("time_finished").str.to_datetime()` so the synthetic rows merge
-    cleanly with the rest of the OCEL.
+    cleanly with the rest of the OCEL. Returns `None` for unparseable input
+    so the caller can drop the offending record.
     """
     try:
         return datetime.fromtimestamp(float(ts))
     except (TypeError, ValueError):
-        # Last-resort fallback so the row still lands somewhere — better than
-        # losing the gateway event entirely.
-        return datetime.fromtimestamp(0)
+        return None

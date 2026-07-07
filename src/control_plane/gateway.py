@@ -115,22 +115,3 @@ class Gateway:
                 for v, ver in zip(decision.verdicts, verdict_versions)
             ],
         })
-
-    def log_tool_execution(
-        self,
-        tool_call_id: str,
-        tool_name: str,
-        tool_args: dict[str, Any],
-        result_preview: str,
-        thread_id: str | None = None,
-    ) -> None:
-        self.log_sink.append({
-            "event_type": "tool_execution",
-            "snapshot_id": self.snapshot_id,
-            "agent_id": self.agent_id,
-            "thread_id": thread_id,
-            "tool_call_id": tool_call_id,
-            "tool_name": tool_name,
-            "tool_args": tool_args,
-            "result_preview": result_preview[:500],
-        })
