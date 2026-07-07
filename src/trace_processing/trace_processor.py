@@ -1,5 +1,6 @@
 import json
 import os
+import time
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -126,6 +127,8 @@ class TraceProcessor:
 
         print(f"📁 Found {len(traces)} traces")
 
+        build_start = time.perf_counter()
+
         feedback_store = {}
         feedback_path = Path("./feedback_store.json")
         if feedback_path.exists():
@@ -136,14 +139,19 @@ class TraceProcessor:
         failed_ingestions = 0
         skipped_ingestions = 0  # processed without error but produced 0 events
 
-        combined_logs = pd.DataFrame()
+        # Per-trace extraction accumulates into a list; a single pd.concat at
+        # the end avoids the O(n²) copy cost of concatenating in the loop.
+        trace_frames: list[pd.DataFrame] = []
         # case_id -> (setup_name, scenario_index) from MLflow trace tags. Filled
         # while iterating traces; broadcast onto every event row (all sources)
         # after all concats complete, so filter/aggregate queries can slice by
         # setup or scenario without joining an extra table.
         case_tags: dict[str, tuple[str | None, int]] = {}
 
+        per_trace_seconds: list[float] = []
+
         for i, trace in enumerate(traces, 1):
+            trace_start = time.perf_counter()
             trace_dict = trace.to_dict()
             trace_id = trace_dict.get('info', {}).get('trace_id', f'trace-{i}')
             trace_tags = trace_dict.get('info', {}).get('tags', {}) or {}
@@ -155,6 +163,7 @@ class TraceProcessor:
             except Exception as e:
                 print(f"   ❌ Failed to generate event log for {trace_id}: {e}")
                 failed_ingestions += 1
+                per_trace_seconds.append(time.perf_counter() - trace_start)
                 continue
 
             if trace_event_log.empty:
@@ -163,6 +172,7 @@ class TraceProcessor:
                 # calls from get_feedback()). These are legitimately-skipped,
                 # not successful — counting them as such hides real bugs.
                 skipped_ingestions += 1
+                per_trace_seconds.append(time.perf_counter() - trace_start)
                 continue
 
             # A trace that produced ONLY user_prompt rows and nothing else is
@@ -180,7 +190,7 @@ class TraceProcessor:
                     f"gaps in LogGenerator."
                 )
 
-            combined_logs = pd.concat([combined_logs, trace_event_log], ignore_index=True)
+            trace_frames.append(trace_event_log)
             successful_ingestions += 1
 
             # Stash the trace's tag values under this trace's case_id. Multiple
@@ -198,6 +208,13 @@ class TraceProcessor:
                     scenario_tag = -1
                 for cid in case_ids_in_trace:
                     case_tags[cid] = (setup_tag, scenario_tag)
+            per_trace_seconds.append(time.perf_counter() - trace_start)
+
+        combined_logs = (
+            pd.concat(trace_frames, ignore_index=True)
+            if trace_frames
+            else pd.DataFrame()
+        )
 
         # Sort combined logs by timestamp. combined_logs starts as an empty
         # DataFrame with no columns; if every trace either failed ingestion or
@@ -208,11 +225,14 @@ class TraceProcessor:
         # "❌ time:timestamp".
         if combined_logs.empty or "time:timestamp" not in combined_logs.columns:
             print("⚠️  No usable events extracted from traces; nothing to export.")
-            print("\n📈 Processing Summary:")
-            print(f"   📊 Total traces processed: {len(traces)}")
-            print(f"   ✅ Successful: {successful_ingestions}")
-            print(f"   ⏭️  Skipped (no events): {skipped_ingestions}")
-            print(f"   ❌ Failed: {failed_ingestions}")
+            self._print_summary(
+                total=len(traces),
+                successful=successful_ingestions,
+                skipped=skipped_ingestions,
+                failed=failed_ingestions,
+                total_seconds=time.perf_counter() - build_start,
+                per_trace_seconds=per_trace_seconds,
+            )
             return
         combined_logs.sort_values(by="time:timestamp", inplace=True)
 
@@ -284,11 +304,14 @@ class TraceProcessor:
             combined_logs, "./generated_event_log", json_format=export_as_json
         )
 
-        print("\n📈 Processing Summary:")
-        print(f"   📊 Total traces processed: {len(traces)}")
-        print(f"   ✅ Successful: {successful_ingestions}")
-        print(f"   ⏭️  Skipped (no events): {skipped_ingestions}")
-        print(f"   ❌ Failed: {failed_ingestions}")
+        self._print_summary(
+            total=len(traces),
+            successful=successful_ingestions,
+            skipped=skipped_ingestions,
+            failed=failed_ingestions,
+            total_seconds=time.perf_counter() - build_start,
+            per_trace_seconds=per_trace_seconds,
+        )
 
         if successful_ingestions > 0:
             print("\nLog generation process completed successfully!")
@@ -297,6 +320,32 @@ class TraceProcessor:
             print("💡 Go back to step 4 and create some orders to generate trace data.")
 
         return
+
+    @staticmethod
+    def _print_summary(
+        *,
+        total: int,
+        successful: int,
+        skipped: int,
+        failed: int,
+        total_seconds: float,
+        per_trace_seconds: list[float],
+    ) -> None:
+        print("\n📈 Processing Summary:")
+        print(f"   📊 Total traces processed: {total}")
+        print(f"   ✅ Successful: {successful}")
+        print(f"   ⏭️  Skipped (no events): {skipped}")
+        print(f"   ❌ Failed: {failed}")
+        print(f"   ⏱️  Build time: {total_seconds:.2f}s total", end="")
+        if per_trace_seconds:
+            avg = sum(per_trace_seconds) / len(per_trace_seconds)
+            print(
+                f" (avg {avg * 1000:.1f}ms/trace, "
+                f"min {min(per_trace_seconds) * 1000:.1f}ms, "
+                f"max {max(per_trace_seconds) * 1000:.1f}ms)"
+            )
+        else:
+            print("")
 
     def _generate_log_file(self, dataframe: pd.DataFrame, output_path: str, json_format: bool = False):
         """
