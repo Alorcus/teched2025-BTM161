@@ -185,10 +185,10 @@ class AgentPanel(param.Parameterized):
             },
         )
 
-    def add_message(self, role: str, content: str, reason: str | None = None):
+    def add_message(self, role: str, content: str, reason: str | None = None, tool_name: str | None = None):
         ts = time.strftime("%H:%M:%S")
         msgs = list(self.messages)
-        msgs.append({"role": role, "content": content, "ts": ts, "reason": reason or ""})
+        msgs.append({"role": role, "content": content, "ts": ts, "reason": reason or "", "tool_name": tool_name or ""})
         self.messages = msgs
         self._render_messages()
 
@@ -283,7 +283,7 @@ class AgentPanel(param.Parameterized):
             f'<div class="ap-scroll-body ap-scroll-body-{self.agent_name}" '
             f'style="font-size:12px;position:absolute;inset:0;overflow-y:auto;">'
         )
-        for msg in self.messages[-20:]:
+        for msg in self.messages[-30:]:
             role = msg["role"]
             full_content = str(msg["content"])
             full_escaped = html_mod.escape(full_content)
@@ -300,6 +300,8 @@ class AgentPanel(param.Parameterized):
                 prefix = '<span style="color:#2196F3;font-weight:bold;">⚙️</span>'
             elif role == "tool_result":
                 prefix = '<span style="color:#666;">→</span>'
+            elif role == "thought":
+                prefix = '<span style="color:#6b6478;">🧠</span>'
             else:
                 prefix = f'<span style="font-weight:bold;">{html_mod.escape(role)}:</span>'
             reason = msg.get("reason") or ""
@@ -313,11 +315,20 @@ class AgentPanel(param.Parameterized):
             body_style = ""
             if role == "ai_rejected":
                 body_style = "color:#b3261e;"
+            elif role == "thought":
+                body_style = "color:#555;font-style:italic;"
+            tool_name = msg.get("tool_name") or ""
+            suffix_html = ""
+            if role == "thought" and tool_name:
+                suffix_html = (
+                    f' <span style="color:#999;font-size:10px;">'
+                    f'→ {html_mod.escape(tool_name)}</span>'
+                )
             html_parts.append(
                 f'<div class="agent-msg">'
                 f'<span style="color:#999;font-size:10px;margin-right:4px;">{ts}</span>'
                 f'{prefix} <span class="agent-msg-body" style="{body_style}">{full_escaped}</span>'
-                f'{reason_html}</div>'
+                f'{suffix_html}{reason_html}</div>'
             )
         html_parts.append("</div>")
         html_parts.append(script)

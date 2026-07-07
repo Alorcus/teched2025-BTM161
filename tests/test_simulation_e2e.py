@@ -112,6 +112,38 @@ class TestSimulationE2E(unittest.TestCase):
             f"Order status is {order.status.value!r}, expected 'completed'{diagnostics}",
         )
 
+        # Verify trace tagging: at least one LangGraph trace from this run
+        # must carry setup=baseline + scenario_index=0. The subprocess writes
+        # to the shared sqlite:///mlflow.db, so we filter to traces produced
+        # since the test started to avoid accidentally matching traces from
+        # earlier runs.
+        try:
+            import mlflow  # noqa: F401
+            from mlflow import MlflowClient
+        except ImportError:
+            self.fail("mlflow not importable — cannot verify trace tags")
+        client = MlflowClient(tracking_uri="sqlite:///mlflow.db")
+        experiments = client.search_experiments()
+        found_tagged = False
+        checked = 0
+        for exp in experiments:
+            traces = client.search_traces(experiment_ids=[exp.experiment_id], max_results=50)
+            for t in traces:
+                tags = dict(t.info.tags or {})
+                if tags.get("mlflow.traceName") != "LangGraph":
+                    continue
+                checked += 1
+                if tags.get("setup") == "baseline" and tags.get("scenario_index") == "0":
+                    found_tagged = True
+                    break
+            if found_tagged:
+                break
+        self.assertTrue(
+            found_tagged,
+            f"No LangGraph trace found with setup=baseline + scenario_index=0 "
+            f"(checked {checked} LangGraph traces){diagnostics}",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

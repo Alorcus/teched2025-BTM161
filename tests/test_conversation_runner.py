@@ -17,6 +17,7 @@ from src.dashboard.interaction.conversation_runner import (
     MAX_CONVERSATION_TURNS,
     _summarize_tool_calls,
     _rejected_content,
+    _extract_text,
 )
 
 
@@ -1195,6 +1196,129 @@ class TestHandoverPauseAndResume(unittest.TestCase):
         # Dedup means exactly one HANDOFF was published even though the
         # stream emitted handoff_context twice.
         self.assertEqual(len(handoffs), 1)
+
+
+class TestExtractTextHelper(unittest.TestCase):
+    """_extract_text flattens both str and list-of-blocks content."""
+
+    def test_str_content_passthrough(self):
+        self.assertEqual(_extract_text("hello"), "hello")
+
+    def test_empty_str(self):
+        self.assertEqual(_extract_text(""), "")
+
+    def test_list_of_blocks_extracts_text(self):
+        content = [
+            {"type": "text", "text": "Let me check inventory first"},
+            {"type": "tool_use", "name": "check_inventory", "input": {}},
+        ]
+        self.assertEqual(_extract_text(content), "Let me check inventory first")
+
+    def test_list_with_only_tool_use(self):
+        content = [{"type": "tool_use", "name": "check_inventory", "input": {}}]
+        self.assertEqual(_extract_text(content), "")
+
+    def test_list_multiple_text_blocks_joined(self):
+        content = [
+            {"type": "text", "text": "First thought."},
+            {"type": "text", "text": "Second thought."},
+        ]
+        self.assertEqual(_extract_text(content), "First thought.\nSecond thought.")
+
+    def test_unknown_shape_returns_empty(self):
+        self.assertEqual(_extract_text(None), "")
+        self.assertEqual(_extract_text(42), "")
+
+
+class TestPublishMessageNormallyThoughtSalvage(unittest.TestCase):
+    """AGENT_THOUGHT is emitted before TOOL_CALL when an AIMessage carries
+    both prose and tool_calls; without prose, only TOOL_CALL fires."""
+
+    def _make_runner(self):
+        shop = _make_mock_shop()
+        bus = EventBus()
+        runner = ConversationRunner(shop, bus)
+        return runner, bus
+
+    def test_thought_emitted_before_tool_call_str_content(self):
+        runner, bus = self._make_runner()
+        msg = AIMessage(
+            content="Let me check inventory first",
+            tool_calls=[{"name": "check_inventory", "args": {}, "id": "tc1"}],
+        )
+        runner._publish_message_normally(msg, "barista", None)
+        events = bus.drain()
+        self.assertEqual(
+            [e.event_type for e in events],
+            [EventType.AGENT_THOUGHT, EventType.TOOL_CALL],
+        )
+        self.assertEqual(events[0].content, "Let me check inventory first")
+        self.assertEqual(events[0].tool_name, "check_inventory")
+        self.assertEqual(events[0].agent_name, "barista")
+        self.assertEqual(events[1].tool_name, "check_inventory")
+
+    def test_thought_emitted_for_list_of_blocks_content(self):
+        runner, bus = self._make_runner()
+        msg = AIMessage(
+            content=[
+                {"type": "text", "text": "Espresso needs a fresh shot."},
+                {"type": "tool_use", "name": "start_preparation",
+                 "input": {"drink": "espresso"}, "id": "tc1"},
+            ],
+            tool_calls=[{"name": "start_preparation",
+                         "args": {"drink": "espresso"}, "id": "tc1"}],
+        )
+        runner._publish_message_normally(msg, "barista", None)
+        events = bus.drain()
+        self.assertEqual(
+            [e.event_type for e in events],
+            [EventType.AGENT_THOUGHT, EventType.TOOL_CALL],
+        )
+        self.assertEqual(events[0].content, "Espresso needs a fresh shot.")
+        self.assertEqual(events[0].tool_name, "start_preparation")
+
+    def test_no_thought_when_content_empty_str(self):
+        runner, bus = self._make_runner()
+        msg = AIMessage(
+            content="",
+            tool_calls=[{"name": "check_inventory", "args": {}, "id": "tc1"}],
+        )
+        runner._publish_message_normally(msg, "barista", None)
+        events = bus.drain()
+        self.assertEqual([e.event_type for e in events], [EventType.TOOL_CALL])
+
+    def test_no_thought_when_content_only_tool_use_block(self):
+        runner, bus = self._make_runner()
+        msg = AIMessage(
+            content=[
+                {"type": "tool_use", "name": "check_inventory",
+                 "input": {}, "id": "tc1"},
+            ],
+            tool_calls=[{"name": "check_inventory", "args": {}, "id": "tc1"}],
+        )
+        runner._publish_message_normally(msg, "barista", None)
+        events = bus.drain()
+        self.assertEqual([e.event_type for e in events], [EventType.TOOL_CALL])
+
+    def test_no_thought_when_content_only_whitespace(self):
+        runner, bus = self._make_runner()
+        msg = AIMessage(
+            content="   \n  \t ",
+            tool_calls=[{"name": "check_inventory", "args": {}, "id": "tc1"}],
+        )
+        runner._publish_message_normally(msg, "barista", None)
+        events = bus.drain()
+        self.assertEqual([e.event_type for e in events], [EventType.TOOL_CALL])
+
+    def test_text_only_message_still_emits_agent_message(self):
+        """The elif msg.content branch is untouched — text-only turns still
+        emit AGENT_MESSAGE, not AGENT_THOUGHT."""
+        runner, bus = self._make_runner()
+        msg = AIMessage(content="Your latte is ready.", tool_calls=[])
+        runner._publish_message_normally(msg, "barista", None)
+        events = bus.drain()
+        self.assertEqual([e.event_type for e in events], [EventType.AGENT_MESSAGE])
+        self.assertEqual(events[0].content, "Your latte is ready.")
 
 
 if __name__ == "__main__":

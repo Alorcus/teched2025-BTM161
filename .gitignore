@@ -37,3 +37,6 @@ dev.ipynb
 
 # Coffee machine service logs
 src/services/coffee-machine/logs/
+
+# Docs (local only)
+docs/

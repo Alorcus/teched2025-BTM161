@@ -10,6 +10,13 @@ from .trace_processing import TraceProcessor
 
 coffee_shop_logger = logging.getLogger("coffee_shop")
 
+STATUS_LEVEL = logging.CRITICAL + 10
+logging.addLevelName(STATUS_LEVEL, "STATUS")
+
+
+def log_status(message):
+    coffee_shop_logger.log(STATUS_LEVEL, message)
+
 
 def parse_scenario(value):
     if value == "all":
@@ -150,7 +157,9 @@ def main():
             )
         )
         shop.open_shop(reset_inventory_first=args.reset_inventory)
-        coffee_shop_logger.info(f"Coffee shop is open. Running {args.traces} trace(s).")
+        log_status(
+            f"Running {args.traces} trace(s) with scenario '{args.scenario}'."
+        )
         coffee_shop_logger.info(
             f"Resetting inventory before each trace: {args.reset_inventory}"
         )
@@ -159,7 +168,7 @@ def main():
         for i in range(args.traces):
             idx = pick_scenario_index(scenario_mode, scenario_index, i)
             scenario_label = CUSTOMER_SCENARIOS[idx] if idx is not None else "random"
-            coffee_shop_logger.info(
+            log_status(
                 f"=== Conversation {i + 1}/{args.traces} | Scenario {idx}: {scenario_label[:60]} ==="
             )
 

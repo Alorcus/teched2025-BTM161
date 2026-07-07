@@ -1,5 +1,6 @@
 import json
 import os
+import time
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -126,6 +127,8 @@ class TraceProcessor:
 
         print(f"📁 Found {len(traces)} traces")
 
+        build_start = time.perf_counter()
+
         feedback_store = {}
         feedback_path = Path("./feedback_store.json")
         if feedback_path.exists():
@@ -136,11 +139,22 @@ class TraceProcessor:
         failed_ingestions = 0
         skipped_ingestions = 0  # processed without error but produced 0 events
 
-        combined_logs = pd.DataFrame()
+        # Per-trace extraction accumulates into a list; a single pd.concat at
+        # the end avoids the O(n²) copy cost of concatenating in the loop.
+        trace_frames: list[pd.DataFrame] = []
+        # case_id -> (setup_name, scenario_index) from MLflow trace tags. Filled
+        # while iterating traces; broadcast onto every event row (all sources)
+        # after all concats complete, so filter/aggregate queries can slice by
+        # setup or scenario without joining an extra table.
+        case_tags: dict[str, tuple[str | None, int]] = {}
+
+        per_trace_seconds: list[float] = []
 
         for i, trace in enumerate(traces, 1):
+            trace_start = time.perf_counter()
             trace_dict = trace.to_dict()
             trace_id = trace_dict.get('info', {}).get('trace_id', f'trace-{i}')
+            trace_tags = trace_dict.get('info', {}).get('tags', {}) or {}
             print(f"\t📂 Processing trace {i}/{len(traces)}: {trace_id}")
 
             log_generator = LogGenerator()
@@ -149,6 +163,7 @@ class TraceProcessor:
             except Exception as e:
                 print(f"   ❌ Failed to generate event log for {trace_id}: {e}")
                 failed_ingestions += 1
+                per_trace_seconds.append(time.perf_counter() - trace_start)
                 continue
 
             if trace_event_log.empty:
@@ -157,10 +172,49 @@ class TraceProcessor:
                 # calls from get_feedback()). These are legitimately-skipped,
                 # not successful — counting them as such hides real bugs.
                 skipped_ingestions += 1
+                per_trace_seconds.append(time.perf_counter() - trace_start)
                 continue
 
-            combined_logs = pd.concat([combined_logs, trace_event_log], ignore_index=True)
+            # A trace that produced ONLY user_prompt rows and nothing else is
+            # a red flag: the conversation ran, the user turned up, but no
+            # agent-side event survived extraction. Handover-only threads used
+            # to look like this before the transfer_to_* fix landed; keeping
+            # the warning around means future extraction gaps stay visible
+            # instead of silently collapsing threads to user prompts + feedback.
+            non_agent_names = {"user_prompt"}
+            trace_event_types = set(trace_event_log["concept:name"].unique())
+            if trace_event_types.issubset(non_agent_names):
+                print(
+                    f"   ⚠️  Trace {trace_id} produced no agent-side events "
+                    f"(only {sorted(trace_event_types)}). Check for extraction "
+                    f"gaps in LogGenerator."
+                )
+
+            trace_frames.append(trace_event_log)
             successful_ingestions += 1
+
+            # Stash the trace's tag values under this trace's case_id. Multiple
+            # traces share a case_id (each user turn = one MLflow trace); every
+            # tagged trace in the same case carries the same setup/scenario, so
+            # last-write-wins is fine. Missing tags → setup=None, scenario=-1
+            # (the "unspecified" sentinel used across the pipeline).
+            case_ids_in_trace = trace_event_log["case_id"].dropna().unique()
+            if len(case_ids_in_trace) > 0:
+                setup_tag = trace_tags.get("setup")
+                scenario_tag_raw = trace_tags.get("scenario_index")
+                try:
+                    scenario_tag = int(scenario_tag_raw) if scenario_tag_raw not in (None, "", "None") else -1
+                except (TypeError, ValueError):
+                    scenario_tag = -1
+                for cid in case_ids_in_trace:
+                    case_tags[cid] = (setup_tag, scenario_tag)
+            per_trace_seconds.append(time.perf_counter() - trace_start)
+
+        combined_logs = (
+            pd.concat(trace_frames, ignore_index=True)
+            if trace_frames
+            else pd.DataFrame()
+        )
 
         # Sort combined logs by timestamp. combined_logs starts as an empty
         # DataFrame with no columns; if every trace either failed ingestion or
@@ -171,11 +225,14 @@ class TraceProcessor:
         # "❌ time:timestamp".
         if combined_logs.empty or "time:timestamp" not in combined_logs.columns:
             print("⚠️  No usable events extracted from traces; nothing to export.")
-            print("\n📈 Processing Summary:")
-            print(f"   📊 Total traces processed: {len(traces)}")
-            print(f"   ✅ Successful: {successful_ingestions}")
-            print(f"   ⏭️  Skipped (no events): {skipped_ingestions}")
-            print(f"   ❌ Failed: {failed_ingestions}")
+            self._print_summary(
+                total=len(traces),
+                successful=successful_ingestions,
+                skipped=skipped_ingestions,
+                failed=failed_ingestions,
+                total_seconds=time.perf_counter() - build_start,
+                per_trace_seconds=per_trace_seconds,
+            )
             return
         combined_logs.sort_values(by="time:timestamp", inplace=True)
 
@@ -228,15 +285,33 @@ class TraceProcessor:
                     [combined_logs, machine_rows], ignore_index=True
                 ).sort_values(by="time:timestamp")
 
+        # Broadcast per-case setup/scenario tags to every row so downstream
+        # readers (e.g. the metrics dashboard) can filter without joining an
+        # extra table. Cases without tagged traces show setup=None (rendered
+        # as an "(unknown)" bucket in the dashboard) and scenario=-1.
+        if case_tags and not combined_logs.empty and "case_id" in combined_logs.columns:
+            combined_logs["case_setup"] = combined_logs["case_id"].map(
+                lambda cid: case_tags.get(cid, (None, -1))[0]
+            )
+            combined_logs["case_scenario_index"] = combined_logs["case_id"].map(
+                lambda cid: case_tags.get(cid, (None, -1))[1]
+            )
+        else:
+            combined_logs["case_setup"] = None
+            combined_logs["case_scenario_index"] = -1
+
         self._generate_log_file(
             combined_logs, "./generated_event_log", json_format=export_as_json
         )
 
-        print("\n📈 Processing Summary:")
-        print(f"   📊 Total traces processed: {len(traces)}")
-        print(f"   ✅ Successful: {successful_ingestions}")
-        print(f"   ⏭️  Skipped (no events): {skipped_ingestions}")
-        print(f"   ❌ Failed: {failed_ingestions}")
+        self._print_summary(
+            total=len(traces),
+            successful=successful_ingestions,
+            skipped=skipped_ingestions,
+            failed=failed_ingestions,
+            total_seconds=time.perf_counter() - build_start,
+            per_trace_seconds=per_trace_seconds,
+        )
 
         if successful_ingestions > 0:
             print("\nLog generation process completed successfully!")
@@ -245,6 +320,32 @@ class TraceProcessor:
             print("💡 Go back to step 4 and create some orders to generate trace data.")
 
         return
+
+    @staticmethod
+    def _print_summary(
+        *,
+        total: int,
+        successful: int,
+        skipped: int,
+        failed: int,
+        total_seconds: float,
+        per_trace_seconds: list[float],
+    ) -> None:
+        print("\n📈 Processing Summary:")
+        print(f"   📊 Total traces processed: {total}")
+        print(f"   ✅ Successful: {successful}")
+        print(f"   ⏭️  Skipped (no events): {skipped}")
+        print(f"   ❌ Failed: {failed}")
+        print(f"   ⏱️  Build time: {total_seconds:.2f}s total", end="")
+        if per_trace_seconds:
+            avg = sum(per_trace_seconds) / len(per_trace_seconds)
+            print(
+                f" (avg {avg * 1000:.1f}ms/trace, "
+                f"min {min(per_trace_seconds) * 1000:.1f}ms, "
+                f"max {max(per_trace_seconds) * 1000:.1f}ms)"
+            )
+        else:
+            print("")
 
     def _generate_log_file(self, dataframe: pd.DataFrame, output_path: str, json_format: bool = False):
         """

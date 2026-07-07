@@ -25,6 +25,7 @@ EVENT_ATTRIBUTES = {
     "end_preparation": ["ocel_time", "duration"],
     "estimate_prep_time": ["ocel_time", "duration"],
     "process_order": ["ocel_time", "duration"],
+    "modify_order": ["ocel_time", "duration"],
     "check_inventory": ["ocel_time", "duration"],
     "update_stock": ["ocel_time", "duration"],
     "get_order": ["ocel_time", "duration"],

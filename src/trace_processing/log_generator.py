@@ -122,8 +122,9 @@ class LogGenerator:
             # grandchild under an agent_* span.
             span = call_model_child_spans[0]
         elif len(call_model_child_spans) == 0:
-            # New guardrail control-plane subgraph: the llm_N span itself
-            # carries mlflow.spanOutputs in the shape we need.
+            # New guardrail control-plane subgraph AND modern MLflow LangChain
+            # autolog: the llm span itself (named `llm` or `llm_N`) carries
+            # mlflow.spanOutputs in the shape we need.
             pass
         else:
             print(f'Unexpected number of call_model children for {span["name"]}: {len(call_model_child_spans)}')
@@ -184,8 +185,16 @@ class LogGenerator:
         if tool_input.get("type", None) == "tool_call":
             tool_name = tool_input.get("name", "unknown_tool")
 
-        if tool_name.startswith("transfer_to_"):
-            return
+        # Handovers were previously dropped here, which erased every
+        # order_agent → customer_service_agent transfer from the CSV. If a
+        # conversation's only tool call was a transfer, the trace collapsed
+        # to user_prompt + user_feedback and looked empty. Emitting them as
+        # execute_tool rows also matters for the guardrail-log join: the
+        # gateway can flag a transfer_to_* call, and its tool_call object
+        # (keyed by tool_call_id) would dangle if the event row didn't exist.
+        # The event_type/ocel_type is the tool name itself (e.g.
+        # `transfer_to_customer_service_agent`), distinct from the
+        # synthesised `<from>_handover_<to>` type used elsewhere.
 
         self.process_events.append(
             {
