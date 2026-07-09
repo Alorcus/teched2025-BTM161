@@ -16,6 +16,8 @@ from .conversation_runner import ConversationRunner
 from .stock_panel import StockPanel
 from .coffee_machine_panel import CoffeeMachinePanel
 from .tray_panel import TrayPanel
+from src.trace_processing.trace_processor import TraceProcessor
+from src.setups import list_setups
 
 logger = logging.getLogger("coffee_shop.dashboard")
 
@@ -53,19 +55,41 @@ def _agent_registry_from_repo(shop: CoffeeShop) -> dict[str, dict]:
     }
 
 
+def _resolve_setup_options(
+    selected_setup: str | None, available_setups: list[str]
+) -> dict[str, str]:
+    """Build a Select-compatible setup mapping while preserving the current selection."""
+    if not available_setups:
+        return {selected_setup: selected_setup} if selected_setup else {}
+
+    ordered = []
+    if selected_setup:
+        ordered.append(selected_setup)
+    for name in available_setups:
+        if name not in ordered:
+            ordered.append(name)
+    return {name: name for name in ordered}
+
+
 def create_observatory_dashboard(setup_name: str):
     """Create the Agent Observatory dashboard page."""
     pn.extension(sizing_mode="stretch_both")
 
-    shop = CoffeeShop(CoffeeShopConfig(setup_name=setup_name))
-    shop.open_shop()
-    event_bus = EventBus()
-    runner = ConversationRunner(shop, event_bus)
-    agent_registry = _agent_registry_from_repo(shop)
+    available_setups = list_setups()
+    setup_options = _resolve_setup_options(setup_name, available_setups)
+    initial_setup_value = (
+        setup_name
+        if setup_name in setup_options
+        else next(iter(setup_options), None) or setup_name
+    )
+
+    shop = None
+    event_bus = None
+    runner = None
+    agent_registry: dict[str, dict] = {}
 
     coffee_shop_logger = logging.getLogger("coffee_shop")
     coffee_shop_logger.setLevel(logging.DEBUG)
-    coffee_shop_logger.addHandler(_EventBusLogHandler(event_bus))
 
     start_coffee_machine()
     atexit.register(stop_coffee_machine)
@@ -75,23 +99,90 @@ def create_observatory_dashboard(setup_name: str):
     tray_panel = TrayPanel()
 
     agent_panels: dict[str, AgentPanel] = {}
-    for agent_name, config in shop.agent_config.items():
-        if agent_name == "user":
-            continue
-        reg = agent_registry.get(agent_name, {})
-        agent_panels[agent_name] = AgentPanel(
-            agent_name=agent_name,
-            config=config,
-            system_prompt=reg.get("prompt", ""),
-            tools=reg.get("tools", []),
-        )
 
     grid = pn.GridSpec(
         ncols=2, nrows=2, sizing_mode="stretch_both", styles={"gap": "5px"}
     )
     positions = [(0, 0), (0, 1), (1, 0), (1, 1)]
-    for (agent_name, panel_obj), (r, c) in zip(agent_panels.items(), positions):
-        grid[r, c] = panel_obj.panel()
+
+    export_button = pn.widgets.Button(
+        name="Export to Event Log",
+        button_type="default",
+        sizing_mode="stretch_width",
+        disabled=True,
+    )
+    export_status = pn.pane.HTML(
+        "",
+        sizing_mode="stretch_width",
+        styles={"font-size": "11px", "min-height": "16px"},
+    )
+    _export_done_flag: list[str] = []  # thread-safe message queue: ["ok"] or ["err: …"]
+    _conversation_has_run: list[bool] = [
+        False
+    ]  # mutable container so closure can write to it
+    _export_in_progress = threading.Event()  # set while a daemon export is running
+
+    status_indicator = pn.indicators.LoadingSpinner(value=False, size=25)
+    conversation_log = pn.pane.HTML(
+        '<div style="font-size:12px;color:#999;">No conversation yet.</div>',
+        sizing_mode="stretch_width",
+        styles={
+            "overflow-y": "auto",
+            "border": "1px solid #D7CCC8",
+            "border-radius": "6px",
+            "padding": "6px 8px",
+            "flex": "1 1 0",
+            "min-height": "150px",
+        },
+    )
+    log_entries: list[str] = []
+
+    def initialize_runtime(selected_setup: str):
+        nonlocal shop, event_bus, runner, agent_registry, agent_panels
+        if not selected_setup:
+            return
+        if runner is not None and runner.is_running:
+            return
+
+        shop = CoffeeShop(CoffeeShopConfig(setup_name=selected_setup))
+        shop.open_shop()
+        event_bus = EventBus()
+        runner = ConversationRunner(shop, event_bus)
+        agent_registry = _agent_registry_from_repo(shop)
+
+        for handler in list(coffee_shop_logger.handlers):
+            if isinstance(handler, _EventBusLogHandler):
+                coffee_shop_logger.removeHandler(handler)
+        coffee_shop_logger.addHandler(_EventBusLogHandler(event_bus))
+
+        new_agent_panels: dict[str, AgentPanel] = {}
+        for agent_name, config in shop.agent_config.items():
+            if agent_name == "user":
+                continue
+            reg = agent_registry.get(agent_name, {})
+            new_agent_panels[agent_name] = AgentPanel(
+                agent_name=agent_name,
+                config=config,
+                system_prompt=reg.get("prompt", ""),
+                tools=reg.get("tools", []),
+            )
+
+        agent_panels = new_agent_panels
+        for (agent_name, panel_obj), (r, c) in zip(agent_panels.items(), positions):
+            grid[r, c] = panel_obj.panel()
+
+        log_entries.clear()
+        conversation_log.object = (
+            '<div style="font-size:12px;color:#999;">No conversation yet.</div>'
+        )
+        status_indicator.value = False
+        export_button.disabled = True
+        export_status.object = ""
+        stock_panel.refresh()
+        coffee_machine_panel.update_progress()
+        tray_panel.refresh(None)
+
+    initialize_runtime(initial_setup_value)
 
     scenario_labels = [
         "Latte & croissant (friendly)",
@@ -106,6 +197,14 @@ def create_observatory_dashboard(setup_name: str):
     scenario_select = pn.widgets.Select(
         name="",
         options=scenario_options,
+        sizing_mode="stretch_width",
+        margin=(0, 0, 5, 0),
+    )
+
+    setup_select = pn.widgets.Select(
+        name="",
+        options=setup_options,
+        value=initial_setup_value,
         sizing_mode="stretch_width",
         margin=(0, 0, 5, 0),
     )
@@ -246,6 +345,8 @@ def create_observatory_dashboard(setup_name: str):
     run_button.on_click(on_run)
 
     def poll_events():
+        if event_bus is None:
+            return
         events = event_bus.drain()
         for ev in events:
             _dispatch_event(
@@ -263,6 +364,24 @@ def create_observatory_dashboard(setup_name: str):
             status_indicator.value = False
         stock_panel.refresh()
         coffee_machine_panel.update_progress()
+
+        if _export_done_flag:
+            msg = _export_done_flag.pop(0)
+            if msg == "ok":
+                export_status.object = '<span style="color:#4CAF50;">✅ Export complete — saved to ./generated_event_log/</span>'
+            else:
+                export_status.object = (
+                    f'<span style="color:#F44336;">❌ {msg[4:]}</span>'
+                )
+            if not runner.is_running and _conversation_has_run[0]:
+                export_button.disabled = False
+
+    def on_setup_change(event):
+        if event.new in {None, ""}:
+            return
+        initialize_runtime(event.new)
+
+    setup_select.param.watch(on_setup_change, "value")
 
     # ── Mode Toggle (als nativer HTML-Switch, wie der Theme-Toggle in der Navbar) ──
     mode_toggle = pn.widgets.RadioButtonGroup(
@@ -398,6 +517,8 @@ def create_observatory_dashboard(setup_name: str):
     )
 
     def on_end_conversation(event):
+        if runner is None:
+            return
         runner.end_manual_conversation(
             feedback_score=feedback_score_input.value,
             feedback_reason=feedback_reason_input.value,
@@ -457,6 +578,12 @@ def create_observatory_dashboard(setup_name: str):
     )
 
     sidebar = pn.Column(
+        pn.pane.HTML(
+            '<label style="font-size:13px;font-weight:500;">Setup</label>',
+            sizing_mode="stretch_width",
+            margin=(0, 0, 4, 0),
+        ),
+        setup_select,
         pn.pane.HTML(
             '<label style="font-size:13px;font-weight:500;">Customer mode</label>',
             sizing_mode="stretch_width",
