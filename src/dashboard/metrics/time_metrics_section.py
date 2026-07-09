@@ -28,12 +28,6 @@ _PER_ORDER_CARDS: list[tuple[str, str, str, str]] = [
         "confirm_to_tray_s",
         "orders",
     ),
-    (
-        "Customer Service Resolution",
-        "From handover to customer service until control returns to another agent.",
-        "cs_resolution_s",
-        "incidents",
-    ),
 ]
 
 
@@ -61,7 +55,7 @@ class TimeMetricsSection:
             per_order_kpi_card(title, subtitle, order_durations[col], unit=unit)
             for title, subtitle, col, unit in _PER_ORDER_CARDS
         )
-        return kpi_row(cards_html, columns=4, top_padding=12)
+        return kpi_row(cards_html, columns=3, top_padding=12)
 
     def _avg_activity_chart(self) -> pn.viewable.Viewable:
         events_flat = flat_event_table(self._ocel)

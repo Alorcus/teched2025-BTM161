@@ -614,8 +614,7 @@ def _preprocess_eventlog(eventlog: pl.DataFrame) -> pl.DataFrame:
         )
         .with_columns(
             handover_flag=(
-                (pl.col("event_type") == "call_llm")
-                & (pl.col("next_event_type") == "call_llm")
+                (pl.col("event_type") == "transfer_to_agent")
                 & (pl.col("object_type_agent") != pl.col("next_agent"))
             ),
             previous_event_type=pl.col("event_type").shift(1),
