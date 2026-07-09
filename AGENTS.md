@@ -81,6 +81,23 @@ To export event logs with feedback after a dashboard session:
 python3 -c "from src.trace_processing import TraceProcessor; TraceProcessor().process_all_traces()"
 ```
 
+## MLflow Trace Tags
+
+Every LangGraph trace (one MLflow trace per `app.stream(...)` call) is tagged
+with two attributes the Metrics Dashboard filters against:
+
+- `setup` — the active setup name (`baseline`, `all_handovers`, `unconstrained`)
+- `scenario_index` — the customer scenario played (`0`–`3` for a preset, `-1`
+  for a custom prompt or the Jupyter path where no scenario applies)
+
+Tags are written by `_tag_trace(trace_id, setup, scenario)` in
+`src/conversation.py`, called at every site that produces a coffee-shop trace
+(`ConversationEngine.send_message`, `ConversationRunner._stream_with_events`,
+`NotebookUI.continue_conversation_interactive`). The trace processor lifts the
+tags into `case_setup` and `case_scenario_index` columns on every event row
+of the CSV cache; the extractor's `SCHEMA_VERSION` is bumped whenever the
+column shape changes so already-built caches are rebuilt on demand.
+
 ## Branch Naming
 
 New branches follow: `<two-initials>/<feature-description-with-dashes>`
@@ -96,12 +113,11 @@ Squash branches before merging into `main` so each merged change is a single com
 - Tool functions return `json.dumps(result)` for structured output
 - Snake_case for functions/variables, PascalCase for classes
 - Pydantic models and dataclasses for data structures
-- No automated test suite — validation is via interactive notebook exercises
+- `unittest`-based test suite in `tests/`; new tests follow `class TestX(unittest.TestCase)` with `test_*` methods (see `tests/test_trace_table.py` for the canonical shape)
 
 ## Important Constraints
 
 - This is educational/demo material, not production code
-- No automated tests exist
 - In-memory checkpointing only (no persistence across sessions)
 - The 20% barista error rate is intentional — it creates process variants for mining analysis
 

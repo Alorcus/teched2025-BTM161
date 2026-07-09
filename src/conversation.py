@@ -23,17 +23,24 @@ FEEDBACK_STORE_PATH = Path("./feedback_store.json")
 class ConversationEngine:
     """Headless conversation runner for the coffee shop multi-agent system."""
 
-    def __init__(self, app, mlflow_enabled=True):
+    def __init__(self, app, mlflow_enabled=True, setup_name: str | None = None):
         self.app = app
         self.mlflow_enabled = mlflow_enabled
+        self.setup_name = setup_name
         self.traces_of_latest_conversations: list[str] = []
         self.feedback_log: dict[str, dict] = {}
 
     def _get_config(self, thread_id):
         return {"configurable": {"thread_id": thread_id}}
 
-    def send_message(self, thread_id: str, message: str) -> str | None:
-        """Send a message through the swarm and return the last customer-facing agent response."""
+    def send_message(self, thread_id: str, message: str, scenario_index: int | None = None) -> str | None:
+        """Send a message through the swarm and return the last customer-facing agent response.
+
+        When `mlflow_enabled` and `setup_name` are set, tags the produced MLflow
+        trace with `setup` and `scenario_index` so downstream analytics can filter
+        by them. `scenario_index` is per-conversation state; the caller passes it
+        in so the tag reflects the conversation's chosen scenario.
+        """
         config = self._get_config(thread_id)
         last_agent_message = None
 
@@ -49,6 +56,8 @@ class ConversationEngine:
         if self.mlflow_enabled:
             trace_id = mlflow.get_last_active_trace_id()
             self.traces_of_latest_conversations.append(trace_id)
+            if trace_id is not None and self.setup_name is not None:
+                _tag_trace(trace_id, self.setup_name, scenario_index)
 
         return last_agent_message
 
@@ -72,7 +81,7 @@ class ConversationEngine:
             on_message("customer", message)
 
         while message:
-            agent_reply = self.send_message(thread_id, message)
+            agent_reply = self.send_message(thread_id, message, scenario_index=customer_agent.scenario_index)
             if on_message and agent_reply:
                 on_message("agent", agent_reply)
 
@@ -144,3 +153,15 @@ def _extract_order_id_from_history(history: list) -> str | None:
             if match:
                 order_id = match.group()
     return order_id
+
+
+def _tag_trace(trace_id: str, setup_name: str, scenario_index: int | None) -> None:
+    """Attach `setup` and `scenario_index` tags to an MLflow trace by id.
+
+    Values are cast to strings — MLflow stringifies tag values server-side but
+    logs a warning for non-string inputs. `scenario_index=None` is stored as
+    "-1" (the "custom / unspecified" sentinel used across the pipeline).
+    """
+    resolved = -1 if scenario_index is None else int(scenario_index)
+    mlflow.set_trace_tag(trace_id, "setup", setup_name)
+    mlflow.set_trace_tag(trace_id, "scenario_index", str(resolved))

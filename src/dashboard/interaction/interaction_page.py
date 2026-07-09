@@ -3,9 +3,8 @@ import html as html_mod
 import json
 import logging
 import time
-import threading
-from typing import Optional
 import panel as pn
+import threading
 
 from src.coffee_shop import CoffeeShop
 from src.config import CoffeeShopConfig
@@ -317,6 +316,21 @@ def create_observatory_dashboard(setup_name: str):
 
     pause_toggle.on_click(on_pause_toggle)
 
+    status_indicator = pn.indicators.LoadingSpinner(value=False, size=25)
+    conversation_log = pn.pane.HTML(
+        '<div style="font-size:12px;color:#999;">No conversation yet.</div>',
+        sizing_mode="stretch_width",
+        styles={
+            "overflow-y": "auto",
+            "border": "1px solid #D7CCC8",
+            "border-radius": "6px",
+            "padding": "6px 8px",
+            "flex": "1 1 0",
+            "min-height": "150px",
+        },
+    )
+    log_entries: list[str] = []
+
     def on_run(event):
         if runner.is_running:
             return
@@ -330,32 +344,6 @@ def create_observatory_dashboard(setup_name: str):
         )
 
     run_button.on_click(on_run)
-
-    def on_export(event):
-        if runner.is_running:
-            return
-        # Guard against double-clicks racing two daemon threads against the
-        # same MLflow client / output directory. Event.is_set() is atomic;
-        # the Bokeh document thread reads it before spawning.
-        if _export_in_progress.is_set():
-            return
-        _export_in_progress.set()
-        export_button.disabled = True
-        export_status.object = '<span style="color:#FF9800;">⏳ Exporting…</span>'
-        _export_done_flag.clear()
-
-        def _run_export():
-            try:
-                TraceProcessor().process_all_traces(export_as_json=False)
-                _export_done_flag.append("ok")
-            except Exception as e:
-                _export_done_flag.append(f"err:{e}")
-            finally:
-                _export_in_progress.clear()
-
-        threading.Thread(target=_run_export, daemon=True).start()
-
-    export_button.on_click(on_export)
 
     def poll_events():
         if event_bus is None:
@@ -372,8 +360,6 @@ def create_observatory_dashboard(setup_name: str):
                 take_tray_button,
                 current_tray_order,
                 log_level_select.value,
-                export_button,
-                _conversation_has_run,
             )
         if not runner.is_running and not events:
             status_indicator.value = False
@@ -448,8 +434,6 @@ def create_observatory_dashboard(setup_name: str):
             margin=(0, 0, 0, 0),
             styles={"align-items": "center"},
         ),
-        export_button,
-        export_status,
         pn.layout.Divider(margin=(0, 0, 0, 0)),
         pn.pane.HTML(
             '<label style="font-size:14px;font-weight:600;">Conversation Log</label>',
@@ -662,8 +646,6 @@ def _dispatch_event(
     take_tray_button,
     current_tray_order,
     min_log_level: int = 20,
-    export_button=None,
-    conversation_has_run: Optional[list[bool]] = None,
 ):
     panel = agent_panels.get(event.agent_name)
 
@@ -692,6 +674,16 @@ def _dispatch_event(
                 panel.set_status("thinking")
             else:
                 panel.set_status("idle")
+
+    elif event.event_type == EventType.AGENT_THOUGHT:
+        # Thoughts (LLM narration bundled with a tool call) are rendered only in
+        # the per-agent panel on the right. They are intentionally excluded from
+        # the left-hand Conversation Log: the CustomerAgent never sees them
+        # (src/stream.py filters AIMessages with tool_calls out of the reply
+        # stream), so showing them in the customer-facing chat would misrepresent
+        # what the customer is actually reacting to.
+        if panel:
+            panel.add_message("thought", event.content, tool_name=event.tool_name)
 
     elif event.event_type == EventType.AGENT_MESSAGE:
         if panel:
@@ -804,10 +796,6 @@ def _dispatch_event(
             '<span style="color:#F44336"><b>END</b></span> Conversation complete',
         )
         tray_panel.clear()
-        if conversation_has_run is not None:
-            conversation_has_run[0] = True
-        if export_button is not None:
-            export_button.disabled = False
 
     elif event.event_type == EventType.TRAY_READY:
         current_tray_order["id"] = event.content
@@ -826,10 +814,6 @@ def _dispatch_event(
         current_tray_order["id"] = None
         take_tray_button.disabled = True
         tray_panel.clear()
-        if conversation_has_run is not None:
-            conversation_has_run[0] = True
-        if export_button is not None:
-            export_button.disabled = False
 
 
 def _log(entries: list[str], pane, html_line: str):
