@@ -4,7 +4,7 @@ import polars as pl
 
 from src.trace_processing.eventlog_conversion import ObjectCentricEventlog
 
-from .styling_helpers import COLOR_SCHEME, section_header, subsection_header, subtitled_kpi_card
+from .styling_helpers import COLOR_SCHEME, kpi_row, section_header, subsection_header, subtitled_kpi_card
 
 
 _DENY_COLOR = COLOR_SCHEME["dark_red"]
@@ -156,11 +156,7 @@ class GuardrailSection:
             subtitled_kpi_card(label, subtitle, value)
             for label, subtitle, value in cards
         )
-        return pn.pane.HTML(
-            f'<div style="padding:12px 0 2px;display:grid;grid-template-columns:repeat(6, 1fr);'
-            f'gap:8px;width:100%;">{cards_html}</div>',
-            sizing_mode="stretch_width",
-        )
+        return kpi_row(cards_html, columns=6)
 
     def _trigger_frequency_chart(self, triggers: pl.DataFrame) -> pn.viewable.Viewable:
         if triggers.is_empty():

@@ -5,7 +5,7 @@ import polars as pl
 from src.trace_processing.eventlog_conversion import ObjectCentricEventlog
 
 from .eventlog_helpers import flat_event_table, per_order_durations
-from .styling_helpers import COLOR_SCHEME, per_order_kpi_card, section_header, subsection_header
+from .styling_helpers import COLOR_SCHEME, kpi_row, per_order_kpi_card, section_header, subsection_header
 
 
 # Per-order KPI configuration. (label, subtitle, column-in-per_order_durations, unit)
@@ -62,11 +62,7 @@ class TimeMetricsSection:
             per_order_kpi_card(title, subtitle, order_durations[col], unit=unit)
             for title, subtitle, col, unit in _PER_ORDER_CARDS
         )
-        return pn.pane.HTML(
-            f'<div style="padding:2px 0;display:grid;grid-template-columns:repeat(4, 1fr);'
-            f'gap:8px;width:100%;">{cards_html}</div>',
-            sizing_mode="stretch_width",
-        )
+        return kpi_row(cards_html, columns=4)
 
     def _avg_activity_chart(self) -> pn.viewable.Viewable:
         events_flat = flat_event_table(self._ocel)

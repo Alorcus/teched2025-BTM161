@@ -50,37 +50,55 @@ def subsection_header(title: str, top_margin: int = 8) -> pn.pane.HTML:
     )
 
 
-def small_kpi_card(label: str, value: str) -> str:
-    """Compact label-over-value card used in the Overview row."""
+# ---- Shared KPI card styling ------------------------------------------------
+# Every KPI card in the metrics dashboard is a flex-column with the same
+# outer shell (padding, border, radius, background, height alignment) and
+# the same title / subtitle typography. Only the "body" underneath the
+# subtitle differs — a single value for `subtitled_kpi_card`, or the
+# avg/min·max/n block for `per_order_kpi_card`. Keeping these tokens in one
+# place is what makes every section on the page look like one system.
+
+_CARD_SHELL_OPEN = (
+    '<div style="padding:8px 10px;border:1px solid #e0e0e0;border-radius:6px;'
+    'background:#fafafa;display:flex;flex-direction:column;height:100%;'
+    'box-sizing:border-box;">'
+)
+_CARD_SHELL_CLOSE = "</div>"
+_CARD_TITLE_STYLE = "font-size:12px;font-weight:600;color:#4E342E;margin-bottom:2px;"
+_CARD_SUBTITLE_STYLE = "font-size:10px;color:#777;margin-bottom:6px;line-height:1.35;"
+_CARD_VALUE_STYLE = (
+    "font-weight:600;font-size:18px;color:#333;line-height:1.2;"
+    "margin-top:auto;"
+)
+
+
+def kpi_card(title: str, value: str) -> str:
+    """KPI card with title and value only — no subtitle line.
+
+    Shares the outer shell, title typography, and value typography with
+    ``subtitled_kpi_card`` so a row of these lines up beside the subtitled
+    variant used in other sections.
+    """
     return (
-        '<div style="display:inline-block;margin:0 5px 5px 0;padding:4px 9px;'
-        'border:1px solid #e0e0e0;border-radius:5px;background:#fafafa;min-width:78px;">'
-        f'<div style="font-size:10px;color:#666;margin-bottom:1px;">{label}</div>'
-        f'<div style="font-weight:600;font-size:13px;color:#333;line-height:1.2;">{value}</div>'
-        '</div>'
+        f'{_CARD_SHELL_OPEN}'
+        f'<div style="{_CARD_TITLE_STYLE}">{title}</div>'
+        f'<div style="{_CARD_VALUE_STYLE}">{value}</div>'
+        f'{_CARD_SHELL_CLOSE}'
     )
 
 
 def subtitled_kpi_card(title: str, subtitle: str, value: str) -> str:
     """KPI card with title, one-sentence subtitle, and a single value.
 
-    Visually matches ``per_order_kpi_card`` (title + subtitle + value column),
-    so a grid of these lines up with the Time Metrics per-order cards.
+    Shares its outer shell and title/subtitle typography with
+    ``per_order_kpi_card`` so a mixed grid of both lines up perfectly.
     """
-    title_style = "font-size:12px;font-weight:600;color:#4E342E;margin-bottom:2px;"
-    subtitle_style = "font-size:10px;color:#777;margin-bottom:6px;line-height:1.35;"
-    value_style = (
-        "font-weight:600;font-size:18px;color:#333;line-height:1.2;"
-        "margin-top:auto;"
-    )
     return (
-        '<div style="padding:8px 10px;border:1px solid #e0e0e0;border-radius:6px;'
-        'background:#fafafa;display:flex;flex-direction:column;height:100%;'
-        'box-sizing:border-box;">'
-        f'<div style="{title_style}">{title}</div>'
-        f'<div style="{subtitle_style}">{subtitle}</div>'
-        f'<div style="{value_style}">{value}</div>'
-        '</div>'
+        f'{_CARD_SHELL_OPEN}'
+        f'<div style="{_CARD_TITLE_STYLE}">{title}</div>'
+        f'<div style="{_CARD_SUBTITLE_STYLE}">{subtitle}</div>'
+        f'<div style="{_CARD_VALUE_STYLE}">{value}</div>'
+        f'{_CARD_SHELL_CLOSE}'
     )
 
 
@@ -99,19 +117,25 @@ def per_order_kpi_card(title: str, subtitle: str, durations: pl.Series,
         avg_str = fmt_seconds(float(clean.mean()))
         min_str = fmt_seconds(float(clean.min()))
         max_str = fmt_seconds(float(clean.max()))
-    title_style = "font-size:12px;font-weight:600;color:#4E342E;margin-bottom:2px;"
-    subtitle_style = "font-size:10px;color:#777;margin-bottom:6px;line-height:1.35;"
     avg_style = "font-weight:600;font-size:13px;color:#333;line-height:1.25;"
     range_style = "font-weight:500;font-size:11px;color:#555;line-height:1.25;"
     footer_style = "font-size:10px;color:#999;margin-top:auto;padding-top:4px;"
     return (
-        '<div style="padding:8px 10px;border:1px solid #e0e0e0;border-radius:6px;'
-        'background:#fafafa;display:flex;flex-direction:column;height:100%;'
-        'box-sizing:border-box;">'
-        f'<div style="{title_style}">{title}</div>'
-        f'<div style="{subtitle_style}">{subtitle}</div>'
+        f'{_CARD_SHELL_OPEN}'
+        f'<div style="{_CARD_TITLE_STYLE}">{title}</div>'
+        f'<div style="{_CARD_SUBTITLE_STYLE}">{subtitle}</div>'
         f'<div style="{avg_style}">avg {avg_str}</div>'
         f'<div style="{range_style}">min {min_str} &nbsp;·&nbsp; max {max_str}</div>'
         f'<div style="{footer_style}">n={n} {unit}</div>'
-        '</div>'
+        f'{_CARD_SHELL_CLOSE}'
+    )
+
+
+def kpi_row(cards_html: str, columns: int) -> pn.pane.HTML:
+    """Standard KPI-card row wrapper — one grid style used everywhere."""
+    return pn.pane.HTML(
+        f'<div style="padding:2px 0;display:grid;'
+        f'grid-template-columns:repeat({columns}, 1fr);gap:8px;width:100%;">'
+        f'{cards_html}</div>',
+        sizing_mode="stretch_width",
     )
