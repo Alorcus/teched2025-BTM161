@@ -81,8 +81,7 @@ def per_order_durations(ocel: ObjectCentricEventlog) -> pl.DataFrame:
     """Compute per-order time windows in seconds.
 
     Returns one row per order with columns:
-      order_id, full_duration_s, pipeline_duration_s,
-      confirm_to_tray_s, cs_resolution_s
+      order_id, full_duration_s, pipeline_duration_s, confirm_to_tray_s
     Any column may be null when the relevant boundary event is missing
     for that order.
     """

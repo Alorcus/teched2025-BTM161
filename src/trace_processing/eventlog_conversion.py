@@ -608,7 +608,6 @@ def _preprocess_eventlog(eventlog: pl.DataFrame) -> pl.DataFrame:
                 .then(pl.lit("feedback_") + pl.col("identity:id"))
                 .otherwise(pl.lit(None))
             ),
-            next_event_type=pl.col("event_type").shift(-1),
             next_agent=pl.col("object_type_agent").shift(-1),
             next_agent_id=pl.col("object_id_agent").shift(-1),
         )
