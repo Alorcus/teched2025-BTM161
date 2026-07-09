@@ -15,10 +15,6 @@ _GUARDRAIL_TYPE_COLORS = {
     "guardrail": COLOR_SCHEME["orange"],
     "unknown": COLOR_SCHEME["beige"],
 }
-_SOFT_STUB_NOTE = (
-    "Soft guardrails are currently stubbed to always allow, so this "
-    "reflects hard-guardrail activity only."
-)
 
 
 def _gateway_events(ocel: ObjectCentricEventlog) -> pl.DataFrame:
@@ -96,12 +92,6 @@ class GuardrailSection:
         column.append(self._kpi_row(gw, triggers))
         column.append(subsection_header("Trigger Frequency per Guardrail"))
         column.append(self._trigger_frequency_chart(triggers))
-        column.append(subsection_header("Hard vs Soft Guardrails", top_margin=10))
-        column.append(self._hard_vs_soft_chart(triggers))
-        column.append(pn.pane.HTML(
-            f'<div style="font-size:10px;color:#777;margin-top:4px;">{_SOFT_STUB_NOTE}</div>',
-            sizing_mode="stretch_width",
-        ))
         return column
 
     def _kpi_row(self, gw: pl.DataFrame, triggers: pl.DataFrame) -> pn.pane.HTML:
@@ -201,46 +191,3 @@ class GuardrailSection:
             legend=dict(orientation="h", yanchor="bottom", y=1.0, xanchor="right", x=1.0),
         )
         return pn.pane.Plotly(fig, height=height, sizing_mode="stretch_width")
-
-    def _hard_vs_soft_chart(self, triggers: pl.DataFrame) -> pn.viewable.Viewable:
-        # Count unique (event, guardrail) pairs so a guardrail that both flags
-        # and denies the same event isn't double-counted, then join the
-        # guardrail_type from the guardrail object table.
-        unique_pairs = triggers.select(["event_id", "guardrail_id"]).unique()
-        if unique_pairs.is_empty():
-            return pn.pane.Alert("No guardrails were triggered.", alert_type="info")
-
-        guardrail_tbl = self._ocel.object_tables.get("object_guardrail")
-        if guardrail_tbl is not None and "guardrail_type" in guardrail_tbl.columns:
-            typed = unique_pairs.join(
-                guardrail_tbl.select(
-                    pl.col("ocel_id").alias("guardrail_id"),
-                    pl.col("guardrail_type"),
-                ),
-                on="guardrail_id",
-                how="left",
-            )
-        else:
-            typed = unique_pairs.with_columns(pl.lit(None).cast(pl.Utf8).alias("guardrail_type"))
-
-        by_type = (
-            typed
-            .with_columns(pl.col("guardrail_type").fill_null("unknown"))
-            .group_by("guardrail_type")
-            .agg(pl.len().alias("count"))
-            .sort("count", descending=True)
-        )
-
-        fig = px.pie(
-            by_type.to_pandas(),
-            names="guardrail_type", values="count", hole=0.55,
-            color="guardrail_type",
-            color_discrete_map=_GUARDRAIL_TYPE_COLORS,
-        )
-        fig.update_layout(
-            height=220,
-            margin=dict(l=10, r=10, t=5, b=5),
-            font=dict(size=10),
-            legend=dict(orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.02),
-        )
-        return pn.pane.Plotly(fig, height=220, sizing_mode="stretch_width")
