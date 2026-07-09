@@ -131,10 +131,10 @@ def per_order_kpi_card(title: str, subtitle: str, durations: pl.Series,
     )
 
 
-def kpi_row(cards_html: str, columns: int) -> pn.pane.HTML:
+def kpi_row(cards_html: str, columns: int, top_padding: int = 2) -> pn.pane.HTML:
     """Standard KPI-card row wrapper — one grid style used everywhere."""
     return pn.pane.HTML(
-        f'<div style="padding:2px 0;display:grid;'
+        f'<div style="padding:{top_padding}px 0 2px;display:grid;'
         f'grid-template-columns:repeat({columns}, 1fr);gap:8px;width:100%;">'
         f'{cards_html}</div>',
         sizing_mode="stretch_width",

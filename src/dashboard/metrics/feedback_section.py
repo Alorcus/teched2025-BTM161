@@ -96,7 +96,7 @@ class FeedbackSection:
             subtitled_kpi_card(title, subtitle, value)
             for title, subtitle, value in cards
         )
-        return kpi_row(cards_html, columns=5)
+        return kpi_row(cards_html, columns=5, top_padding=12)
 
     def _build_scenario_breakdown(self) -> pn.viewable.Viewable:
         df = self._data

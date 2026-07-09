@@ -156,7 +156,7 @@ class GuardrailSection:
             subtitled_kpi_card(label, subtitle, value)
             for label, subtitle, value in cards
         )
-        return kpi_row(cards_html, columns=6)
+        return kpi_row(cards_html, columns=6, top_padding=12)
 
     def _trigger_frequency_chart(self, triggers: pl.DataFrame) -> pn.viewable.Viewable:
         if triggers.is_empty():
