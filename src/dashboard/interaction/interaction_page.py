@@ -4,6 +4,7 @@ import json
 import logging
 import time
 import panel as pn
+import threading
 
 from src.coffee_shop import CoffeeShop
 from src.config import CoffeeShopConfig
