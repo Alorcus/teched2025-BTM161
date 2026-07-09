@@ -13,6 +13,7 @@ from src.stream import extract_messages
 from src.agents import (
     reset_inventory, set_item_stock, get_all_inventory,
     CUSTOMER_SCENARIOS,
+    CUSTOMER_SCENARIO_LABELS,
 )
 
 logger = logging.getLogger("coffee_shop.notebook_ui")
@@ -323,7 +324,7 @@ class NotebookUI:
         self.customer_agent_toggle.observe(self._on_customer_agent_toggle_changed, names='value')
 
         self.customer_scenario_dropdown = widgets.Dropdown(
-            options=[(f'Scenario {i+1}: {s[:40]}...', i) for i, s in enumerate(CUSTOMER_SCENARIOS)],
+            options=[(f'Scenario {i+1}: {CUSTOMER_SCENARIO_LABELS[i]}', i) for i in range(len(CUSTOMER_SCENARIOS))],
             value=0,
             description='Scenario:',
             style={'description_width': '65px'},

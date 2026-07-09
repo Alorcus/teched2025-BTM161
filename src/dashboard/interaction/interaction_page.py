@@ -9,7 +9,7 @@ import panel as pn
 
 from src.coffee_shop import CoffeeShop
 from src.config import CoffeeShopConfig
-from src.agents import CUSTOMER_SCENARIOS, build_default_prompt
+from src.agents import CUSTOMER_SCENARIOS, CUSTOMER_SCENARIO_LABELS, build_default_prompt
 from src.agents.barista_agent import start_coffee_machine, stop_coffee_machine
 from ..nav import header_nav
 from .event_bus import EventBus, EventType, DashboardEvent
@@ -186,14 +186,8 @@ def create_observatory_dashboard(setup_name: str):
 
     initialize_runtime(initial_setup_value)
 
-    scenario_labels = [
-        "Latte & croissant (friendly)",
-        "2 espressos (in a hurry)",
-        "Complaint (cold cappuccino)",
-        "Ask for a recommendation",
-    ]
     scenario_options = {
-        f"{i}: {scenario_labels[i]}": i for i in range(len(CUSTOMER_SCENARIOS))
+        f"{i}: {CUSTOMER_SCENARIO_LABELS[i]}": i for i in range(len(CUSTOMER_SCENARIOS))
     }
     scenario_options["Custom"] = -1
     scenario_select = pn.widgets.Select(
