@@ -1,0 +1,46 @@
+# Temporal order constraints based on BPMN2Constraints
+# Defines valid execution order of tools/activities
+
+temporal_constraints:
+  # Order processing must happen before inventory check
+  - id: "inventory_and_stock_update"
+    constraint_type: "coexistence"
+    antecedent: "check_inventory"
+    consequent: "update_stock"
+    description: "If inventory is checked, the stock must be updated."
+
+  - id: "start_and_end_preparation"
+    constraint_type: "responded_existence"
+    antecedent: "start_preparation"
+    consequent: "end_preparation"
+    description: "If preparation starts, it must end."
+  
+  - id: "place_on_tray_or_end_preparation"
+    constraint_type: "choice"
+    antecedent: "place_on_tray"
+    consequent: "end_preparation"
+    description: "We need to place on tray or end preparation (at least one of them must happen)."
+
+  - id: "process_order_before_update_stock"
+    constraint_type: "precedence"
+    antecedent: "process_order"
+    consequent: "update_stock"
+    description: "We need to process the order before updating stock."
+
+  - id: "check_inventory_before_update_stock"
+    constraint_type: "chain_precedence"
+    antecedent: "check_inventory"
+    consequent: "update_stock"
+    description: "update_stock must be called immediately after check_inventory (no other tool in between)"
+
+  - id: "process_order_before_check_inventory"
+    constraint_type: "chain_response"
+    antecedent: "process_order"
+    consequent: "check_inventory"
+    description: "check_inventory must be called immediately after process_order (no other tool in between)"
+
+
+
+  
+
+  

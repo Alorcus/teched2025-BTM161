@@ -465,5 +465,3 @@ def clean_machine(config: RunnableConfig = None) -> str:
         return json.dumps(data)
     except Exception:
         return json.dumps({"status": "error", "message": "Invalid response from machine."})
-
-

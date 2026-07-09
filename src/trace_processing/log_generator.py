@@ -1,6 +1,11 @@
 import json
 import uuid
 import pandas as pd
+import csv
+from pathlib import Path
+
+import logging
+logger = logging.getLogger(__name__)
 
 
 def _is_langgraph_root(span_name: str) -> bool:
@@ -17,7 +22,7 @@ def _is_langgraph_root(span_name: str) -> bool:
 
 
 class LogGenerator:
-    def generate_event_log_df(self, trace_source) -> pd.DataFrame:
+    def generate_event_log_df(self, trace_source, coffee_machine_log_path=None) -> pd.DataFrame:
         self.process_events = []
         self.case_id = None
         self.spans = None

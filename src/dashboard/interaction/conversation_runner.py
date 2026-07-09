@@ -13,6 +13,7 @@ from src.agents.order_store import load_order, save_order
 from src.agents.shared_components import OrderStatus
 from src.stream import SWARM_AGENTS
 from .event_bus import EventBus, DashboardEvent, EventType
+from src.control_plane.temporal_guardrail import _traces
 
 logger = logging.getLogger("coffee_shop.dashboard")
 
@@ -227,6 +228,12 @@ class ConversationRunner:
             feedback["feedback_reason"],
         )
 
+        if thread_id in _traces:
+            trace = _traces[thread_id] 
+            trace.end_session()  # Logs all unfulfilled responses
+        else:
+            logger.debug(f"No temporal trace found for thread {thread_id}")
+            
         self.event_bus.publish(
             DashboardEvent(
                 event_type=EventType.CONVERSATION_END,

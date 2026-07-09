@@ -5,6 +5,7 @@ from typing import Any
 from .guardrails import Guardrail
 from .log_sink import JsonlLogSink, NullLogSink
 from .types import Effect, GuardrailContext, Verdict
+from .temporal_guardrail import get_or_create_trace
 
 logger = logging.getLogger("coffee_shop.control_plane.gateway")
 
@@ -34,12 +35,14 @@ class Gateway:
         allowed_handovers: list[str],
         snapshot_id: str,
         log_sink: JsonlLogSink | NullLogSink,
+        temporal_guardrail=None,  # Add optional temporal_guardrail parameter
     ):
         self.agent_id = agent_id
         self.guardrails = guardrails
         self.allowed_handovers = list(allowed_handovers)
         self.snapshot_id = snapshot_id
         self.log_sink = log_sink
+        self.temporal_guardrail = temporal_guardrail  # Store temporal guardrail
 
     def evaluate_call(
         self,
@@ -59,21 +62,35 @@ class Gateway:
             allowed_handovers=list(self.allowed_handovers),
         )
 
-        applicable = [guardrail for guardrail in self.guardrails if guardrail.applies_to(tool_name)]
-        applicable.sort(key=lambda g: 0 if g.type == "hard" else 1)
-
+        # Initialize verdicts list
         verdicts: list[Verdict] = []
         final = Effect.ALLOW
         deny_reason = ""
-        for guardrail in applicable:
-            verdict = guardrail.eval(context)
-            verdicts.append(verdict)
-            if verdict.effect == Effect.DENY and final != Effect.DENY:
+
+        # Add temporal constraint evaluation if available
+        if self.temporal_guardrail and self.temporal_guardrail.applies_to(tool_name):
+            # Pass thread_id as string (not None)
+            trace_thread_id = thread_id or "default"
+            temporal_verdict = self.temporal_guardrail.evaluate(context, trace_thread_id)
+            if temporal_verdict.effect == Effect.DENY:
+                verdicts.append(temporal_verdict)
                 final = Effect.DENY
-                deny_reason = verdict.reason_for_llm or verdict.reason_internal
-                break
-            if verdict.effect == Effect.FLAG and final == Effect.ALLOW:
-                final = Effect.FLAG  # observability only; doesn't block
+                deny_reason = temporal_verdict.reason_for_llm or temporal_verdict.reason_internal
+
+        # Only evaluate other guardrails if temporal didn't already deny
+        if final != Effect.DENY:
+            applicable = [guardrail for guardrail in self.guardrails if guardrail.applies_to(tool_name)]
+            applicable.sort(key=lambda g: 0 if g.type == "hard" else 1)
+
+            for guardrail in applicable:
+                verdict = guardrail.eval(context)
+                verdicts.append(verdict)
+                if verdict.effect == Effect.DENY and final != Effect.DENY:
+                    final = Effect.DENY
+                    deny_reason = verdict.reason_for_llm or verdict.reason_internal
+                    break
+                if verdict.effect == Effect.FLAG and final == Effect.ALLOW:
+                    final = Effect.FLAG  # observability only; doesn't block
 
         decision = CallDecision(
             tool_call_id=tool_call_id,

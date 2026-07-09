@@ -46,6 +46,7 @@ def build(
         allowed_handovers=list(definition.allowed_handovers),
         snapshot_id=snapshot,
         log_sink=log_sink,
+        temporal_guardrail=catalog.get_temporal_guardrail(),
     )
 
     subgraph = create_agent_subgraph(

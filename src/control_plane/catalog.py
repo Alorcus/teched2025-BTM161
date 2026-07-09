@@ -12,6 +12,8 @@ import yaml
 from .guardrails import Guardrail, HardGuardrail, SoftGuardrail
 from .predicates import PREDICATE_REGISTRY
 from .types import Effect
+from .temporal_constraints import TemporalConstraint
+from .temporal_guardrail import TemporalConstraintGuardrail, create_temporal_guardrail
 
 
 @dataclass(frozen=True)
@@ -65,6 +67,7 @@ class Catalog:
     def __init__(self, config_dir: Path):
         self._guardrails: dict[str, Guardrail] = {}
         self._guidelines: dict[str, Guideline] = {}
+        self._temporal_guardrail: TemporalConstraintGuardrail | None = None
 
         guardrails_dir = Path(config_dir) / "guardrails"
         if not guardrails_dir.exists():
@@ -90,6 +93,22 @@ class Catalog:
                     )
                     self._guidelines[guideline.id] = guideline
 
+        constraints_path = Path(config_dir) / "constraints" / "temporal_order.yaml"
+        print(f"🔍 Looking for temporal constraints at: {constraints_path}")
+        print(f"📁 File exists: {constraints_path.exists()}")
+
+        if constraints_path.exists():
+            try:
+                self._temporal_guardrail = create_temporal_guardrail(constraints_path)
+                print(f"✅ Temporal guardrail created with {len(self._temporal_guardrail.constraints)} constraints")
+                print(f"   Tools monitored: {self._temporal_guardrail.tools}")
+            except Exception as e:
+                print(f"❌ Error loading temporal guardrail: {e}")
+                self._temporal_guardrail = None
+        else:
+            print(f"⚠️ No temporal constraints file found")
+            self._temporal_guardrail = None
+
     def guardrails(self, ids: list[str]) -> list[Guardrail]:
         missing = [i for i in ids if i not in self._guardrails]
         if missing:
@@ -101,3 +120,7 @@ class Catalog:
         if missing:
             raise KeyError(f"Unknown guideline ids: {missing}")
         return [self._guidelines[i] for i in ids]
+    
+    def get_temporal_guardrail(self) -> TemporalConstraintGuardrail | None:
+        """Get the temporal constraint guardrail if configured."""
+        return self._temporal_guardrail
