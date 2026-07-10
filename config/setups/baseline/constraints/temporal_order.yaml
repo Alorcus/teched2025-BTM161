@@ -34,10 +34,10 @@ temporal_constraints:
     description: "update_stock must be called immediately after check_inventory (no other tool in between)"
 
   - id: "process_order_before_check_inventory"
-    constraint_type: "chain_response"
+    constraint_type: "response"
     antecedent: "process_order"
     consequent: "check_inventory"
-    description: "check_inventory must be called immediately after process_order (no other tool in between)"
+    description: "check_inventory must be called after process_order"
 
 
 

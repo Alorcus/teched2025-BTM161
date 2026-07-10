@@ -25,3 +25,4 @@ class GuardrailContext:
     tool_args: dict[str, Any]
     state: dict[str, Any] = field(default_factory=dict)
     allowed_handovers: list[str] = field(default_factory=list)
+    thread_id: str | None = None  # ← ADD THIS LINE

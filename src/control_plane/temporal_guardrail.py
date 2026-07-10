@@ -19,6 +19,7 @@ from collections import defaultdict
 
 from .temporal_constraints import TemporalConstraint, ConstraintType
 from .types import Effect, GuardrailContext, Verdict
+from .guardrails import Guardrail
 
 logger = logging.getLogger("coffee_shop.control_plane.temporal_guardrail")
 
@@ -193,14 +194,80 @@ def get_or_create_trace(thread_id: str, guardrail: 'TemporalConstraintGuardrail'
         logger.debug(f"Created new trace for thread {thread_id}")
     return _traces[thread_id]
 
+class TemporalGuardrail(Guardrail):
+    """
+    A single temporal constraint wrapped as a Guardrail.
+    This allows each temporal constraint to be treated as an individual guardrail
+    in the system, consistent with the existing guardrail architecture.
+    """
+    
+    def __init__(self, constraint: TemporalConstraint):
+        self._constraint = constraint
+        self._name = f"temporal_{constraint.id}"
+        self._version = "v1"
+        self._effect = Effect.DENY
+        self._description = constraint.description
+        
+        # Collect all tools from the constraint
+        self._tools = [constraint.antecedent, constraint.consequent]
+        if constraint.additional_activities:
+            self._tools.extend(constraint.additional_activities)
+        
+        # Create the underlying guardrail instance
+        self._guardrail = TemporalConstraintGuardrail([constraint])
+    
+    @property
+    def name(self) -> str:
+        return self._name
+    
+    @property
+    def version(self) -> str:
+        return self._version
+    
+    @property
+    def tools(self) -> list[str]:
+        return self._tools
+    
+    @property
+    def effect(self) -> Effect:
+        return self._effect
+    
+    @property
+    def description(self) -> str:
+        return self._description
+    
+    @property
+    def type(self) -> str:
+        return "hard"
+    
+    def applies_to(self, tool_name: str) -> bool:
+        """Check if this guardrail applies to the tool."""
+        return tool_name in self._tools
+    
+    def eval(self, context: GuardrailContext) -> Verdict:
+        """
+        Evaluate the temporal constraint.
+        
+        Args:
+            context: GuardrailContext containing thread_id, tool_name, etc.
+        
+        Returns:
+            Verdict: DENY if constraint violated, otherwise ALLOW.
+        """
+        # The context should have thread_id from the gateway
+        thread_id = context.thread_id or "default"
+        
+        # Evaluate the underlying guardrail
+        return self._guardrail.evaluate(context, thread_id)
 
-class TemporalConstraintGuardrail:
+class TemporalConstraintGuardrail(Guardrail):  # Inherit from Guardrail
     """Hard guardrail enforcing DECLARE temporal constraints."""
     
     def __init__(self, constraints: List[TemporalConstraint]):
         self.constraints = constraints
-        self.name = "temporal_order_constraints"
-        self.version = "v1"
+        self._name = f"temporal_{constraints[0].id}" if len(constraints) == 1 else "temporal_order_constraints"
+        self._version = "v1"
+        self._effect = Effect.DENY
         
         
         # Organize constraints by type for efficient checking
@@ -248,6 +315,14 @@ class TemporalConstraintGuardrail:
                 self.responded_existence_constraints.append(c)
                 self.responded_existence_map[c.antecedent] = c.consequent
                 self.reverse_responded_existence_map[c.consequent].append(c.antecedent)
+
+        self._applies_to_all = any(
+            c.constraint_type in [
+                ConstraintType.CHAIN_RESPONSE,
+                ConstraintType.CHAIN_PRECEDENCE,
+            ]
+            for c in constraints
+        )
         
         # Collect business tools that have constraints (for enforcement)
         self.enforced_tools = set()
@@ -259,13 +334,46 @@ class TemporalConstraintGuardrail:
         
         # For backwards compatibility - tools property returns enforced_tools
         self.tools = list(self.enforced_tools)
-        
+        self._tools = list(self.enforced_tools) 
+
         logger.debug(f"Temporal guardrail initialized with {len(constraints)} DECLARE constraints")
         logger.debug(f"  Will ENFORCE constraints on: {sorted(self.enforced_tools)}")
 
+    @property
+    def name(self) -> str:
+        return self._name
+    
+    @property
+    def version(self) -> str:
+        return self._version
+    
+    @property
+    def tools(self) -> list[str]:
+        return self._tools
+    
+    @tools.setter
+    def tools(self, value: list[str]):
+        self._tools = value
+    
+    @property
+    def effect(self) -> Effect:
+        return self._effect
+    
+    @property
+    def type(self) -> str:
+        return "hard"
+    
+    def eval(self, context: GuardrailContext) -> Verdict:
+        """Evaluate the temporal constraint."""
+        thread_id = context.thread_id or "default"
+        return self.evaluate(context, thread_id)
+
     def applies_to(self, tool_name: str) -> bool:
         """Check if this guardrail applies to the tool."""
-        return True
+        # Chain constraints must apply to ALL tools
+        if self._applies_to_all:
+            return True
+        return tool_name in self._tools
     
     def evaluate(self, context: GuardrailContext, thread_id: str) -> Verdict:
         """Evaluate all temporal constraints."""
@@ -321,14 +429,6 @@ class TemporalConstraintGuardrail:
                         choice_constraint = constraint
         
         # ========== STEP 2: Only allow if all constraints pass ==========
-        
-        # Record the event
-        trace.add_event(
-            tool_name=tool_name,
-            tool_call_id=tool_call_id,
-            timestamp=datetime.now(),
-            context=tool_args
-        )
 
         if choice_made and choice_constraint:
             self._log_choice_made(choice_constraint, trace, tool_name)
@@ -426,7 +526,7 @@ class TemporalConstraintGuardrail:
         
         return Verdict(
             effect=Effect.ALLOW,
-            guardrail_name=self.name,
+            guardrail_name=self._name,  # Use self._name instead of self.name
             guardrail_type="temporal_hard",
             reason_internal=f"Temporal constraints satisfied for {tool_name}"
         )
@@ -622,6 +722,29 @@ class TemporalConstraintGuardrail:
         else:
             logger.debug(f"Choice made: {current_tool} selected from options: {', '.join(all_choice_tools)}")
     
+
+def create_temporal_guardrails(config_path: str) -> List[TemporalGuardrail]:
+    """
+    Create individual temporal guardrails from YAML config.
+    
+    Each constraint becomes its own guardrail with a unique name.
+    This allows individual constraints to be enabled/disabled separately
+    and provides clearer error messages.
+    """
+    import yaml
+    from pathlib import Path
+    
+    with open(config_path, 'r', encoding='utf-8') as f:
+        data = yaml.safe_load(f)
+    
+    guardrails = []
+    for c_data in data.get('temporal_constraints', []):
+        constraint = TemporalConstraint.from_dict(c_data)
+        guardrail = TemporalGuardrail(constraint)
+        guardrails.append(guardrail)
+    
+    logger.debug(f"Created {len(guardrails)} temporal guardrails from {config_path}")
+    return guardrails
 
 
 def create_temporal_guardrail(config_path: str) -> TemporalConstraintGuardrail:

@@ -6,6 +6,7 @@ through `PREDICATE_REGISTRY` so YAML stays declarative.
 """
 from dataclasses import dataclass
 from pathlib import Path
+from typing import List
 
 import yaml
 
@@ -13,7 +14,7 @@ from .guardrails import Guardrail, HardGuardrail, SoftGuardrail
 from .predicates import PREDICATE_REGISTRY
 from .types import Effect
 from .temporal_constraints import TemporalConstraint
-from .temporal_guardrail import TemporalConstraintGuardrail, create_temporal_guardrail
+from .temporal_guardrail import create_temporal_guardrails, TemporalGuardrail, TemporalConstraintGuardrail
 
 
 @dataclass(frozen=True)
@@ -67,7 +68,7 @@ class Catalog:
     def __init__(self, config_dir: Path):
         self._guardrails: dict[str, Guardrail] = {}
         self._guidelines: dict[str, Guideline] = {}
-        self._temporal_guardrail: TemporalConstraintGuardrail | None = None
+        self._temporal_guardrails: dict[str, TemporalGuardrail] = {}
 
         guardrails_dir = Path(config_dir) / "guardrails"
         if not guardrails_dir.exists():
@@ -93,21 +94,28 @@ class Catalog:
                     )
                     self._guidelines[guideline.id] = guideline
 
+        # Load temporal constraints as individual guardrails
         constraints_path = Path(config_dir) / "constraints" / "temporal_order.yaml"
-        print(f"🔍 Looking for temporal constraints at: {constraints_path}")
-        print(f"📁 File exists: {constraints_path.exists()}")
-
         if constraints_path.exists():
             try:
-                self._temporal_guardrail = create_temporal_guardrail(constraints_path)
-                print(f"✅ Temporal guardrail created with {len(self._temporal_guardrail.constraints)} constraints")
-                print(f"   Tools monitored: {self._temporal_guardrail.tools}")
+                guardrails = create_temporal_guardrails(constraints_path)
+                for guardrail in guardrails:
+                    self._guardrails[guardrail.name] = guardrail
+                    self._temporal_guardrails[guardrail.name] = guardrail
             except Exception as e:
-                print(f"❌ Error loading temporal guardrail: {e}")
-                self._temporal_guardrail = None
-        else:
-            print(f"⚠️ No temporal constraints file found")
-            self._temporal_guardrail = None
+                print(f"❌ Error loading temporal guardrails: {e}")
+
+    def _load_temporal_constraints(self, constraints_path: Path) -> List[TemporalConstraint]:
+        """Load temporal constraints from YAML file."""
+        with open(constraints_path, 'r', encoding='utf-8') as f:
+            data = yaml.safe_load(f)
+        
+        constraints = []
+        for c_data in data.get('temporal_constraints', []):
+            constraint = TemporalConstraint.from_dict(c_data)
+            constraints.append(constraint)
+        
+        return constraints
 
     def guardrails(self, ids: list[str]) -> list[Guardrail]:
         missing = [i for i in ids if i not in self._guardrails]
@@ -121,6 +129,6 @@ class Catalog:
             raise KeyError(f"Unknown guideline ids: {missing}")
         return [self._guidelines[i] for i in ids]
     
-    def get_temporal_guardrail(self) -> TemporalConstraintGuardrail | None:
-        """Get the temporal constraint guardrail if configured."""
-        return self._temporal_guardrail
+    def get_temporal_guardrails(self) -> List[TemporalConstraintGuardrail]:
+        """Get all temporal constraint guardrails if configured."""
+        return list(self._temporal_guardrails.values()) if self._temporal_guardrails else []

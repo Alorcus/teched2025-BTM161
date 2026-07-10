@@ -11,6 +11,7 @@ from .log_sink import JsonlLogSink, NullLogSink
 from .snapshot import snapshot_id as compute_snapshot_id
 from .subgraph import create_agent_subgraph
 from .tool_registry import resolve_tools
+from .temporal_constraints import ConstraintType
 
 
 def build(
@@ -23,7 +24,32 @@ def build(
     """Build (compile) an agent subgraph for the given agent_id."""
     definition: AgentDefinition = repo.get(agent_id)
     tools = resolve_tools(list(definition.tools))
+    
+    # Get regular guardrails from catalog
     guardrails = catalog.guardrails(list(definition.guardrail_ids))
+    
+    # Get temporal guardrails and add them to the guardrails list
+    temporal_guardrails = catalog.get_temporal_guardrails()
+    
+        # Separate temporal guardrails by type
+    deny_guardrails = []
+    track_guardrails = []
+
+    for g in temporal_guardrails:
+        if g._constraint.constraint_type in [
+            ConstraintType.PRECEDENCE,
+            ConstraintType.ALTERNATE_PRECEDENCE,
+            ConstraintType.CHAIN_RESPONSE,
+            ConstraintType.CHAIN_PRECEDENCE,
+            ConstraintType.EXCLUSIVE_CHOICE,
+        ]:
+            deny_guardrails.append(g)
+        else:
+            track_guardrails.append(g)
+
+    # Deny guardrails first, then track guardrails
+    all_guardrails = guardrails + deny_guardrails + track_guardrails
+    
     guidelines = catalog.guidelines(list(definition.guideline_ids))
 
     composed_prompt = definition.base_prompt
@@ -42,11 +68,10 @@ def build(
 
     gateway = Gateway(
         agent_id=definition.id,
-        guardrails=guardrails,
+        guardrails=all_guardrails,
         allowed_handovers=list(definition.allowed_handovers),
         snapshot_id=snapshot,
         log_sink=log_sink,
-        temporal_guardrail=catalog.get_temporal_guardrail(),
     )
 
     subgraph = create_agent_subgraph(
