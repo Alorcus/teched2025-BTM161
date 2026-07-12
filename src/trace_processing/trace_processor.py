@@ -4,7 +4,7 @@ import time
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
-from .log_generator import LogGenerator
+from .log_generator import LogGenerator, _is_langgraph_root
 import pandas as pd
 
 COFFEE_MACHINE_LOG = Path("services/coffee_machine/logs/coffee_machine.csv")
@@ -113,17 +113,60 @@ class TraceProcessor:
 
         return all_traces
 
-    def process_all_traces(self, export_as_json: bool = False):
+    @staticmethod
+    def _peek_case_id(trace_dict: dict) -> str | None:
+        """Cheap read of the LangGraph thread_id (= case_id) without running
+        LogGenerator over the whole trace. Returns None if the trace has no
+        LangGraph root or no metadata (e.g. feedback-only traces)."""
+        info = trace_dict.get("info", {}) or {}
+        # MLflow's client puts spans under trace_dict["data"]["spans"] when
+        # this dict comes from Trace.to_dict(); LogGenerator also accepts a
+        # bare "spans" key. Handle both shapes.
+        spans = trace_dict.get("spans")
+        if spans is None:
+            spans = (trace_dict.get("data") or {}).get("spans")
+        if not spans:
+            return None
+        for span in spans:
+            if _is_langgraph_root(span.get("name", "")):
+                raw_meta = (span.get("attributes") or {}).get("metadata")
+                if not raw_meta:
+                    return None
+                try:
+                    parsed = json.loads(raw_meta)
+                except (TypeError, ValueError):
+                    return None
+                cid = parsed.get("thread_id")
+                return str(cid) if cid is not None else None
+        _ = info  # kept for future debug logging; explicit read silences linters.
+        return None
+
+    def extract_new_traces(
+        self, existing_case_ids: set[str] | None = None
+    ) -> tuple[pd.DataFrame, dict[str, tuple[str | None, int]], set[str]]:
+        """Run the trace-extraction pipeline for MLflow traces whose case_id
+        is NOT already in `existing_case_ids`. Feedback and coffee-machine
+        rows are joined in but scoped to the *new* case_ids only — the caller
+        is responsible for preserving rows for already-covered cases.
+
+        Returns `(combined_df, case_tags, new_case_ids)`. `combined_df` is
+        empty (no columns) when there is nothing new to add.
         """
-        Process all traces found via the MLflow API.
-        """
+        if existing_case_ids is None:
+            existing_case_ids = set()
 
         print("🔍 Searching for traces...")
         traces = self._get_all_traces()
 
+        empty_result: tuple[pd.DataFrame, dict[str, tuple[str | None, int]], set[str]] = (
+            pd.DataFrame(),
+            {},
+            set(),
+        )
+
         if not traces:
             print("❌ No traces found in MLflow")
-            return {"total": 0, "successful": 0, "failed": 0}
+            return empty_result
 
         print(f"📁 Found {len(traces)} traces")
 
@@ -138,6 +181,7 @@ class TraceProcessor:
         successful_ingestions = 0
         failed_ingestions = 0
         skipped_ingestions = 0  # processed without error but produced 0 events
+        skipped_already_covered = 0
 
         # Per-trace extraction accumulates into a list; a single pd.concat at
         # the end avoids the O(n²) copy cost of concatenating in the loop.
@@ -147,6 +191,7 @@ class TraceProcessor:
         # after all concats complete, so filter/aggregate queries can slice by
         # setup or scenario without joining an extra table.
         case_tags: dict[str, tuple[str | None, int]] = {}
+        new_case_ids: set[str] = set()
 
         per_trace_seconds: list[float] = []
 
@@ -155,6 +200,18 @@ class TraceProcessor:
             trace_dict = trace.to_dict()
             trace_id = trace_dict.get('info', {}).get('trace_id', f'trace-{i}')
             trace_tags = trace_dict.get('info', {}).get('tags', {}) or {}
+
+            # Cheap peek before the expensive LogGenerator pass: if the
+            # trace's thread_id is already covered by the caller's CSV, we
+            # skip it entirely. Feedback-only traces (no LangGraph root) peek
+            # as None and fall through to LogGenerator so the existing empty-
+            # frame branch keeps handling them.
+            peeked_case_id = self._peek_case_id(trace_dict)
+            if peeked_case_id is not None and peeked_case_id in existing_case_ids:
+                skipped_already_covered += 1
+                per_trace_seconds.append(time.perf_counter() - trace_start)
+                continue
+
             print(f"\t📂 Processing trace {i}/{len(traces)}: {trace_id}")
 
             log_generator = LogGenerator()
@@ -208,6 +265,7 @@ class TraceProcessor:
                     scenario_tag = -1
                 for cid in case_ids_in_trace:
                     case_tags[cid] = (setup_tag, scenario_tag)
+                    new_case_ids.add(str(cid))
             per_trace_seconds.append(time.perf_counter() - trace_start)
 
         combined_logs = (
@@ -224,21 +282,33 @@ class TraceProcessor:
         # the dashboard's export button doesn't surface a cryptic
         # "❌ time:timestamp".
         if combined_logs.empty or "time:timestamp" not in combined_logs.columns:
-            print("⚠️  No usable events extracted from traces; nothing to export.")
+            if skipped_already_covered:
+                print(
+                    f"⚠️  No new usable events extracted; "
+                    f"{skipped_already_covered} trace(s) already covered."
+                )
+            else:
+                print("⚠️  No usable events extracted from traces; nothing to export.")
             self._print_summary(
                 total=len(traces),
                 successful=successful_ingestions,
                 skipped=skipped_ingestions,
                 failed=failed_ingestions,
+                already_covered=skipped_already_covered,
                 total_seconds=time.perf_counter() - build_start,
                 per_trace_seconds=per_trace_seconds,
             )
-            return
+            return empty_result
         combined_logs.sort_values(by="time:timestamp", inplace=True)
 
-        # Append exactly one user_feedback event per case, after all other events
+        # Append exactly one user_feedback event per NEW case, after all other
+        # events. Scoping to `new_case_ids` matters for append mode: feedback
+        # rows for already-covered cases live in the caller's existing CSV
+        # and must not be re-emitted here.
         feedback_rows = []
         for case_id, fb in feedback_store.items():
+            if case_id not in new_case_ids:
+                continue
             case_mask = combined_logs["case_id"] == case_id
             if not case_mask.any():
                 continue
@@ -268,17 +338,18 @@ class TraceProcessor:
 
         # Merge coffee machine rows (stream 2). Same shape as the feedback
         # injection above: read the source CSV, map to canonical columns,
-        # filter to known case_ids, concat, re-sort.
+        # filter to NEW case_ids, concat, re-sort. Rows keyed to already-
+        # covered cases remain in the caller's existing CSV.
         machine_rows = _load_coffee_machine_rows(COFFEE_MACHINE_LOG)
         if not machine_rows.empty:
-            valid_case_ids = set(combined_logs["case_id"].unique())
             before = len(machine_rows)
-            machine_rows = machine_rows[machine_rows["case_id"].isin(valid_case_ids)]
+            machine_rows = machine_rows[machine_rows["case_id"].isin(new_case_ids)]
             dropped = before - len(machine_rows)
             if dropped:
                 print(
                     f"   ⚠️  Dropped {dropped} coffee-machine row(s) with "
-                    f"case_id not in agent log (stale or correlation_id mismatch)"
+                    f"case_id not in the new agent log slice "
+                    f"(stale, mismatched, or belonging to an already-covered case)"
                 )
             if not machine_rows.empty:
                 combined_logs = pd.concat(
@@ -300,25 +371,33 @@ class TraceProcessor:
             combined_logs["case_setup"] = None
             combined_logs["case_scenario_index"] = -1
 
-        self._generate_log_file(
-            combined_logs, "./generated_event_log", json_format=export_as_json
-        )
-
         self._print_summary(
             total=len(traces),
             successful=successful_ingestions,
             skipped=skipped_ingestions,
             failed=failed_ingestions,
+            already_covered=skipped_already_covered,
             total_seconds=time.perf_counter() - build_start,
             per_trace_seconds=per_trace_seconds,
         )
 
         if successful_ingestions > 0:
             print("\nLog generation process completed successfully!")
-        if len(traces) == 0:
-            print("\nNo trace files found. Make sure you have completed some coffee shop interactions first.")
-            print("💡 Go back to step 4 and create some orders to generate trace data.")
 
+        return combined_logs, case_tags, new_case_ids
+
+    def process_all_traces(self, export_as_json: bool = False):
+        """
+        Process all traces found via the MLflow API. Kept as the entrypoint
+        for the headless `simulate --export-logs` path — writes one
+        timestamped event-log file with every trace's events.
+        """
+        combined_logs, _tags, _new_ids = self.extract_new_traces(set())
+        if combined_logs.empty:
+            return
+        self._generate_log_file(
+            combined_logs, "./generated_event_log", json_format=export_as_json
+        )
         return
 
     @staticmethod
@@ -330,10 +409,13 @@ class TraceProcessor:
         failed: int,
         total_seconds: float,
         per_trace_seconds: list[float],
+        already_covered: int = 0,
     ) -> None:
         print("\n📈 Processing Summary:")
         print(f"   📊 Total traces processed: {total}")
         print(f"   ✅ Successful: {successful}")
+        if already_covered:
+            print(f"   ⏩ Already covered (skipped): {already_covered}")
         print(f"   ⏭️  Skipped (no events): {skipped}")
         print(f"   ❌ Failed: {failed}")
         print(f"   ⏱️  Build time: {total_seconds:.2f}s total", end="")
