@@ -48,7 +48,9 @@ META_FILENAME = "_all_traces.meta"
 #       rows now populated (previously always zero for the current autolog)
 #   4 → case_setup + case_scenario_index columns propagated from MLflow
 #       trace tags so the metrics dashboard can filter by them
-_SCHEMA_VERSION = 4
+#   5 → gateway_decision rows folded in from guardrail_log/events.jsonl so
+#       a shared _all_traces.csv carries the guardrail signal end-to-end
+_SCHEMA_VERSION = 5
 
 
 def _mlflow_trace_count(tracking_uri: str) -> int:

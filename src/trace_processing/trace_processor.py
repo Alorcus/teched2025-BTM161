@@ -8,6 +8,7 @@ from .log_generator import LogGenerator, _is_langgraph_root
 import pandas as pd
 
 COFFEE_MACHINE_LOG = Path("services/coffee_machine/logs/coffee_machine.csv")
+GUARDRAIL_LOG = Path("guardrail_log/events.jsonl")
 
 # Activities the coffee machine is allowed to emit. Anything else in the CSV
 # is a stale row from a previous version of the logger (e.g. pre-rename
@@ -77,6 +78,82 @@ def _load_coffee_machine_rows(path: Path) -> pd.DataFrame:
         "job_id":           raw.get("job_id", pd.Series([""] * len(raw))),
         "drink":            drink_safe,
     })
+
+
+def _load_gateway_rows(path: Path) -> pd.DataFrame:
+    """Read `guardrail_log/events.jsonl` and project each `gateway_decision`
+    record into one canonical event-log row so the flat `_all_traces.csv`
+    can carry the signal to users who don't have the JSONL on disk.
+
+    The row shape mirrors what `guardrail_log_loader.load_guardrail_events_from_eventlog`
+    expects to decode back into a `GuardrailOcelExtension`. `tool_args` and
+    `verdicts` are stored as JSON-encoded strings — polars CSV doesn't
+    support nested types, and the decoder round-trips both back to dicts/lists
+    before feeding them to the shared `project_decisions` function.
+
+    Rows for `gateway_decision` records missing any of the required
+    identifiers (`thread_id`, `agent_id`, `setup_name`, `snapshot_id`,
+    `tool_call_id`) are dropped — same rule the JSONL loader applies at
+    `guardrail_log_loader.py:192-193`.
+    """
+    if not path.exists() or path.stat().st_size == 0:
+        return pd.DataFrame()
+    rows: list[dict] = []
+    bad_lines = 0
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    bad_lines += 1
+                    continue
+                if rec.get("event_type") != "gateway_decision":
+                    continue
+                thread_id = rec.get("thread_id")
+                agent_id = rec.get("agent_id")
+                setup_name = rec.get("setup_name")
+                snapshot_id = rec.get("snapshot_id")
+                tool_call_id = rec.get("tool_call_id")
+                if not (thread_id and agent_id and setup_name and snapshot_id and tool_call_id):
+                    continue
+                ts_raw = rec.get("ts")
+                try:
+                    ts_dt = datetime.fromtimestamp(float(ts_raw))
+                except (TypeError, ValueError):
+                    continue
+                # Full microsecond precision — the JSONL loader parses `ts`
+                # via `datetime.fromtimestamp(float)` which keeps microseconds,
+                # so trimming to milliseconds here would leave the CSV-embedded
+                # extension slightly off from the JSONL-derived one and break
+                # dashboards that filter/sort by exact timestamp.
+                ts_iso = ts_dt.strftime("%Y-%m-%dT%H:%M:%S.%f")
+                rows.append({
+                    "case_id":               str(thread_id),
+                    "identity:id":           str(uuid.uuid4()),
+                    "time:timestamp":        ts_iso,
+                    "time_finished":         ts_iso,
+                    "concept:name":          "gateway_decision",
+                    "concept:instance":      f"gateway {rec.get('final_decision', 'allow')}: {rec.get('tool_name', '')}",
+                    "org:resource":          str(agent_id),
+                    "gateway_setup_name":    str(setup_name),
+                    "gateway_snapshot_id":   str(snapshot_id),
+                    "gateway_tool_name":     rec.get("tool_name", "") or "",
+                    "gateway_tool_call_id":  str(tool_call_id),
+                    "gateway_final_decision": rec.get("final_decision", "allow") or "allow",
+                    "gateway_tool_args_json": json.dumps(rec.get("tool_args") or {}, sort_keys=True),
+                    "gateway_verdicts_json":  json.dumps(rec.get("verdicts") or []),
+                })
+    except OSError:
+        return pd.DataFrame()
+    if bad_lines:
+        print(f"   ⚠️  gateway log: skipped {bad_lines} malformed line(s) in {path}")
+    if not rows:
+        return pd.DataFrame()
+    return pd.DataFrame(rows)
 
 
 class TraceProcessor:
@@ -354,6 +431,27 @@ class TraceProcessor:
             if not machine_rows.empty:
                 combined_logs = pd.concat(
                     [combined_logs, machine_rows], ignore_index=True
+                ).sort_values(by="time:timestamp")
+
+        # Merge gateway decisions (stream 3). Same shape as the two blocks
+        # above: read the JSONL source, project to canonical columns, filter
+        # to NEW case_ids, concat, re-sort. This is what lets a shared
+        # `_all_traces.csv` reproduce the guardrail dashboard panel on a
+        # machine that never had `guardrail_log/events.jsonl`.
+        gateway_rows = _load_gateway_rows(GUARDRAIL_LOG)
+        if not gateway_rows.empty:
+            before = len(gateway_rows)
+            gateway_rows = gateway_rows[gateway_rows["case_id"].isin(new_case_ids)]
+            dropped = before - len(gateway_rows)
+            if dropped:
+                print(
+                    f"   ⚠️  Dropped {dropped} gateway_decision row(s) whose "
+                    f"case_id is not in the new agent log slice "
+                    f"(stale, mismatched, or belonging to an already-covered case)"
+                )
+            if not gateway_rows.empty:
+                combined_logs = pd.concat(
+                    [combined_logs, gateway_rows], ignore_index=True
                 ).sort_values(by="time:timestamp")
 
         # Broadcast per-case setup/scenario tags to every row so downstream

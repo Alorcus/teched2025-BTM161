@@ -147,6 +147,100 @@ def load_guardrail_events(path: str | Path) -> GuardrailOcelExtension:
     if not decisions:
         return GuardrailOcelExtension()
 
+    return project_decisions(decisions)
+
+
+def load_guardrail_events_from_eventlog(
+    eventlog: pl.DataFrame,
+) -> GuardrailOcelExtension:
+    """Rebuild the OCEL extension from `gateway_decision` rows embedded in
+    the flat event log CSV.
+
+    Companion to `load_guardrail_events` — that one reads
+    `guardrail_log/events.jsonl` on disk; this one reads the same records
+    after they've been folded into `_all_traces.csv`. The two paths converge
+    on `project_decisions` so the resulting `GuardrailOcelExtension` is
+    identical shape either way.
+
+    Why this exists: `_all_traces.csv` is meant to be shared with users who
+    don't have the source JSONL on their machine. Every signal the dashboard
+    reads must therefore round-trip through the CSV.
+
+    Row contract (produced by TraceProcessor.extract_new_traces):
+    - `concept:name == "gateway_decision"`
+    - `time:timestamp` — ISO-8601 (with millisecond precision)
+    - `case_id` — thread_id
+    - `org:resource` — agent_id
+    - `gateway_setup_name`, `gateway_snapshot_id`, `gateway_tool_name`,
+      `gateway_tool_call_id`, `gateway_final_decision` — scalars
+    - `gateway_tool_args_json`, `gateway_verdicts_json` — JSON-encoded
+      strings (verdicts is a list, tool_args is a dict)
+    """
+    if eventlog.is_empty() or "concept:name" not in eventlog.columns:
+        return GuardrailOcelExtension()
+    rows = eventlog.filter(pl.col("concept:name") == "gateway_decision")
+    if rows.is_empty():
+        return GuardrailOcelExtension()
+
+    decisions: list[dict[str, Any]] = []
+    for r in rows.iter_rows(named=True):
+        raw_verdicts = r.get("gateway_verdicts_json") or "[]"
+        raw_args = r.get("gateway_tool_args_json") or "{}"
+        try:
+            verdicts = json.loads(raw_verdicts)
+        except (TypeError, ValueError):
+            verdicts = []
+        try:
+            tool_args = json.loads(raw_args)
+        except (TypeError, ValueError):
+            tool_args = {}
+
+        # `ts` is what project_decisions expects; the CSV carries the human-
+        # readable string in time:timestamp. Convert back to an epoch float
+        # so the shared projection path treats it identically to JSONL input.
+        ts_raw = r.get("time:timestamp")
+        ts_epoch: float | None
+        if ts_raw is None:
+            ts_epoch = None
+        else:
+            try:
+                # Accept both string ("2026-07-12T10:00:00.000") and datetime
+                # (when the loader has already parsed the column) shapes.
+                if isinstance(ts_raw, str):
+                    parsed = datetime.strptime(ts_raw, "%Y-%m-%dT%H:%M:%S.%f")
+                else:
+                    parsed = ts_raw
+                ts_epoch = parsed.timestamp()
+            except (TypeError, ValueError):
+                ts_epoch = None
+
+        decisions.append({
+            "event_type": "gateway_decision",
+            "ts": ts_epoch,
+            "thread_id": r.get("case_id"),
+            "agent_id": r.get("org:resource"),
+            "setup_name": r.get("gateway_setup_name"),
+            "snapshot_id": r.get("gateway_snapshot_id"),
+            "tool_name": r.get("gateway_tool_name") or "",
+            "tool_call_id": r.get("gateway_tool_call_id") or "",
+            "tool_args": tool_args,
+            "final_decision": r.get("gateway_final_decision") or "allow",
+            "verdicts": verdicts,
+        })
+
+    if not decisions:
+        return GuardrailOcelExtension()
+    return project_decisions(decisions)
+
+
+def project_decisions(decisions: list[dict[str, Any]]) -> GuardrailOcelExtension:
+    """Turn gateway_decision records into an OCEL extension.
+
+    Public because both `load_guardrail_events` (JSONL path) and
+    `load_guardrail_events_from_eventlog` (CSV path) share this projection —
+    keeping them convergent is what guarantees the shared `_all_traces.csv`
+    reproduces the same OCEL that a live JSONL would.
+    """
     return _project(decisions)
 
 

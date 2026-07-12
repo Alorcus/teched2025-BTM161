@@ -1,0 +1,275 @@
+"""Round-trip tests for guardrail_log <-> _all_traces.csv.
+
+Motivation: `_all_traces.csv` is designed to be shared with users who don't
+have `guardrail_log/events.jsonl` on disk. That contract only holds if the
+guardrail extension the OCEL converter builds from CSV-embedded rows is
+identical to the one it would build from the original JSONL. These tests
+pin that equivalence.
+"""
+from __future__ import annotations
+
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+import pandas as pd
+import polars as pl
+
+from src.trace_processing.guardrail_log_loader import (
+    GuardrailOcelExtension,
+    load_guardrail_events,
+    load_guardrail_events_from_eventlog,
+)
+from src.trace_processing.trace_processor import _load_gateway_rows
+
+
+def _decision(
+    *,
+    ts: float,
+    thread_id: str,
+    agent_id: str = "order_agent",
+    setup_name: str = "baseline",
+    snapshot_id: str = "order_agent@v1+abc123",
+    tool_name: str = "process_order",
+    tool_call_id: str | None = None,
+    final_decision: str = "allow",
+    verdicts: list | None = None,
+    tool_args: dict | None = None,
+) -> dict:
+    """One realistic gateway_decision record. Mirrors what
+    control_plane.log_sink writes."""
+    return {
+        "ts": ts,
+        "setup_name": setup_name,
+        "event_type": "gateway_decision",
+        "snapshot_id": snapshot_id,
+        "agent_id": agent_id,
+        "thread_id": thread_id,
+        "tool_name": tool_name,
+        "tool_call_id": tool_call_id or f"toolu_{ts}",
+        "tool_args": tool_args if tool_args is not None else {"customer": "Alice"},
+        "final_decision": final_decision,
+        "verdicts": verdicts or [],
+    }
+
+
+def _ext_signature(ext: GuardrailOcelExtension) -> dict:
+    """Reduce a GuardrailOcelExtension to a comparable structure.
+
+    We compare on the sorted set of relationships / attributes rather than
+    on ocel_ids that carry a random uuid (event_id is generated fresh at
+    projection time — the two projections will never share those). The
+    signature captures what an OCEL consumer actually observes: event
+    types, object types, and E2O / O2O edges keyed by stable identifiers.
+    """
+    def _events_by_type(evt_type: str) -> list[dict]:
+        df = ext.event_tables.get(evt_type)
+        if df is None or df.is_empty():
+            return []
+        # Drop the random ocel_id; keep everything else. Sort by tool_call_id
+        # so ordering isn't a false diff.
+        cols = [c for c in df.columns if c != "ocel_id"]
+        return sorted(
+            df.select(cols).to_dicts(), key=lambda r: (r.get("tool_call_id"), r.get("agent_id"))
+        )
+
+    def _objects_by_type(obj_type: str) -> list[dict]:
+        df = ext.object_tables.get(obj_type)
+        if df is None or df.is_empty():
+            return []
+        return sorted(df.to_dicts(), key=lambda r: r["ocel_id"])
+
+    # E2O edges: strip event_id (uuid) but keep object_id + qualifier, and
+    # rekey each edge by the (tool_call_id, object_id, qualifier) triple so
+    # events line up across the two extensions.
+    def _e2o_signature() -> list[tuple]:
+        if ext.event_object_rows.is_empty():
+            return []
+        # Look up each event's tool_call_id via the event tables.
+        tool_by_event: dict[str, str] = {}
+        for evt_type in ("gateway_flag", "gateway_deny"):
+            df = ext.event_tables.get(evt_type)
+            if df is None or df.is_empty():
+                continue
+            for row in df.to_dicts():
+                tool_by_event[row["ocel_id"]] = row.get("tool_call_id", "")
+        return sorted(
+            (
+                tool_by_event.get(r["ocel_event_id"], ""),
+                r["ocel_object_id"],
+                r["ocel_qualifier"],
+            )
+            for r in ext.event_object_rows.to_dicts()
+        )
+
+    def _o2o_signature() -> list[tuple]:
+        if ext.object_object_rows.is_empty():
+            return []
+        return sorted(
+            (r["ocel_source_id"], r["ocel_target_id"], r["ocel_qualifier"])
+            for r in ext.object_object_rows.to_dicts()
+        )
+
+    return {
+        "gateway_flag": _events_by_type("gateway_flag"),
+        "gateway_deny": _events_by_type("gateway_deny"),
+        "guardrail": _objects_by_type("guardrail"),
+        "setup": _objects_by_type("setup"),
+        "snapshot": _objects_by_type("snapshot"),
+        "tool_call": _objects_by_type("tool_call"),
+        "case_setup_map": dict(sorted(ext.case_setup_map.items())),
+        "case_agent_snapshot_map": {
+            f"{k[0]}|{k[1]}": v for k, v in sorted(ext.case_agent_snapshot_map.items())
+        },
+        "tool_call_ids": sorted(ext.tool_call_ids),
+        "event_object_rows": _e2o_signature(),
+        "object_object_rows": _o2o_signature(),
+    }
+
+
+class TestGuardrailCsvRoundTrip(unittest.TestCase):
+    """CSV-embedded gateway rows must decode to the same OCEL extension as
+    the JSONL they came from."""
+
+    def _write_jsonl(self, path: Path, records: list[dict]) -> None:
+        path.write_text("\n".join(json.dumps(r) for r in records) + "\n")
+
+    def _project_via_csv(self, records: list[dict]) -> GuardrailOcelExtension:
+        """JSONL → _load_gateway_rows → in-memory CSV round-trip →
+        load_guardrail_events_from_eventlog. Round-tripping through a CSV
+        write/read is what the shared-file recipient actually experiences."""
+        with tempfile.TemporaryDirectory() as tmp:
+            jsonl_path = Path(tmp) / "events.jsonl"
+            self._write_jsonl(jsonl_path, records)
+            rows = _load_gateway_rows(jsonl_path)
+            csv_path = Path(tmp) / "eventlog.csv"
+            rows.to_csv(csv_path, index=False)
+            el = pl.read_csv(str(csv_path), infer_schema_length=10_000)
+        return load_guardrail_events_from_eventlog(el)
+
+    def test_allow_only_produces_empty_events_but_populates_maps(self):
+        """Allowed decisions emit no gateway_flag/deny events but still
+        register tool_call objects and populate the backfill maps."""
+        records = [
+            _decision(
+                ts=1783868902.16553,
+                thread_id="thread-1",
+                final_decision="allow",
+                verdicts=[],
+            )
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            jsonl_path = Path(tmp) / "events.jsonl"
+            self._write_jsonl(jsonl_path, records)
+            jsonl_ext = load_guardrail_events(jsonl_path)
+        csv_ext = self._project_via_csv(records)
+        self.assertEqual(_ext_signature(jsonl_ext), _ext_signature(csv_ext))
+
+    def test_deny_decision_round_trip(self):
+        """A deny decision must reproduce the same event/object/edge set."""
+        records = [
+            _decision(
+                ts=1783868902.16553,
+                thread_id="thread-1",
+                final_decision="deny",
+                verdicts=[
+                    {
+                        "guardrail_name": "no_freebies",
+                        "guardrail_version": "v1",
+                        "guardrail_type": "policy",
+                        "effect": "deny",
+                        "reason_internal": "cost > 0",
+                        "reason_for_llm": "Free items disabled.",
+                    }
+                ],
+            )
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            jsonl_path = Path(tmp) / "events.jsonl"
+            self._write_jsonl(jsonl_path, records)
+            jsonl_ext = load_guardrail_events(jsonl_path)
+        csv_ext = self._project_via_csv(records)
+        self.assertEqual(_ext_signature(jsonl_ext), _ext_signature(csv_ext))
+
+    def test_mixed_flag_and_deny_across_threads(self):
+        """Multiple decisions across threads, agents, and effects — the most
+        realistic shape. Verifies that consulting/flagging/denying verdicts
+        all round-trip and that per-thread setup+snapshot maps stay
+        consistent."""
+        records = [
+            _decision(
+                ts=1783868902.1,
+                thread_id="thread-a",
+                agent_id="order_agent",
+                tool_call_id="tc-1",
+                final_decision="allow",
+                verdicts=[
+                    {
+                        "guardrail_name": "menu_check",
+                        "guardrail_version": "v2",
+                        "guardrail_type": "content",
+                        "effect": "flag",
+                        "reason_internal": "unusual item",
+                        "reason_for_llm": "Item is uncommon.",
+                    }
+                ],
+            ),
+            _decision(
+                ts=1783868903.4,
+                thread_id="thread-a",
+                agent_id="barista_agent",
+                snapshot_id="barista_agent@v1+xyz",
+                tool_call_id="tc-2",
+                final_decision="deny",
+                verdicts=[
+                    {
+                        "guardrail_name": "safety",
+                        "guardrail_version": "v3",
+                        "guardrail_type": "policy",
+                        "effect": "deny",
+                        "reason_internal": "unsafe temp",
+                        "reason_for_llm": "Too hot.",
+                    }
+                ],
+            ),
+            _decision(
+                ts=1783868904.9,
+                thread_id="thread-b",
+                agent_id="order_agent",
+                tool_call_id="tc-3",
+                final_decision="allow",
+                verdicts=[],
+            ),
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            jsonl_path = Path(tmp) / "events.jsonl"
+            self._write_jsonl(jsonl_path, records)
+            jsonl_ext = load_guardrail_events(jsonl_path)
+        csv_ext = self._project_via_csv(records)
+        self.assertEqual(_ext_signature(jsonl_ext), _ext_signature(csv_ext))
+
+
+class TestGatewayAppendScoping(unittest.TestCase):
+    """`_load_gateway_rows` reads the entire JSONL; scoping to new case_ids
+    happens in the merge step in extract_new_traces. This is a small
+    behavioural check on that step (via the standalone helper) so the row
+    contract downstream can rely on a case_id column being present."""
+
+    def test_load_gateway_rows_returns_case_id_column(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            jsonl = Path(tmp) / "events.jsonl"
+            jsonl.write_text(
+                json.dumps(_decision(ts=1783868902.0, thread_id="t-1")) + "\n"
+                + json.dumps(_decision(ts=1783868903.0, thread_id="t-2")) + "\n"
+            )
+            rows = _load_gateway_rows(jsonl)
+        self.assertEqual(set(rows["case_id"]), {"t-1", "t-2"})
+        # Downstream (extract_new_traces) filters by case_id — column must
+        # exist and be indexable with `.isin()`.
+        filtered = rows[rows["case_id"].isin({"t-1"})]
+        self.assertEqual(len(filtered), 1)
+
+
+if __name__ == "__main__":
+    unittest.main()

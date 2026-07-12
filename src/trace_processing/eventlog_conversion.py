@@ -12,7 +12,32 @@ from .guardrail_log_loader import (
     GATEWAY_OBJECT_TYPES,
     GuardrailOcelExtension,
     load_guardrail_events,
+    load_guardrail_events_from_eventlog,
 )
+
+
+def _resolve_guardrail_extension(
+    eventlog: pl.DataFrame,
+    guardrail_log_path: str | Path | None,
+) -> GuardrailOcelExtension:
+    """Prefer gateway_decision rows embedded in the eventlog; fall back to
+    the on-disk JSONL for callers that don't hand over a shareable CSV.
+
+    Never merges the two — embedded rows are the authoritative source once
+    they exist (they were written from the same JSONL) so combining would
+    just duplicate everything.
+    """
+    if "concept:name" in eventlog.columns:
+        has_embedded = (
+            eventlog.filter(pl.col("concept:name") == "gateway_decision")
+            .height
+            > 0
+        )
+        if has_embedded:
+            return load_guardrail_events_from_eventlog(eventlog)
+    if guardrail_log_path is not None:
+        return load_guardrail_events(guardrail_log_path)
+    return GuardrailOcelExtension()
 EVENT_ATTRIBUTES = {
     "agent_response": ["ocel_time", "duration", "input_tokens", "response_tokens"],
     "call_llm": ["ocel_time", "model", "duration", "input_tokens", "response_tokens"],
@@ -216,16 +241,30 @@ class ObjectCentricEventlog:
 
         Input:
             el : pl.DataFrame holding the raw event log as loaded directly from the CSV.
+
+        Guardrail signal resolution — two sources, one wins:
+        1. `gateway_decision` rows embedded in the eventlog itself. This is
+           what a shared `_all_traces.csv` carries; the recipient doesn't
+           need `guardrail_log/events.jsonl` on disk to see the panel.
+        2. `guardrail_log_path` — the on-disk JSONL, used when the eventlog
+           has no embedded rows (e.g. an old cache built before schema
+           v5). We prefer embedded rows over the JSONL when both are present
+           so the two never disagree.
         """
         if isinstance(eventlog, str):
             eventlog = pl.read_csv(eventlog)
 
+        # Resolve the guardrail extension BEFORE preprocessing, using the raw
+        # eventlog so the CSV-embedded gateway_decision rows are still visible.
+        # Then strip those rows out of the eventlog that feeds the OCEL
+        # converter — they've been re-emitted as gateway_flag/gateway_deny
+        # events by the extension, and leaving the raw rows in would produce
+        # a duplicate native `event_gateway_decision` table with no OCEL edges.
+        ext = _resolve_guardrail_extension(eventlog, guardrail_log_path)
+        if "concept:name" in eventlog.columns:
+            eventlog = eventlog.filter(pl.col("concept:name") != "gateway_decision")
+
         el_enriched = _preprocess_eventlog(eventlog)
-        ext = (
-            load_guardrail_events(guardrail_log_path)
-            if guardrail_log_path is not None
-            else GuardrailOcelExtension()
-        )
 
         objects = (
             el_enriched.select(
