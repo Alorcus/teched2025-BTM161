@@ -2,7 +2,7 @@ import json
 import os
 import time
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from .log_generator import LogGenerator, _is_langgraph_root
 import pandas as pd
@@ -122,7 +122,16 @@ def _load_gateway_rows(path: Path) -> pd.DataFrame:
                     continue
                 ts_raw = rec.get("ts")
                 try:
-                    ts_dt = datetime.fromtimestamp(float(ts_raw))
+                    # `rec["ts"]` is an epoch float. The rest of the eventlog
+                    # (LogGenerator, from OpenTelemetry `start_time_unix_nano`)
+                    # writes naive-UTC ISO strings, and metrics_page's
+                    # `_load_combined_eventlog` interprets every CSV timestamp
+                    # as UTC before converting to local. If we used
+                    # `datetime.fromtimestamp(epoch)` (naive-LOCAL) the
+                    # dashboard would double-shift these rows by the local
+                    # offset, pushing gateway events hours into the future.
+                    # Produce a naive-UTC string to match the rest of the CSV.
+                    ts_dt = datetime.fromtimestamp(float(ts_raw), tz=timezone.utc).replace(tzinfo=None)
                 except (TypeError, ValueError):
                     continue
                 # Full microsecond precision — the JSONL loader parses `ts`

@@ -24,7 +24,7 @@ import json
 import logging
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -205,11 +205,17 @@ def load_guardrail_events_from_eventlog(
         else:
             try:
                 # Accept both string ("2026-07-12T10:00:00.000") and datetime
-                # (when the loader has already parsed the column) shapes.
+                # (when the loader has already parsed the column) shapes. The
+                # CSV column is naive-UTC (see _load_gateway_rows); calling
+                # `.timestamp()` on a naive datetime otherwise assumes LOCAL
+                # and would invert the fix at the producer side. Tag as UTC
+                # before converting back to an epoch float.
                 if isinstance(ts_raw, str):
                     parsed = datetime.strptime(ts_raw, "%Y-%m-%dT%H:%M:%S.%f")
                 else:
                     parsed = ts_raw
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=timezone.utc)
                 ts_epoch = parsed.timestamp()
             except (TypeError, ValueError):
                 ts_epoch = None
@@ -556,14 +562,18 @@ def _parse_snapshot_id(snapshot_id: str) -> tuple[str, str, str]:
 
 
 def _ts_to_datetime(ts: Any) -> datetime | None:
-    """Convert the JSONL `ts` (epoch float seconds) to a Python datetime.
+    """Convert the JSONL `ts` (epoch float seconds) to a naive-UTC datetime.
 
     Matches the dtype produced by `_preprocess_eventlog`'s
-    `pl.col("time_finished").str.to_datetime()` so the synthetic rows merge
-    cleanly with the rest of the OCEL. Returns `None` for unparseable input
-    so the caller can drop the offending record.
+    `pl.col("time_finished").str.to_datetime()` — which yields naive-UTC
+    because LogGenerator writes CSV timestamps as naive-UTC (from OTel's
+    `start_time_unix_nano`, always UTC). Using `datetime.fromtimestamp(ts)`
+    with no `tz=` would return naive-LOCAL and shift gateway events by the
+    local UTC offset relative to the rest of the OCEL — invisible on a
+    UTC host, hours off on any host in a non-UTC zone. Returns `None` for
+    unparseable input so the caller can drop the offending record.
     """
     try:
-        return datetime.fromtimestamp(float(ts))
+        return datetime.fromtimestamp(float(ts), tz=timezone.utc).replace(tzinfo=None)
     except (TypeError, ValueError):
         return None

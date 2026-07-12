@@ -50,7 +50,11 @@ META_FILENAME = "_all_traces.meta"
 #       trace tags so the metrics dashboard can filter by them
 #   5 → gateway_decision rows folded in from guardrail_log/events.jsonl so
 #       a shared _all_traces.csv carries the guardrail signal end-to-end
-_SCHEMA_VERSION = 5
+#   6 → gateway_decision rows now written as naive-UTC (matching LogGenerator);
+#       version-5 rows used naive-LOCAL and were double-shifted by
+#       _load_combined_eventlog's UTC→local conversion, pushing gateway
+#       events hours into the future on any non-UTC host
+_SCHEMA_VERSION = 6
 
 
 def _mlflow_trace_count(tracking_uri: str) -> int:

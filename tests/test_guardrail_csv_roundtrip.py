@@ -270,6 +270,37 @@ class TestGatewayAppendScoping(unittest.TestCase):
         filtered = rows[rows["case_id"].isin({"t-1"})]
         self.assertEqual(len(filtered), 1)
 
+    def test_load_gateway_rows_writes_naive_utc_timestamps(self):
+        """The Metrics Dashboard treats every CSV `time:timestamp` as
+        naive-UTC (LogGenerator writes them that way, from OpenTelemetry
+        `start_time_unix_nano`). If gateway rows carried naive-LOCAL strings
+        instead, `_load_combined_eventlog`'s UTC→local conversion would
+        double-shift them by the local offset — pushing current-run
+        gateway events hours into the future and knocking them out of
+        "Last 10 min" filters. Pin the UTC convention with a fixed epoch
+        that renders differently in every non-UTC zone.
+
+        `ts = 1783868902.0` is 2026-07-12T15:08:22 UTC (deterministic).
+        In naive-LOCAL for a CET/CEST host the string would come out as
+        17:08:22 (+02:00); in UTC it must be 15:08:22.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            jsonl = Path(tmp) / "events.jsonl"
+            jsonl.write_text(
+                json.dumps(_decision(ts=1783868902.0, thread_id="t-1")) + "\n"
+            )
+            rows = _load_gateway_rows(jsonl)
+        ts_str = rows["time:timestamp"].iloc[0]
+        # The exact UTC rendering for this epoch. Anchoring on a string
+        # (not a local datetime comparison) means this test fails
+        # identically on WSL/CET, macOS/PST, and UTC CI runners.
+        self.assertTrue(
+            ts_str.startswith("2026-07-12T15:08:22"),
+            f"Expected naive-UTC prefix '2026-07-12T15:08:22', got {ts_str!r}. "
+            f"If this fails with a +Nh shift, _load_gateway_rows regressed "
+            f"back to `datetime.fromtimestamp(...)` without `tz=timezone.utc`.",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
