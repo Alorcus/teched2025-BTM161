@@ -136,6 +136,16 @@ poetry run simulate --setup baseline --traces 10 --scenario all --export-logs
 | 2     | Complain about a cold cappuccino and seek resolution   |
 | 3     | Ask for a recommendation and order based on suggestion |
 
+### Batch Script
+
+For mixing setups and scenarios in a single run (e.g. 10 traces of scenario 0 under `baseline`, then 10 of scenario 2 under `unconstrained`), use `scripts/run_batches.py`. Edit the `BATCHES` list at the top of the file — a sequence of `(setup, scenario_index, count)` tuples — then run:
+
+```bash
+poetry run python -m scripts.run_batches
+```
+
+Make sure the Poetry virtual environment is active (`poetry env activate`) or prefix with `poetry run` as shown; the script imports from `src/` and needs the project's dependencies. Batches sharing a setup reuse the same `CoffeeShop` instance, so keep same-setup entries consecutive in the list.
+
 ## Agent Observatory Dashboard
 
 A two-page observability dashboard built with [Panel](https://panel.holoviz.org/):
