@@ -26,7 +26,7 @@ import time
 import panel as pn
 
 from src.coffee_shop import CoffeeShop
-from src.agents import CUSTOMER_SCENARIOS, build_default_prompt
+from src.agents import CUSTOMER_SCENARIOS, CUSTOMER_SCENARIO_LABELS, build_default_prompt
 from src.agents.barista_agent import start_coffee_machine, stop_coffee_machine
 from .interaction.agent_panel import AgentPanel  # noqa: F401  (used indirectly by status colors)
 from .interaction.coffee_machine_panel import CoffeeMachinePanel
@@ -150,14 +150,8 @@ _CONV_SCROLL_SCRIPT = """
 
 
 def _scenario_options() -> dict[str, int]:
-    labels = [
-        "Latte & croissant (friendly)",
-        "2 espressos (in a hurry)",
-        "Complaint (cold cappuccino)",
-        "Ask for a recommendation",
-    ]
     options: dict[str, int] = {
-        f"{i}: {labels[i]}": i for i in range(min(len(labels), len(CUSTOMER_SCENARIOS)))
+        f"{i}: {CUSTOMER_SCENARIO_LABELS[i]}": i for i in range(len(CUSTOMER_SCENARIOS))
     }
     options["Custom"] = -1
     return options
