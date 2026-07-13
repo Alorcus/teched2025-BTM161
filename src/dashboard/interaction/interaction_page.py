@@ -76,9 +76,8 @@ def create_observatory_dashboard(setup_name: str):
     """Create the Agent Observatory dashboard page."""
     pn.extension(sizing_mode="stretch_both")
 
-    # The Interaction page is the only page that touches the SQLite order
-    # store, so initialise the schema lazily on first visit. `init_db()` is
-    # idempotent — repeat visits are cheap.
+    # Only page that touches the SQLite order store, so init the schema here
+    # rather than at app boot. init_db() is idempotent.
     init_db()
 
     available_setups = list_setups()

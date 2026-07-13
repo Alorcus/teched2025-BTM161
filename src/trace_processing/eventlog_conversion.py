@@ -27,31 +27,23 @@ def _resolve_guardrail_extension(
     """Prefer gateway_decision rows embedded in the eventlog; fall back to
     the on-disk JSONL for callers that don't hand over a shareable CSV.
 
-    Never merges the two — embedded rows are the authoritative source once
-    they exist (they were written from the same JSONL) so combining would
-    just duplicate everything.
+    Never merges the two — embedded rows were written from the same JSONL,
+    so combining would just duplicate everything.
 
     Timezone contract: `load_guardrail_events_from_eventlog` interprets any
     naive `time:timestamp` value as UTC. `_load_gateway_rows` writes the
-    column as a naive-UTC string, so a freshly-loaded CSV satisfies the
-    contract directly. The dashboard, however, parses the column into a
-    Datetime and shifts it to naive-LOCAL before this function runs — at
-    that point tagging the value as UTC would double-shift each gateway
-    event by the local UTC offset.
+    column as a naive-UTC string, so a freshly-loaded CSV is fine. The
+    dashboard, however, parses the column into a Datetime and shifts it to
+    naive-LOCAL before this runs — tagging that value as UTC would
+    double-shift each gateway event.
 
     Resolution order (fall through on each miss):
-    1. `time:timestamp_utc_naive` — an extra column the dashboard's
-       `_load_combined_eventlog` writes with the pre-conversion, naive-UTC
-       Datetime. When present, we rebuild a sub-frame that copies that
-       column back into `time:timestamp` and hand it to the loader; the
-       result is always correct regardless of what the caller did to the
-       display column.
-    2. If `time:timestamp` is still a raw string, use the loader directly —
-       that's the on-disk CSV case (recipient shares `_all_traces.csv`
-       without the JSONL).
+    1. `time:timestamp_utc_naive` — sibling column preserved by the
+       dashboard, holding the pre-conversion naive-UTC Datetime.
+    2. `time:timestamp` as raw string (plain CSV case) — pass directly.
     3. On-disk JSONL, if `guardrail_log_path` points at an existing file.
-    4. Last-resort: run the loader against the potentially-shifted embedded
-       rows anyway, with a warning — better a display shift than no panel.
+    4. Last-resort: run the loader against potentially-shifted embedded
+       rows, with a warning.
     """
     if "concept:name" in eventlog.columns:
         has_embedded = (
@@ -60,10 +52,6 @@ def _resolve_guardrail_extension(
             > 0
         )
         if has_embedded:
-            # Path 1: naive-UTC sibling column preserved by the dashboard.
-            # Route it through the loader after rewiring the column name so
-            # the loader still sees `time:timestamp` — its expected key —
-            # holding the untouched UTC value.
             if "time:timestamp_utc_naive" in eventlog.columns:
                 rewired = eventlog.with_columns(
                     pl.col("time:timestamp_utc_naive").alias("time:timestamp"),
@@ -71,16 +59,13 @@ def _resolve_guardrail_extension(
                 return load_guardrail_events_from_eventlog(rewired)
             ts_dtype = eventlog.schema.get("time:timestamp")
             timestamp_is_string = ts_dtype in (pl.Utf8, pl.String)
-            # Path 2: raw string column — the plain CSV case.
             if timestamp_is_string:
                 return load_guardrail_events_from_eventlog(eventlog)
-            # Path 3: fall back to on-disk JSONL when it exists.
             if (
                 guardrail_log_path is not None
                 and Path(guardrail_log_path).exists()
             ):
                 return load_guardrail_events(guardrail_log_path)
-            # Path 4: last-resort, warn and use whatever we have.
             logger.warning(
                 "Guardrail rows are embedded in the eventlog but "
                 "time:timestamp is not a string column and no "
@@ -297,33 +282,16 @@ class ObjectCentricEventlog:
 
         Input:
             el : pl.DataFrame holding the raw event log as loaded directly from the CSV.
-
-        Guardrail signal resolution — two sources, one wins:
-        1. `gateway_decision` rows embedded in the eventlog itself. This is
-           what a shared `_all_traces.csv` carries; the recipient doesn't
-           need `guardrail_log/events.jsonl` on disk to see the panel.
-        2. `guardrail_log_path` — the on-disk JSONL, used when the eventlog
-           has no embedded rows (e.g. an old cache built before schema
-           v5). We prefer embedded rows over the JSONL when both are present
-           so the two never disagree.
         """
         if isinstance(eventlog, str):
             eventlog = pl.read_csv(eventlog)
 
-        # Resolve the guardrail extension BEFORE preprocessing, using the raw
-        # eventlog so the CSV-embedded gateway_decision rows are still visible.
-        # Then strip those rows out of the eventlog that feeds the OCEL
-        # converter — they've been re-emitted as gateway_flag/gateway_deny
-        # events by the extension, and leaving the raw rows in would produce
-        # a duplicate native `event_gateway_decision` table with no OCEL edges.
+        # Resolve the guardrail extension BEFORE filtering out gateway_decision
+        # rows, then strip those rows from the eventlog that feeds the OCEL
+        # converter — they've been re-emitted as gateway_flag/gateway_deny by
+        # the extension, and leaving the raw rows in would produce a duplicate
+        # native `event_gateway_decision` table with no OCEL edges.
         ext = _resolve_guardrail_extension(eventlog, guardrail_log_path)
-        # First strip out gateway rows so they don't feed into the native OCEL
-        # as an unlinked event table — they were already re-emitted as
-        # gateway_flag/gateway_deny by the extension above. The
-        # `concept:name in columns` guard here is a presence check (the frame
-        # may lack the column entirely), distinct from the value check inside
-        # `_resolve_guardrail_extension` which asks whether any row IS a
-        # gateway_decision.
         if "concept:name" in eventlog.columns:
             eventlog = eventlog.filter(pl.col("concept:name") != "gateway_decision")
 

@@ -1,19 +1,8 @@
 """Run a configured list of simulation batches.
 
-Each batch is a (setup, scenario, count) tuple. Consecutive batches sharing
-a setup reuse the same CoffeeShop instance, so keep same-setup entries next
-to each other in the list to pay the init cost once per contiguous block.
-
-The batch list and flags can be driven three ways (in precedence order):
-  1. `--batches setup:scenario:count ...` on the command line
-  2. `--config path/to/config.json` (mutually exclusive with `--batches`)
-  3. The module-level `BATCHES` / `RESET_INVENTORY` / `PROCESS_SUPERVISOR`
-     / `EXPORT_LOGS` defaults below
-
-Run from the repo root:
-    python -m scripts.run_batches
-    python -m scripts.run_batches --batches baseline:0:1
-    python -m scripts.run_batches --config path/to/batches.json
+Consecutive batches sharing a setup reuse the same CoffeeShop instance, so
+keep same-setup entries next to each other in the list to pay the init cost
+once per contiguous block.
 """
 
 import argparse
@@ -46,7 +35,6 @@ logger = logging.getLogger("coffee_shop")
 
 
 def _parse_triple(raw: str) -> tuple[str, int, int]:
-    """Parse a single `setup:scenario:count` triple."""
     parts = raw.split(":")
     if len(parts) != 3:
         raise argparse.ArgumentTypeError(
@@ -97,7 +85,6 @@ def _load_config(path: Path) -> tuple[
     bool | None,
     bool | None,
 ]:
-    """Load a JSON config file. Returns (batches, reset, supervisor, export)."""
     with path.open("r", encoding="utf-8") as f:
         data = json.load(f)
     if not isinstance(data, dict):
@@ -194,7 +181,7 @@ def _build_parser() -> argparse.ArgumentParser:
 def _resolve_settings(
     args: argparse.Namespace,
 ) -> tuple[list[tuple[str, int, int]], bool, bool, bool]:
-    """Merge CLI args, optional config file, and module defaults."""
+    """CLI args override config file values, which override module defaults."""
     batches: list[tuple[str, int, int]] = BATCHES
     reset = RESET_INVENTORY
     supervisor = PROCESS_SUPERVISOR
@@ -213,7 +200,6 @@ def _resolve_settings(
     elif args.batches is not None:
         batches = _parse_batches_arg(args.batches)
 
-    # CLI boolean flags override config + module defaults when supplied.
     if args.reset_inventory is not None:
         reset = args.reset_inventory
     if args.process_supervisor is not None:

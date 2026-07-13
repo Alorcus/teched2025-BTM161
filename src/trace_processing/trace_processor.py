@@ -17,8 +17,6 @@ logger = logging.getLogger(__name__)
 # subprocess launched from elsewhere.
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-# Kept as module-level defaults for callers that want to override the paths
-# on the CSV loaders directly (see tests/test_guardrail_csv_roundtrip.py).
 COFFEE_MACHINE_LOG = PROJECT_ROOT / "services/coffee_machine/logs/coffee_machine.csv"
 GUARDRAIL_LOG = PROJECT_ROOT / "guardrail_log/events.jsonl"
 
@@ -105,16 +103,9 @@ def _load_gateway_rows(path: Path) -> pd.DataFrame:
     record into one canonical event-log row so the flat `_all_traces.csv`
     can carry the signal to users who don't have the JSONL on disk.
 
-    The row shape mirrors what `guardrail_log_loader.load_guardrail_events_from_eventlog`
-    expects to decode back into a `GuardrailOcelExtension`. `tool_args` and
-    `verdicts` are stored as JSON-encoded strings — polars CSV doesn't
-    support nested types, and the decoder round-trips both back to dicts/lists
-    before feeding them to the shared `project_decisions` function.
-
-    Rows for `gateway_decision` records missing any of the required
-    identifiers (`thread_id`, `agent_id`, `setup_name`, `snapshot_id`,
-    `tool_call_id`) are dropped — same rule the JSONL loader applies at
-    `guardrail_log_loader.py:192-193`.
+    `tool_args` and `verdicts` are stored as JSON-encoded strings — polars
+    CSV doesn't support nested types, and the decoder round-trips both back
+    to dicts/lists before feeding them to `project_decisions`.
     """
     if not path.exists() or path.stat().st_size == 0:
         return pd.DataFrame()
@@ -142,21 +133,12 @@ def _load_gateway_rows(path: Path) -> pd.DataFrame:
                     continue
                 ts_raw = rec.get("ts")
                 try:
-                    # `rec["ts"]` is an epoch float. `from_epoch_naive_utc`
-                    # produces the same naive-UTC shape LogGenerator writes
-                    # (from OpenTelemetry `start_time_unix_nano`), which is
-                    # what `_load_combined_eventlog` interprets every CSV
-                    # timestamp as before converting to local. Using the
-                    # bare `datetime.fromtimestamp(epoch)` (naive-LOCAL)
-                    # would double-shift these rows by the local offset.
+                    # `datetime.fromtimestamp(epoch)` without tz returns
+                    # naive-LOCAL, which would double-shift these rows
+                    # relative to LogGenerator's naive-UTC timestamps.
                     ts_dt = from_epoch_naive_utc(float(ts_raw))
                 except (TypeError, ValueError):
                     continue
-                # Full microsecond precision — the JSONL loader parses `ts`
-                # via `datetime.fromtimestamp(float)` which keeps microseconds,
-                # so trimming to milliseconds here would leave the CSV-embedded
-                # extension slightly off from the JSONL-derived one and break
-                # dashboards that filter/sort by exact timestamp.
                 ts_iso = ts_dt.strftime("%Y-%m-%dT%H:%M:%S.%f")
                 rows.append({
                     "case_id":               str(thread_id),
@@ -191,10 +173,6 @@ class TraceProcessor:
         coffee_machine_log_path: str | os.PathLike[str] | None = None,
     ):
         self.tracking_uri = tracking_uri
-        # Guardrail path default comes from CoffeeShopConfig so the trace
-        # processor and the dashboard read the same file. Coffee-machine
-        # path has no config field yet, so fall back to the module-level
-        # PROJECT_ROOT-anchored default.
         if guardrail_log_path is None:
             guardrail_log_path = CoffeeShopConfig.__dataclass_fields__[
                 "guardrail_log_path"
@@ -245,21 +223,13 @@ class TraceProcessor:
 
         MLflow's LangChain autolog records the LangGraph `thread_id` on the
         trace as metadata under the key ``mlflow.trace.session`` (see
-        ``mlflow/langchain/langchain_tracer.py`` — the tracer calls
-        ``mlflow.update_current_trace(metadata={TraceMetadataKey.TRACE_SESSION: thread_id})``
-        for every chain span carrying a `thread_id`). Reading it from
+        ``mlflow/langchain/langchain_tracer.py``). Reading it from
         ``trace_info.trace_metadata`` avoids materializing the whole span
-        tree just to learn the case_id, which is what the info-first peek
-        exists to prevent.
+        tree just to learn the case_id.
 
-        Returns None when the metadata is missing (feedback-only traces
-        with no LangGraph root, legacy traces predating this MLflow behavior,
-        or when the caller passes a stub that has no `.trace_metadata`
-        attribute) — the caller falls back to `_peek_case_id(trace_dict)`
-        after paying for `to_dict()`.
+        Returns None when the metadata is missing — the caller falls back
+        to `_peek_case_id(trace_dict)` after paying for `to_dict()`.
         """
-        # Accept both a full TraceInfo (with .trace_metadata) and a mapping
-        # shape; guard AttributeError for stubs that expose neither.
         try:
             metadata = getattr(trace_info, "trace_metadata", None)
         except AttributeError:
@@ -271,13 +241,9 @@ class TraceProcessor:
 
     @staticmethod
     def _peek_case_id(trace_dict: dict) -> str | None:
-        """Cheap read of the LangGraph thread_id (= case_id) without running
-        LogGenerator over the whole trace. Returns None if the trace has no
-        LangGraph root or no metadata (e.g. feedback-only traces).
-
-        Kept as the fallback path for legacy traces whose ``TraceInfo`` does
-        not carry ``mlflow.trace.session`` — see `_peek_case_id_from_info`
-        for the fast path that avoids paying for `to_dict()` at all."""
+        """Fallback peek of the LangGraph thread_id from a serialized trace
+        dict, used when `_peek_case_id_from_info` misses (legacy traces or
+        test stubs without `trace_metadata`)."""
         # MLflow's client puts spans under trace_dict["data"]["spans"] when
         # this dict comes from Trace.to_dict(); LogGenerator also accepts a
         # bare "spans" key. Handle both shapes.
@@ -345,10 +311,7 @@ class TraceProcessor:
         # Per-trace extraction accumulates into a list; a single pd.concat at
         # the end avoids the O(n²) copy cost of concatenating in the loop.
         trace_frames: list[pd.DataFrame] = []
-        # case_id -> (setup_name, scenario_index) from MLflow trace tags. Filled
-        # while iterating traces; broadcast onto every event row (all sources)
-        # after all concats complete, so filter/aggregate queries can slice by
-        # setup or scenario without joining an extra table.
+        # case_id -> (setup_name, scenario_index) from MLflow trace tags.
         case_tags: dict[str, tuple[str | None, int]] = {}
         new_case_ids: set[str] = set()
 
@@ -358,11 +321,8 @@ class TraceProcessor:
             trace_start = time.perf_counter()
 
             # Fast path: peek the case_id from `trace.info.trace_metadata`
-            # BEFORE paying for `trace.to_dict()`. On warm caches with N
-            # already-covered traces this saves N full span-tree
-            # serializations. Real MLflow traces expose `.info`; test stubs
-            # that only implement `to_dict()` fall through to the dict path
-            # below.
+            # BEFORE paying for `trace.to_dict()`, so already-covered traces
+            # skip the full span-tree serialization.
             trace_info = getattr(trace, "info", None)
             peeked_case_id = (
                 self._peek_case_id_from_info(trace_info)
@@ -379,10 +339,7 @@ class TraceProcessor:
             trace_tags = trace_dict.get('info', {}).get('tags', {}) or {}
 
             # Fallback peek for legacy traces whose `TraceInfo` did not carry
-            # `mlflow.trace.session` (or test stubs that skipped the info
-            # path). Feedback-only traces (no LangGraph root) peek as None
-            # here too and fall through to LogGenerator so the existing
-            # empty-frame branch keeps handling them.
+            # `mlflow.trace.session`.
             if peeked_case_id is None:
                 peeked_case_id = self._peek_case_id(trace_dict)
                 if peeked_case_id is not None and peeked_case_id in existing_case_ids:
@@ -403,19 +360,16 @@ class TraceProcessor:
 
             if trace_event_log.empty:
                 # LogGenerator returns an empty frame for traces with no
-                # spans, no LangGraph root, etc. (e.g. standalone ChatOllama
-                # calls from get_feedback()). These are legitimately-skipped,
+                # spans or no LangGraph root (e.g. standalone ChatOllama
+                # calls from get_feedback()). These are legitimately skipped,
                 # not successful — counting them as such hides real bugs.
                 skipped_ingestions += 1
                 per_trace_seconds.append(time.perf_counter() - trace_start)
                 continue
 
-            # A trace that produced ONLY user_prompt rows and nothing else is
-            # a red flag: the conversation ran, the user turned up, but no
-            # agent-side event survived extraction. Handover-only threads used
-            # to look like this before the transfer_to_* fix landed; keeping
-            # the warning around means future extraction gaps stay visible
-            # instead of silently collapsing threads to user prompts + feedback.
+            # A trace that produced ONLY user_prompt rows is a red flag:
+            # some agent-side event failed extraction. Warn so future
+            # extraction gaps stay visible.
             non_agent_names = {"user_prompt"}
             trace_event_types = set(trace_event_log["concept:name"].unique())
             if trace_event_types.issubset(non_agent_names):
@@ -429,11 +383,9 @@ class TraceProcessor:
             trace_frames.append(trace_event_log)
             successful_ingestions += 1
 
-            # Stash the trace's tag values under this trace's case_id. Multiple
-            # traces share a case_id (each user turn = one MLflow trace); every
-            # tagged trace in the same case carries the same setup/scenario, so
-            # last-write-wins is fine. Missing tags → setup=None, scenario=-1
-            # (the "unspecified" sentinel used across the pipeline).
+            # Stash the trace's tag values under this trace's case_id.
+            # Missing tags → setup=None, scenario=-1 (the "unspecified"
+            # sentinel used across the pipeline).
             case_ids_in_trace = trace_event_log["case_id"].dropna().unique()
             if len(case_ids_in_trace) > 0:
                 setup_tag = trace_tags.get("setup")
@@ -454,11 +406,10 @@ class TraceProcessor:
         )
 
         # combined_logs starts as an empty DataFrame with no columns; if every
-        # trace either failed ingestion or returned an empty frame (e.g.
-        # feedback-only traces with no LangGraph root — see log_generator.py:33),
-        # there is no "time:timestamp" column to sort on and pandas raises
-        # KeyError. Bail out cleanly instead so the dashboard's export button
-        # doesn't surface a cryptic "❌ time:timestamp".
+        # trace either failed ingestion or returned an empty frame, there is
+        # no "time:timestamp" column to sort on and pandas raises KeyError.
+        # Bail out cleanly so the dashboard's export button doesn't surface a
+        # cryptic "❌ time:timestamp".
         if combined_logs.empty or "time:timestamp" not in combined_logs.columns:
             if skipped_already_covered:
                 logger.warning(
@@ -479,15 +430,12 @@ class TraceProcessor:
             return empty_result
 
         # Precompute the last timestamp per case in a single groupby so the
-        # feedback loop below is O(F + R) instead of O(F * R) (see todo 021).
-        # .max() over a Series doesn't require sorted input, so we can defer
-        # the sort until after all supplementary streams merge in.
+        # feedback loop below is O(F + R) instead of O(F * R).
         max_ts_by_case = combined_logs.groupby("case_id")["time:timestamp"].max()
 
-        # Append exactly one user_feedback event per NEW case, after all other
-        # events. Scoping to `new_case_ids` matters for append mode: feedback
-        # rows for already-covered cases live in the caller's existing CSV
-        # and must not be re-emitted here.
+        # Scoping to `new_case_ids` matters for append mode: feedback rows
+        # for already-covered cases live in the caller's existing CSV and
+        # must not be re-emitted here.
         feedback_rows = []
         for case_id, fb in feedback_store.items():
             if case_id not in new_case_ids:
@@ -513,16 +461,13 @@ class TraceProcessor:
                 "scenario_index": fb.get("scenario_index"),
             })
 
-        # Accumulate all supplementary streams (feedback, coffee-machine,
-        # gateway) and do a single concat+sort at the end. Merging them one
-        # at a time forced the whole frame to be re-sorted up to four times.
+        # Accumulate all supplementary streams and do a single concat+sort
+        # at the end. Merging them one at a time forced the whole frame to
+        # be re-sorted up to four times.
         supplementary: list[pd.DataFrame] = []
         if feedback_rows:
             supplementary.append(pd.DataFrame(feedback_rows))
 
-        # Merge coffee machine rows (stream 2). Filter to NEW case_ids so
-        # rows keyed to already-covered cases stay in the caller's existing
-        # CSV rather than getting duplicated.
         machine_rows = _load_coffee_machine_rows(self.coffee_machine_log_path)
         if not machine_rows.empty:
             before = len(machine_rows)
@@ -538,9 +483,6 @@ class TraceProcessor:
             if not machine_rows.empty:
                 supplementary.append(machine_rows)
 
-        # Merge gateway decisions (stream 3). This is what lets a shared
-        # `_all_traces.csv` reproduce the guardrail dashboard panel on a
-        # machine that never had `guardrail_log/events.jsonl`.
         gateway_rows = _load_gateway_rows(self.guardrail_log_path)
         if not gateway_rows.empty:
             before = len(gateway_rows)
@@ -563,9 +505,7 @@ class TraceProcessor:
         combined_logs.sort_values(by="time:timestamp", inplace=True)
 
         # Broadcast per-case setup/scenario tags to every row so downstream
-        # readers (e.g. the metrics dashboard) can filter without joining an
-        # extra table. Cases without tagged traces show setup=None (rendered
-        # as an "(unknown)" bucket in the dashboard) and scenario=-1.
+        # readers can filter without joining an extra table.
         if case_tags and not combined_logs.empty and "case_id" in combined_logs.columns:
             combined_logs["case_setup"] = combined_logs["case_id"].map(
                 lambda cid: case_tags.get(cid, (None, -1))[0]
@@ -593,11 +533,9 @@ class TraceProcessor:
         return combined_logs, case_tags, new_case_ids
 
     def process_all_traces(self, export_as_json: bool = False):
-        """
-        Process all traces found via the MLflow API. Kept as the entrypoint
-        for the headless `simulate --export-logs` path — writes one
-        timestamped event-log file with every trace's events.
-        """
+        """Process all traces via the MLflow API and write a timestamped
+        event-log file. Entrypoint for the headless
+        `simulate --export-logs` path."""
         combined_logs, _tags, _new_ids = self.extract_new_traces(set())
         if combined_logs.empty:
             return
@@ -617,9 +555,6 @@ class TraceProcessor:
         per_trace_seconds: list[float],
         already_covered: int = 0,
     ) -> None:
-        # Emit line-by-line via the module logger so callers (dashboard,
-        # simulate) can silence or redirect the summary through standard
-        # logging configuration rather than intercepting stdout.
         logger.info("📈 Processing Summary:")
         logger.info("   📊 Total traces processed: %d", total)
         logger.info("   ✅ Successful: %d", successful)

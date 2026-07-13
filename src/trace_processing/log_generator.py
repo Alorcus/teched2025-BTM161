@@ -185,16 +185,13 @@ class LogGenerator:
         if tool_input.get("type", None) == "tool_call":
             tool_name = tool_input.get("name", "unknown_tool")
 
-        # Handovers were previously dropped here, which erased every
-        # order_agent → customer_service_agent transfer from the CSV. If a
-        # conversation's only tool call was a transfer, the trace collapsed
-        # to user_prompt + user_feedback and looked empty. Emitting them as
-        # execute_tool rows also matters for the guardrail-log join: the
-        # gateway can flag a transfer_to_* call, and its tool_call object
-        # (keyed by tool_call_id) would dangle if the event row didn't exist.
-        # The event_type/ocel_type is the tool name itself (e.g.
-        # `transfer_to_customer_service_agent`), distinct from the
-        # synthesised `<from>_handover_<to>` type used elsewhere.
+        # Emit transfer_to_* calls as execute_tool rows. If the only tool
+        # call in a conversation was a transfer, dropping it would collapse
+        # the trace to user_prompt + user_feedback. The gateway can also
+        # flag transfers, and its tool_call object (keyed by tool_call_id)
+        # would dangle if the event row didn't exist. The event_type here
+        # is the tool name itself (e.g. `transfer_to_customer_service_agent`),
+        # distinct from the synthesised `<from>_handover_<to>` type.
 
         self.process_events.append(
             {

@@ -1,12 +1,7 @@
 """Unit tests for trace_cache append semantics.
 
-The Metrics Dashboard's `_all_traces.csv` is a **shareable** artefact: a
-user hands the file to a colleague who then explores those traces without
-needing the original MLflow store. That contract requires the cache to
-grow in append mode — never rewriting rows that are already present. These
-tests exercise that behavior end-to-end at the module boundary (stubbing
-MLflow and LogGenerator), so a regression that reintroduces the old
-full-rebuild would fail here.
+`_all_traces.csv` is a shareable artefact: it must grow in append mode
+and never rewrite rows that are already present.
 """
 from __future__ import annotations
 
@@ -23,8 +18,6 @@ from src.dashboard.metrics import trace_cache
 
 
 def _make_row(case_id: str, name: str = "call_llm") -> dict:
-    """One canonical event-log row. The exact column set doesn't matter for
-    these tests — we only care that case_id round-trips."""
     return {
         "case_id": case_id,
         "identity:id": f"id-{case_id}-{name}",
@@ -40,7 +33,7 @@ def _make_row(case_id: str, name: str = "call_llm") -> dict:
 
 
 class _FakeTrace:
-    """Minimal stand-in for mlflow.entities.Trace.to_dict() output."""
+    """Stand-in for mlflow.entities.Trace.to_dict() output."""
 
     def __init__(self, case_id: str, trace_id: str):
         self._case_id = case_id
@@ -61,13 +54,6 @@ class _FakeTrace:
 
 
 class TestTraceCacheAppend(unittest.TestCase):
-    """The cache MUST NOT rewrite existing rows on refresh.
-
-    Why: `_all_traces.csv` is intended for cross-user sharing; a rebuild-on-
-    load loop erases curation and drops case_ids that the recipient's MLflow
-    doesn't know about. Confirming append semantics here keeps that contract
-    intact.
-    """
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -84,7 +70,6 @@ class TestTraceCacheAppend(unittest.TestCase):
         )
 
     def test_appends_new_case_and_skips_covered(self):
-        """New case_ids are added; already-covered ones are NOT re-extracted."""
         self._seed_cache(["case-old-1", "case-old-2"])
 
         traces = [
@@ -92,8 +77,6 @@ class TestTraceCacheAppend(unittest.TestCase):
             _FakeTrace("case-new-1", "trace-b"),
         ]
 
-        # LogGenerator returns per-trace event frames. We spy on it to make
-        # sure it is NEVER invoked for the already-covered case_id.
         generate_calls: list[str] = []
 
         def fake_generate(trace_dict):
@@ -113,17 +96,13 @@ class TestTraceCacheAppend(unittest.TestCase):
             MockLogGen.return_value.generate_event_log_df.side_effect = fake_generate
             trace_cache.ensure_trace_cache(self.log_dir)
 
-        # LogGenerator was called only for the NEW case.
         self.assertEqual(generate_calls, ["case-new-1"])
 
-        # The resulting CSV covers both old cases AND the new one.
         result = pl.read_csv(str(self.log_dir / trace_cache.CACHE_FILENAME))
         case_ids = set(result["case_id"].to_list())
         self.assertEqual(case_ids, {"case-old-1", "case-old-2", "case-new-1"})
 
     def test_preserves_imported_rows_when_mlflow_empty(self):
-        """A CSV whose case_ids are not in the local MLflow store must survive
-        a dashboard refresh — that is the whole point of the shareable file."""
         self._seed_cache(["case-imported-1", "case-imported-2"])
 
         with mock.patch(
@@ -131,7 +110,6 @@ class TestTraceCacheAppend(unittest.TestCase):
         ):
             result = trace_cache.ensure_trace_cache(self.log_dir)
 
-        # Non-None (file still exists) and untouched.
         self.assertIsNotNone(result)
         df = pl.read_csv(str(self.log_dir / trace_cache.CACHE_FILENAME))
         self.assertEqual(
@@ -139,8 +117,6 @@ class TestTraceCacheAppend(unittest.TestCase):
         )
 
     def test_preserves_imported_rows_when_new_traces_appear(self):
-        """MLflow has traces the imported CSV doesn't know about → those are
-        appended; imported rows are still present unchanged."""
         self._seed_cache(["case-imported-1"])
 
         traces = [_FakeTrace("case-fresh-1", "trace-fresh")]
@@ -165,17 +141,14 @@ class TestTraceCacheAppend(unittest.TestCase):
         )
 
     def test_schema_bump_preserves_stale_rows_via_quarantine(self):
-        """When the sidecar's schema version differs from the current one the
-        row shape has changed, so we cannot append safely. The old rows are
-        preserved under a versioned backup filename; the canonical cache is
-        rebuilt from MLflow. The shareable-CSV contract says imported rows
-        must survive — quarantine, don't delete."""
-        # Seed with rows tagged at a stale schema version.
+        """On schema-version mismatch, old rows are moved to a versioned
+        backup filename rather than deleted, then the canonical cache is
+        rebuilt from MLflow."""
         old_schema = trace_cache._SCHEMA_VERSION - 1
         rows = [_make_row("case-stale-1"), _make_row("case-stale-2")]
         pd.DataFrame(rows).to_csv(self.log_dir / trace_cache.CACHE_FILENAME, index=False)
-        # Legacy two-line sidecar is still accepted; use it here to also cover
-        # the backward-compat read path.
+        # Legacy two-line sidecar format — also covers the backward-compat
+        # read path.
         (self.log_dir / trace_cache.META_FILENAME).write_text(
             f"2\n{old_schema}\n"
         )
@@ -196,12 +169,9 @@ class TestTraceCacheAppend(unittest.TestCase):
             MockLogGen.return_value.generate_event_log_df.side_effect = fake_generate
             trace_cache.ensure_trace_cache(self.log_dir)
 
-        # Canonical cache: ONLY the fresh row from MLflow.
         df = pl.read_csv(str(self.log_dir / trace_cache.CACHE_FILENAME))
         self.assertEqual(set(df["case_id"].to_list()), {"case-new-after-bump"})
 
-        # Quarantine backup exists at the old-schema name and holds the
-        # stale rows verbatim.
         backup = self.log_dir / f"_all_traces.v{old_schema}.csv"
         self.assertTrue(backup.exists(), f"expected quarantine backup at {backup}")
         stale = pl.read_csv(str(backup))
@@ -209,7 +179,6 @@ class TestTraceCacheAppend(unittest.TestCase):
             set(stale["case_id"].to_list()), {"case-stale-1", "case-stale-2"}
         )
 
-        # Sidecar now reflects the current schema version.
         self.assertEqual(
             trace_cache._cached_schema_version(
                 self.log_dir / trace_cache.META_FILENAME
@@ -218,12 +187,9 @@ class TestTraceCacheAppend(unittest.TestCase):
         )
 
     def test_missing_sidecar_quarantines_existing_cache(self):
-        """A cache with rows but no sidecar has an unknown schema version.
-        Silently appending v6 rows to a possibly-v5 file would mix shapes,
-        so we quarantine the existing file and rebuild fresh. The user's
-        escape hatch: rename the quarantined file back and write a matching
-        sidecar to opt into reuse."""
-        # Seed rows WITHOUT the sidecar.
+        """A cache file with no sidecar has an unknown schema version — its
+        shape may not match the current writer, so quarantine it rather
+        than risk mixing shapes."""
         rows = [_make_row("case-orphan-1"), _make_row("case-orphan-2")]
         pd.DataFrame(rows).to_csv(
             self.log_dir / trace_cache.CACHE_FILENAME, index=False
@@ -246,7 +212,6 @@ class TestTraceCacheAppend(unittest.TestCase):
             MockLogGen.return_value.generate_event_log_df.side_effect = fake_generate
             trace_cache.ensure_trace_cache(self.log_dir)
 
-        # Quarantine file holds the pre-existing rows unchanged.
         quarantine = self.log_dir / "_all_traces.unknown-schema.csv"
         self.assertTrue(
             quarantine.exists(),
@@ -257,8 +222,6 @@ class TestTraceCacheAppend(unittest.TestCase):
             set(stale["case_id"].to_list()), {"case-orphan-1", "case-orphan-2"}
         )
 
-        # Canonical cache is either fresh-from-MLflow or absent. No silent
-        # mixing of the pre-existing rows with new rows.
         canonical = self.log_dir / trace_cache.CACHE_FILENAME
         if canonical.exists():
             fresh = pl.read_csv(str(canonical))

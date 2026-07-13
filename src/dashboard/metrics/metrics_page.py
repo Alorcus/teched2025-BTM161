@@ -21,12 +21,8 @@ from .visualization_section import VisualizationSection
 
 
 _TIMESTAMP_COL = "time:timestamp"
-# Sibling column populated by `_load_combined_eventlog`: the same value as
-# `time:timestamp` but PARSED without any timezone conversion — i.e. still
-# naive-UTC. Downstream code that needs the raw UTC wall clock (guardrail
-# extension resolution, in particular) reads this instead of the converted
-# column to avoid a double-shift. All other dashboard code paths ignore it
-# by accessing columns by name.
+# Naive-UTC sibling of `time:timestamp`. Read by the guardrail-extension
+# resolver so it doesn't double-shift the already UTC→local converted column.
 _TIMESTAMP_UTC_NAIVE_COL = "time:timestamp_utc_naive"
 _GUARDRAIL_LOG_PATH = Path(CoffeeShopConfig.__dataclass_fields__["guardrail_log_path"].default)
 
@@ -358,14 +354,10 @@ def _load_combined_eventlog(csv_files: list[Path]) -> tuple[pl.DataFrame, pl.Dat
     the dashboard match the user's clock; a CET user sees CET times, and
     "Last 10 min" arithmetic just works.
 
-    We also preserve the pre-conversion, naive-UTC Datetime alongside the
-    converted column as `time:timestamp_utc_naive`. Callers that need the
-    original wall clock — specifically the guardrail-extension resolution
-    inside `ObjectCentricEventlog.from_eventlog`, whose loader interprets
-    every naive datetime as UTC — read this sibling column instead of
-    `time:timestamp`. Without it, `load_guardrail_events_from_eventlog`
-    would tag the already-shifted local time as UTC and double-shift every
-    embedded gateway event by the host's UTC offset.
+    We also keep the pre-conversion naive-UTC datetime as
+    `time:timestamp_utc_naive` for the guardrail-extension resolver, whose
+    loader assumes every naive datetime is UTC and would double-shift the
+    already-converted column.
     """
     frames: list[pl.DataFrame] = []
     for path in csv_files:
@@ -379,12 +371,6 @@ def _load_combined_eventlog(csv_files: list[Path]) -> tuple[pl.DataFrame, pl.Dat
     if not frames:
         return pl.DataFrame(), pl.DataFrame()
     local_tz = _local_tz_name()
-    # Two-step parse: FIRST turn the naive-UTC string into a naive-UTC
-    # Datetime (kept verbatim as `time:timestamp_utc_naive`), THEN apply
-    # the UTC → local wall-clock conversion for `time:timestamp`. Both
-    # columns coexist; the naive-UTC one is only consulted by callers that
-    # explicitly opt into it (currently only the guardrail extension
-    # resolver in `eventlog_conversion._resolve_guardrail_extension`).
     combined = pl.concat(frames, how="diagonal_relaxed").with_columns(
         pl.col(_TIMESTAMP_COL)
         .str.to_datetime(strict=False)
@@ -522,10 +508,8 @@ def _same_filter(a: dict, b: dict) -> bool:
     )
 
 
-# How many recent filter results to keep rendered in memory. Re-applying an
-# already-seen filter set (common: toggle a checkbox, apply, toggle back) then
-# skips the pm4py + polars rebuild entirely. 8 covers the typical
-# preset-hopping workflow without holding the whole product-space.
+# 8 covers the typical preset-hopping workflow (toggle a filter, apply,
+# toggle back) without holding the whole product-space of filter states.
 _RENDER_CACHE_SIZE = 8
 
 
@@ -630,12 +614,8 @@ def _build_metrics(
     scenarios: list[int],
     setups: list[str | None],
 ) -> tuple[pn.viewable.Viewable, tuple | None]:
-    """Filter, build OCEL, render sections.
-
-    Returns `(view, cache_entry)`. `cache_entry` is `(ocel, event_count)` for
-    the render cache, or `None` when the filter yielded nothing (nothing worth
-    caching — a re-apply with the same empty filter is already fast).
-    """
+    """Returns `(view, cache_entry)`. `cache_entry` is `(ocel, event_count)`
+    for the render cache, or `None` when the filter yielded nothing."""
     keep_ids = _apply_filters(case_metadata, start, end, scenarios, setups)["case_id"]
     if keep_ids.is_empty():
         return pn.pane.Alert(
@@ -666,10 +646,9 @@ def _render_metrics_from_ocel(
 ) -> pn.viewable.Viewable:
     """Compose the section panels around a pre-built OCEL.
 
-    Kept separate from `_build_metrics` so a cached OCEL can produce a fresh
-    Panel tree without re-doing the polars work — Panel viewables can't
-    safely be reused across mount cycles, so we regenerate the tree each
-    Apply. The section constructors are cheap compared to `from_eventlog`.
+    Separate from `_build_metrics` because Panel viewables can't safely be
+    reused across mount cycles — we regenerate the tree each Apply even when
+    the OCEL is cached.
     """
     range_label = _RangeLabel(start, end, event_count)
     return pn.Column(
@@ -686,12 +665,10 @@ def _render_metrics_from_ocel(
 
 
 def _lazy_visualization_panel(ocel) -> pn.viewable.Viewable:
-    """Defer pm4py discovery + graphviz SVG rendering until the user asks.
+    """Defer pm4py discovery + graphviz rendering behind a button click.
 
     Building `VisualizationSection` runs three pm4py discoveries and three
-    graphviz `dot` invocations — the dominant cost of an Apply. Users don't
-    always need the process maps, so we render a placeholder with a
-    "Generate visualization" button and only construct the section on click.
+    graphviz `dot` invocations — the dominant cost of an Apply.
     """
     slot = pn.Column(
         pn.pane.HTML(
@@ -719,7 +696,6 @@ def _lazy_visualization_panel(ocel) -> pn.viewable.Viewable:
             )
             button.disabled = False
             button.name = "Retry visualization"
-            # Keep the button in the slot so the user can retry.
             slot[:] = [panel, button]
         else:
             button.visible = False
