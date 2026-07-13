@@ -166,13 +166,22 @@ def load_guardrail_events_from_eventlog(
     don't have the source JSONL on their machine. Every signal the dashboard
     reads must therefore round-trip through the CSV.
 
-    Timezone contract: `time:timestamp` MUST be a naive-UTC string (the shape
-    `_load_gateway_rows` writes). If the caller has already parsed the column
-    to a Datetime dtype, this function treats the value as naive-UTC — which
-    is wrong once the frame has been through `_load_combined_eventlog`, since
-    that converts to naive-LOCAL. Callers that can't guarantee the string
-    shape should route through `_resolve_guardrail_extension`, which prefers
-    the on-disk JSONL in that case to avoid a double-shift.
+    Timezone contract: the caller MUST pass a frame where `time:timestamp`
+    is naive-UTC — either the raw ISO string `_load_gateway_rows` writes,
+    or a Datetime that has NOT been through timezone conversion. Any naive
+    datetime is tagged as UTC before `.timestamp()` is called; if the caller
+    silently handed over a naive-LOCAL Datetime (e.g. after
+    `dt.replace_time_zone("UTC").dt.convert_time_zone(local_tz).dt.replace_time_zone(None)`),
+    each gateway event's epoch would be shifted by the local UTC offset — a
+    silent 2-hour skew in Europe/Berlin summer, invisible on a UTC host.
+
+    Callers that can't guarantee the naive-UTC shape (in practice: the
+    dashboard, whose `_load_combined_eventlog` shifts to naive-LOCAL for
+    display) MUST route through
+    `src.trace_processing.eventlog_conversion._resolve_guardrail_extension`.
+    That helper knows to look for a sibling `time:timestamp_utc_naive`
+    column — which the dashboard preserves alongside the converted one —
+    or to fall back to the on-disk JSONL, whichever avoids the shift.
 
     Row contract (produced by TraceProcessor.extract_new_traces):
     - `concept:name == "gateway_decision"`

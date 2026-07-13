@@ -65,6 +65,10 @@ LLM provider is configured via a `.env` file (see `.env.example`). Set `LLM_PROV
 - Order status lifecycle: `pending → inventory_confirmed → completed/preparation_error → refunded`
 - MLflow traces are stored under `./mlruns/` and converted to XES-compatible CSV event logs in `./generated_event_log/`
 
+### Event log schema
+
+The consolidated `_all_traces.csv` (and its schema version, timezone contract, and per-column sensitivity classification) is documented in [`EVENTLOG_SCHEMA.md`](EVENTLOG_SCHEMA.md). Treat that file as the single source of truth for the CSV's columns — update it in the same commit as any producer change in `LogGenerator`, `TraceProcessor`, or `trace_cache`.
+
 ## Customer Feedback
 
 After each conversation, `CustomerAgent.get_feedback()` invokes the LLM to rate service quality from the customer perspective. The result is a structured record with:

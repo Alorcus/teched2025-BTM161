@@ -21,6 +21,13 @@ from .visualization_section import VisualizationSection
 
 
 _TIMESTAMP_COL = "time:timestamp"
+# Sibling column populated by `_load_combined_eventlog`: the same value as
+# `time:timestamp` but PARSED without any timezone conversion — i.e. still
+# naive-UTC. Downstream code that needs the raw UTC wall clock (guardrail
+# extension resolution, in particular) reads this instead of the converted
+# column to avoid a double-shift. All other dashboard code paths ignore it
+# by accessing columns by name.
+_TIMESTAMP_UTC_NAIVE_COL = "time:timestamp_utc_naive"
 _GUARDRAIL_LOG_PATH = Path(CoffeeShopConfig.__dataclass_fields__["guardrail_log_path"].default)
 
 # Scenario labels mirror src/dashboard/interaction/interaction_page.py:93-98 so
@@ -350,6 +357,15 @@ def _load_combined_eventlog(csv_files: list[Path]) -> tuple[pl.DataFrame, pl.Dat
     honest we convert UTC → local here on load. Naive datetimes throughout
     the dashboard match the user's clock; a CET user sees CET times, and
     "Last 10 min" arithmetic just works.
+
+    We also preserve the pre-conversion, naive-UTC Datetime alongside the
+    converted column as `time:timestamp_utc_naive`. Callers that need the
+    original wall clock — specifically the guardrail-extension resolution
+    inside `ObjectCentricEventlog.from_eventlog`, whose loader interprets
+    every naive datetime as UTC — read this sibling column instead of
+    `time:timestamp`. Without it, `load_guardrail_events_from_eventlog`
+    would tag the already-shifted local time as UTC and double-shift every
+    embedded gateway event by the host's UTC offset.
     """
     frames: list[pl.DataFrame] = []
     for path in csv_files:
@@ -363,7 +379,17 @@ def _load_combined_eventlog(csv_files: list[Path]) -> tuple[pl.DataFrame, pl.Dat
     if not frames:
         return pl.DataFrame(), pl.DataFrame()
     local_tz = _local_tz_name()
+    # Two-step parse: FIRST turn the naive-UTC string into a naive-UTC
+    # Datetime (kept verbatim as `time:timestamp_utc_naive`), THEN apply
+    # the UTC → local wall-clock conversion for `time:timestamp`. Both
+    # columns coexist; the naive-UTC one is only consulted by callers that
+    # explicitly opt into it (currently only the guardrail extension
+    # resolver in `eventlog_conversion._resolve_guardrail_extension`).
     combined = pl.concat(frames, how="diagonal_relaxed").with_columns(
+        pl.col(_TIMESTAMP_COL)
+        .str.to_datetime(strict=False)
+        .alias(_TIMESTAMP_UTC_NAIVE_COL)
+    ).with_columns(
         pl.col(_TIMESTAMP_COL)
         .str.to_datetime(strict=False)
         .dt.replace_time_zone("UTC")

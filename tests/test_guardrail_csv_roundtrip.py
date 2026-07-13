@@ -11,11 +11,13 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
 import polars as pl
 
+from src.trace_processing.eventlog_conversion import _resolve_guardrail_extension
 from src.trace_processing.guardrail_log_loader import (
     GuardrailOcelExtension,
     load_guardrail_events,
@@ -300,6 +302,218 @@ class TestGatewayAppendScoping(unittest.TestCase):
             f"If this fails with a +Nh shift, _load_gateway_rows regressed "
             f"back to `datetime.fromtimestamp(...)` without `tz=timezone.utc`.",
         )
+
+
+class TestNaiveUtcEquivalence(unittest.TestCase):
+    """`load_guardrail_events_from_eventlog` must produce identical epoch
+    values whether `time:timestamp` is a naive-UTC string or a naive-UTC
+    Datetime — but ONLY when the Datetime path has NOT been through
+    timezone conversion. This is the contract expansion for todo 017:
+    downstream code that hands the loader a naive-LOCAL Datetime (as the
+    dashboard's `_load_combined_eventlog` produces) is REQUIRED to route
+    through `_resolve_guardrail_extension`, which preserves the naive-UTC
+    sibling column.
+    """
+
+    def _make_row(self, ts_iso: str) -> dict:
+        return {
+            "case_id": "thread-1",
+            "identity:id": "id-1",
+            "time:timestamp": ts_iso,
+            "time_finished": ts_iso,
+            "concept:name": "gateway_decision",
+            "concept:instance": "gateway deny: process_order",
+            "org:resource": "order_agent",
+            "gateway_setup_name": "baseline",
+            "gateway_snapshot_id": "order_agent@v1+abc123",
+            "gateway_tool_name": "process_order",
+            "gateway_tool_call_id": "toolu_1",
+            "gateway_final_decision": "deny",
+            "gateway_tool_args_json": json.dumps({"customer": "Alice"}, sort_keys=True),
+            "gateway_verdicts_json": json.dumps([
+                {
+                    "guardrail_name": "no_freebies",
+                    "guardrail_version": "v1",
+                    "guardrail_type": "policy",
+                    "effect": "deny",
+                    "reason_internal": "cost > 0",
+                    "reason_for_llm": "Free items disabled.",
+                }
+            ]),
+        }
+
+    def test_string_and_naive_utc_datetime_paths_produce_same_epoch(self):
+        """Path A: `time:timestamp` as a naive-UTC ISO string (what
+        _load_gateway_rows writes).
+        Path B: same column parsed with `pl.col.str.to_datetime()` — no
+        `dt.replace_time_zone("UTC").dt.convert_time_zone(...)` chain, so
+        the Datetime is still naive-UTC.
+
+        Both paths must resolve to the same `ocel_time` on the resulting
+        gateway_deny event.
+        """
+        ts_iso = "2026-07-12T15:08:22.000000"
+        row = self._make_row(ts_iso)
+
+        # Path A: string.
+        el_string = pl.DataFrame([row])
+        ext_string = load_guardrail_events_from_eventlog(el_string)
+
+        # Path B: Datetime, but naive-UTC (no timezone conversion applied).
+        el_dt = el_string.with_columns(
+            pl.col("time:timestamp").str.to_datetime(strict=False)
+        )
+        # Sanity: the column really is a naive Datetime.
+        self.assertIn(el_dt.schema["time:timestamp"], (pl.Datetime, pl.Datetime("us"), pl.Datetime("ms")))
+        ext_dt = load_guardrail_events_from_eventlog(el_dt)
+
+        # The event tables should carry the same ocel_time in both paths.
+        deny_str = ext_string.event_tables["gateway_deny"]
+        deny_dt = ext_dt.event_tables["gateway_deny"]
+        self.assertEqual(deny_str.height, 1)
+        self.assertEqual(deny_dt.height, 1)
+        self.assertEqual(
+            deny_str["ocel_time"].to_list(),
+            deny_dt["ocel_time"].to_list(),
+            "String and naive-UTC Datetime input paths must resolve to the "
+            "same ocel_time — the loader tags naive datetimes as UTC.",
+        )
+
+        # And that ocel_time must equal the intended UTC wall clock: 15:08:22
+        # UTC on 2026-07-12. If the loader silently interpreted the naive
+        # datetime as LOCAL, a CET/CEST host would emit 13:08:22 or 14:08:22
+        # instead — this pins the invariant.
+        expected = datetime(2026, 7, 12, 15, 8, 22)
+        self.assertEqual(deny_str["ocel_time"][0], expected)
+
+
+class TestDashboardEndToEndPath(unittest.TestCase):
+    """End-to-end acceptance: when the dashboard's `_load_combined_eventlog`
+    has already converted `time:timestamp` to naive-LOCAL, the resolver in
+    `eventlog_conversion._resolve_guardrail_extension` must still yield an
+    unshifted gateway `ocel_time` by consulting the preserved
+    `time:timestamp_utc_naive` sibling column.
+    """
+
+    def _make_row(self, ts_iso: str) -> dict:
+        return {
+            "case_id": "thread-1",
+            "identity:id": "id-1",
+            "time:timestamp": ts_iso,
+            "time_finished": ts_iso,
+            "concept:name": "gateway_decision",
+            "concept:instance": "gateway deny: process_order",
+            "org:resource": "order_agent",
+            "gateway_setup_name": "baseline",
+            "gateway_snapshot_id": "order_agent@v1+abc123",
+            "gateway_tool_name": "process_order",
+            "gateway_tool_call_id": "toolu_1",
+            "gateway_final_decision": "deny",
+            "gateway_tool_args_json": json.dumps({"customer": "Alice"}, sort_keys=True),
+            "gateway_verdicts_json": json.dumps([
+                {
+                    "guardrail_name": "no_freebies",
+                    "guardrail_version": "v1",
+                    "guardrail_type": "policy",
+                    "effect": "deny",
+                    "reason_internal": "cost > 0",
+                    "reason_for_llm": "Free items disabled.",
+                }
+            ]),
+        }
+
+    def test_utc_naive_sibling_column_prevents_double_shift(self):
+        """Simulate a post-`_load_combined_eventlog` frame:
+        - `time:timestamp` is a Datetime that has been shifted to naive-LOCAL.
+        - `time:timestamp_utc_naive` is the same instant kept as naive-UTC.
+
+        `_resolve_guardrail_extension` MUST use the sibling column, so the
+        resulting gateway_deny event's `ocel_time` matches the original
+        naive-UTC value — not the shifted local one.
+        """
+        ts_iso = "2026-07-12T15:08:22.000000"
+        utc_naive = datetime(2026, 7, 12, 15, 8, 22)
+        # Fake a non-trivial local offset regardless of host tz so the test
+        # actually distinguishes shifted from unshifted. +2h ≈ Europe/Berlin
+        # summer; we just need any non-zero delta.
+        local_offset = timedelta(hours=2)
+        shifted_local = utc_naive + local_offset
+
+        row = self._make_row(ts_iso)
+        # Base frame (naive-UTC string column, as the CSV holds).
+        el = pl.DataFrame([row])
+        # Now simulate what `_load_combined_eventlog` produces: parse
+        # `time:timestamp` and shift it, AND write a sibling naive-UTC
+        # Datetime column.
+        el_dashboard = el.with_columns(
+            pl.col("time:timestamp")
+              .str.to_datetime(strict=False)
+              .alias("time:timestamp_utc_naive"),
+        ).with_columns(
+            # Overwrite time:timestamp with a shifted Datetime. We build the
+            # shifted column from a Python literal so the test doesn't depend
+            # on the host's actual timezone.
+            pl.Series("time:timestamp", [shifted_local], dtype=pl.Datetime("us")),
+        )
+
+        ext = _resolve_guardrail_extension(el_dashboard, guardrail_log_path=None)
+        deny = ext.event_tables["gateway_deny"]
+        self.assertEqual(deny.height, 1)
+        # Must reflect the untouched UTC wall clock — 15:08:22, not 17:08:22.
+        self.assertEqual(
+            deny["ocel_time"][0],
+            utc_naive,
+            "Resolver must consult time:timestamp_utc_naive so the gateway "
+            "event's ocel_time is naive-UTC, not the shifted local time.",
+        )
+
+    def test_no_sibling_column_falls_back_to_jsonl(self):
+        """When `time:timestamp` is a Datetime AND no sibling column exists
+        AND a JSONL is on disk, the resolver must prefer the JSONL — that
+        was the original guard in `_resolve_guardrail_extension` and it still
+        holds as the fallback path."""
+        ts_iso = "2026-07-12T15:08:22.000000"
+        utc_naive = datetime(2026, 7, 12, 15, 8, 22)
+        shifted_local = utc_naive + timedelta(hours=2)
+
+        row = self._make_row(ts_iso)
+        el = pl.DataFrame([row]).with_columns(
+            pl.Series("time:timestamp", [shifted_local], dtype=pl.Datetime("us")),
+        )
+
+        # Corresponding JSONL record with the same UTC instant as ts epoch.
+        # 2026-07-12T15:08:22 UTC == 1783868902.0
+        record = {
+            "ts": 1783868902.0,
+            "setup_name": "baseline",
+            "event_type": "gateway_decision",
+            "snapshot_id": "order_agent@v1+abc123",
+            "agent_id": "order_agent",
+            "thread_id": "thread-1",
+            "tool_name": "process_order",
+            "tool_call_id": "toolu_1",
+            "tool_args": {"customer": "Alice"},
+            "final_decision": "deny",
+            "verdicts": [
+                {
+                    "guardrail_name": "no_freebies",
+                    "guardrail_version": "v1",
+                    "guardrail_type": "policy",
+                    "effect": "deny",
+                    "reason_internal": "cost > 0",
+                    "reason_for_llm": "Free items disabled.",
+                }
+            ],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            jsonl_path = Path(tmp) / "events.jsonl"
+            jsonl_path.write_text(json.dumps(record) + "\n")
+            ext = _resolve_guardrail_extension(el, guardrail_log_path=jsonl_path)
+
+        deny = ext.event_tables["gateway_deny"]
+        self.assertEqual(deny.height, 1)
+        # JSONL loader converts epoch to naive-UTC — same 15:08:22 target.
+        self.assertEqual(deny["ocel_time"][0], utc_naive)
 
 
 if __name__ == "__main__":

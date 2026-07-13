@@ -3,9 +3,10 @@ import logging
 import os
 import time
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from pathlib import Path
 from .log_generator import LogGenerator, is_langgraph_root
+from .naive_utc import from_epoch_naive_utc
 from ..config import CoffeeShopConfig
 import pandas as pd
 
@@ -141,16 +142,14 @@ def _load_gateway_rows(path: Path) -> pd.DataFrame:
                     continue
                 ts_raw = rec.get("ts")
                 try:
-                    # `rec["ts"]` is an epoch float. The rest of the eventlog
-                    # (LogGenerator, from OpenTelemetry `start_time_unix_nano`)
-                    # writes naive-UTC ISO strings, and metrics_page's
-                    # `_load_combined_eventlog` interprets every CSV timestamp
-                    # as UTC before converting to local. If we used
-                    # `datetime.fromtimestamp(epoch)` (naive-LOCAL) the
-                    # dashboard would double-shift these rows by the local
-                    # offset, pushing gateway events hours into the future.
-                    # Produce a naive-UTC string to match the rest of the CSV.
-                    ts_dt = datetime.fromtimestamp(float(ts_raw), tz=timezone.utc).replace(tzinfo=None)
+                    # `rec["ts"]` is an epoch float. `from_epoch_naive_utc`
+                    # produces the same naive-UTC shape LogGenerator writes
+                    # (from OpenTelemetry `start_time_unix_nano`), which is
+                    # what `_load_combined_eventlog` interprets every CSV
+                    # timestamp as before converting to local. Using the
+                    # bare `datetime.fromtimestamp(epoch)` (naive-LOCAL)
+                    # would double-shift these rows by the local offset.
+                    ts_dt = from_epoch_naive_utc(float(ts_raw))
                 except (TypeError, ValueError):
                     continue
                 # Full microsecond precision — the JSONL loader parses `ts`
@@ -239,10 +238,46 @@ class TraceProcessor:
         return all_traces
 
     @staticmethod
+    def _peek_case_id_from_info(trace_info) -> str | None:
+        """Cheap read of the LangGraph thread_id from a `TraceInfo` object,
+        BEFORE any expensive `Trace.to_dict()` serialization of the span
+        payload.
+
+        MLflow's LangChain autolog records the LangGraph `thread_id` on the
+        trace as metadata under the key ``mlflow.trace.session`` (see
+        ``mlflow/langchain/langchain_tracer.py`` — the tracer calls
+        ``mlflow.update_current_trace(metadata={TraceMetadataKey.TRACE_SESSION: thread_id})``
+        for every chain span carrying a `thread_id`). Reading it from
+        ``trace_info.trace_metadata`` avoids materializing the whole span
+        tree just to learn the case_id, which is what the info-first peek
+        exists to prevent.
+
+        Returns None when the metadata is missing (feedback-only traces
+        with no LangGraph root, legacy traces predating this MLflow behavior,
+        or when the caller passes a stub that has no `.trace_metadata`
+        attribute) — the caller falls back to `_peek_case_id(trace_dict)`
+        after paying for `to_dict()`.
+        """
+        # Accept both a full TraceInfo (with .trace_metadata) and a mapping
+        # shape; guard AttributeError for stubs that expose neither.
+        try:
+            metadata = getattr(trace_info, "trace_metadata", None)
+        except AttributeError:
+            metadata = None
+        if metadata is None:
+            return None
+        cid = metadata.get("mlflow.trace.session")
+        return str(cid) if cid else None
+
+    @staticmethod
     def _peek_case_id(trace_dict: dict) -> str | None:
         """Cheap read of the LangGraph thread_id (= case_id) without running
         LogGenerator over the whole trace. Returns None if the trace has no
-        LangGraph root or no metadata (e.g. feedback-only traces)."""
+        LangGraph root or no metadata (e.g. feedback-only traces).
+
+        Kept as the fallback path for legacy traces whose ``TraceInfo`` does
+        not carry ``mlflow.trace.session`` — see `_peek_case_id_from_info`
+        for the fast path that avoids paying for `to_dict()` at all."""
         # MLflow's client puts spans under trace_dict["data"]["spans"] when
         # this dict comes from Trace.to_dict(); LogGenerator also accepts a
         # bare "spans" key. Handle both shapes.
@@ -321,20 +356,39 @@ class TraceProcessor:
 
         for i, trace in enumerate(traces, 1):
             trace_start = time.perf_counter()
-            trace_dict = trace.to_dict()
-            trace_id = trace_dict.get('info', {}).get('trace_id', f'trace-{i}')
-            trace_tags = trace_dict.get('info', {}).get('tags', {}) or {}
 
-            # Cheap peek before the expensive LogGenerator pass: if the
-            # trace's thread_id is already covered by the caller's CSV, we
-            # skip it entirely. Feedback-only traces (no LangGraph root) peek
-            # as None and fall through to LogGenerator so the existing empty-
-            # frame branch keeps handling them.
-            peeked_case_id = self._peek_case_id(trace_dict)
+            # Fast path: peek the case_id from `trace.info.trace_metadata`
+            # BEFORE paying for `trace.to_dict()`. On warm caches with N
+            # already-covered traces this saves N full span-tree
+            # serializations. Real MLflow traces expose `.info`; test stubs
+            # that only implement `to_dict()` fall through to the dict path
+            # below.
+            trace_info = getattr(trace, "info", None)
+            peeked_case_id = (
+                self._peek_case_id_from_info(trace_info)
+                if trace_info is not None
+                else None
+            )
             if peeked_case_id is not None and peeked_case_id in existing_case_ids:
                 skipped_already_covered += 1
                 per_trace_seconds.append(time.perf_counter() - trace_start)
                 continue
+
+            trace_dict = trace.to_dict()
+            trace_id = trace_dict.get('info', {}).get('trace_id', f'trace-{i}')
+            trace_tags = trace_dict.get('info', {}).get('tags', {}) or {}
+
+            # Fallback peek for legacy traces whose `TraceInfo` did not carry
+            # `mlflow.trace.session` (or test stubs that skipped the info
+            # path). Feedback-only traces (no LangGraph root) peek as None
+            # here too and fall through to LogGenerator so the existing
+            # empty-frame branch keeps handling them.
+            if peeked_case_id is None:
+                peeked_case_id = self._peek_case_id(trace_dict)
+                if peeked_case_id is not None and peeked_case_id in existing_case_ids:
+                    skipped_already_covered += 1
+                    per_trace_seconds.append(time.perf_counter() - trace_start)
+                    continue
 
             logger.info("\t📂 Processing trace %d/%d: %s", i, len(traces), trace_id)
 

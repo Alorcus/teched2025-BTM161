@@ -31,16 +31,27 @@ def _resolve_guardrail_extension(
     they exist (they were written from the same JSONL) so combining would
     just duplicate everything.
 
-    Timezone caveat: `load_guardrail_events_from_eventlog` requires
-    `time:timestamp` to still be a naive-UTC string, the shape
-    `_load_gateway_rows` writes it in. If the caller has already parsed the
-    column to a Datetime dtype (as `_load_combined_eventlog` does for the
-    dashboard) the value has been shifted to naive-LOCAL and the embedded
-    path would double-shift each gateway event by the local UTC offset. In
-    that case we prefer the on-disk JSONL when available; only when neither
-    the JSONL nor an unparsed string column is on hand do we fall back to
-    the potentially-shifted embedded rows, and we log a warning so the
-    corner case is visible.
+    Timezone contract: `load_guardrail_events_from_eventlog` interprets any
+    naive `time:timestamp` value as UTC. `_load_gateway_rows` writes the
+    column as a naive-UTC string, so a freshly-loaded CSV satisfies the
+    contract directly. The dashboard, however, parses the column into a
+    Datetime and shifts it to naive-LOCAL before this function runs — at
+    that point tagging the value as UTC would double-shift each gateway
+    event by the local UTC offset.
+
+    Resolution order (fall through on each miss):
+    1. `time:timestamp_utc_naive` — an extra column the dashboard's
+       `_load_combined_eventlog` writes with the pre-conversion, naive-UTC
+       Datetime. When present, we rebuild a sub-frame that copies that
+       column back into `time:timestamp` and hand it to the loader; the
+       result is always correct regardless of what the caller did to the
+       display column.
+    2. If `time:timestamp` is still a raw string, use the loader directly —
+       that's the on-disk CSV case (recipient shares `_all_traces.csv`
+       without the JSONL).
+    3. On-disk JSONL, if `guardrail_log_path` points at an existing file.
+    4. Last-resort: run the loader against the potentially-shifted embedded
+       rows anyway, with a warning — better a display shift than no panel.
     """
     if "concept:name" in eventlog.columns:
         has_embedded = (
@@ -49,20 +60,35 @@ def _resolve_guardrail_extension(
             > 0
         )
         if has_embedded:
+            # Path 1: naive-UTC sibling column preserved by the dashboard.
+            # Route it through the loader after rewiring the column name so
+            # the loader still sees `time:timestamp` — its expected key —
+            # holding the untouched UTC value.
+            if "time:timestamp_utc_naive" in eventlog.columns:
+                rewired = eventlog.with_columns(
+                    pl.col("time:timestamp_utc_naive").alias("time:timestamp"),
+                )
+                return load_guardrail_events_from_eventlog(rewired)
             ts_dtype = eventlog.schema.get("time:timestamp")
             timestamp_is_string = ts_dtype in (pl.Utf8, pl.String)
+            # Path 2: raw string column — the plain CSV case.
             if timestamp_is_string:
                 return load_guardrail_events_from_eventlog(eventlog)
+            # Path 3: fall back to on-disk JSONL when it exists.
             if (
                 guardrail_log_path is not None
                 and Path(guardrail_log_path).exists()
             ):
                 return load_guardrail_events(guardrail_log_path)
+            # Path 4: last-resort, warn and use whatever we have.
             logger.warning(
                 "Guardrail rows are embedded in the eventlog but "
-                "time:timestamp is not a string column — gateway event "
-                "timestamps may be shifted by the local UTC offset. "
-                "Provide guardrail_log_path for the authoritative source."
+                "time:timestamp is not a string column and no "
+                "time:timestamp_utc_naive sibling column is available — "
+                "gateway event timestamps may be shifted by the local UTC "
+                "offset. Provide guardrail_log_path for the authoritative "
+                "source, or preserve time:timestamp_utc_naive alongside the "
+                "converted column."
             )
             return load_guardrail_events_from_eventlog(eventlog)
     if guardrail_log_path is not None:
