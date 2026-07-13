@@ -69,7 +69,7 @@ def _mlflow_trace_count(tracking_uri: str) -> int:
         page_token = None
         while True:
             result = client.search_traces(
-                experiment_ids=[exp.experiment_id],
+                locations=[exp.experiment_id],
                 max_results=100,
                 page_token=page_token,
             )

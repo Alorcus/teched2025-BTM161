@@ -188,7 +188,7 @@ class TraceProcessor:
             page_token = None
             while True:
                 result = client.search_traces(
-                    experiment_ids=[exp_id],
+                    locations=[exp_id],
                     max_results=100,
                     page_token=page_token,
                 )
