@@ -1,16 +1,12 @@
 import panel as pn
 import polars as pl
 
+from src.agents import CUSTOMER_SCENARIO_LABELS
 from src.trace_processing.eventlog_conversion import ObjectCentricEventlog
 
 from .styling_helpers import kpi_row, section_header, subsection_header, subtitled_kpi_card
 
-_SCENARIO_NAMES = {
-    0: "Large latte & croissant",
-    1: "2 espressos (hurry)",
-    2: "Complaint & resolution",
-    3: "Ask for recommendation",
-}
+_SCENARIO_NAMES = {i: label for i, label in enumerate(CUSTOMER_SCENARIO_LABELS)}
 
 
 class FeedbackSection:

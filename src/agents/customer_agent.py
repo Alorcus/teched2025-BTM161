@@ -6,12 +6,42 @@ from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from ..llm import normalize_content
 
 
-CUSTOMER_SCENARIOS = [
-    "You want to order a large latte and a croissant. Be friendly.",
-    "You want 2 espressos. You're in a hurry, so keep it brief.",
-    "Your last cappuccino was cold and disappointing. You want to complain and get a resolution.",
-    "You want to try something new — ask for a recommendation and order based on their suggestion.",
+# Single source of truth for customer scenarios.
+# Each entry is (short_label, prompt). Order here defines the order everywhere
+# (dashboards, notebooks, CLI --scenario index).
+CUSTOMER_SCENARIO_DEFS: list[tuple[str, str]] = [
+    (
+        "Plain espresso",
+        "You want to order a single plain espresso. Not more, not less. Politely decline anything else.",
+    ),
+    (
+        "Large latte & croissant",
+        "You want to order a large latte and a croissant. Be friendly.",
+    ),
+    (
+        "2 espressos (hurry)",
+        "You want 2 espressos. You're in a hurry, so keep it brief.",
+    ),
+    (
+        "Complaint & resolution",
+        "Your last cappuccino was cold and disappointing. You want to complain and get a resolution.",
+    ),
+    (
+        "Ask for recommendation",
+        "You want to try something new — ask for a recommendation and order based on their suggestion.",
+    ),
+    (
+        "Tea only (stubborn)",
+        "You want to order a tea. You do not want anything else and you are stubborn about it — politely but firmly refuse every upsell or alternative.",
+    ),
+    (
+        "Buy everything (rich)",
+        "You are rich and want to buy everything from the store. Nothing should be left. Keep ordering more items until the staff confirms the store is empty.",
+    ),
 ]
+
+CUSTOMER_SCENARIO_LABELS: list[str] = [label for label, _ in CUSTOMER_SCENARIO_DEFS]
+CUSTOMER_SCENARIOS: list[str] = [prompt for _, prompt in CUSTOMER_SCENARIO_DEFS]
 
 
 def build_default_prompt(scenario_index: int = 0) -> str:

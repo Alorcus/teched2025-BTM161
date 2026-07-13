@@ -99,10 +99,10 @@ All examples below require `--setup <name>`; see [Setups](#setups).
 # Run a single trace with a random scenario
 poetry run simulate --setup baseline
 
-# Run 10 traces cycling through all 4 scenarios
+# Run 10 traces cycling through all 7 scenarios
 poetry run simulate --setup baseline --traces 10 --scenario all
 
-# Run 5 traces with a specific scenario (index 0-3)
+# Run 5 traces with a specific scenario (index 0-6)
 poetry run simulate --setup baseline --traces 5 --scenario 2
 
 # Run with minimal output (no message content)
@@ -122,19 +122,24 @@ poetry run simulate --setup baseline --traces 10 --scenario all --export-logs
 | `--setup NAME`  | required  | Setup under `config/setups/` to load; repeat the flag to run multiple setups     |
 | `--list-setups` | off       | List available setups and exit                                                    |
 | `--traces N`    | `1`       | Number of conversation traces to run                                              |
-| `--scenario`    | `random`  | Scenario index (`0`–`3`), `all` (round-robin), or `random`                        |
+| `--scenario`    | `random`  | Scenario index (`0`–`6`), `all` (round-robin), or `random`                        |
 | `--export-logs` | off       | Generate event log CSV after simulation                                           |
 | `--quiet`       | off       | Minimal output: only trace numbers, scenarios, and summary                        |
 | `--log-level`   | `warning` | Set the logging level for agent diagnostics (`debug`, `info`, `warning`, `error`) |
 
 ### Available Scenarios
 
-| Index | Description                                            |
-| ----- | ------------------------------------------------------ |
-| 0     | Order a large latte and a croissant (friendly)         |
-| 1     | Order 2 espressos (in a hurry)                         |
-| 2     | Complain about a cold cappuccino and seek resolution   |
-| 3     | Ask for a recommendation and order based on suggestion |
+Defined in `src/agents/customer_agent.py` (`CUSTOMER_SCENARIO_DEFS`) — single source of truth for both the label and the LLM prompt.
+
+| Index | Description                                                       |
+| ----- | ----------------------------------------------------------------- |
+| 0     | Order a plain espresso — nothing more, nothing less               |
+| 1     | Order a large latte and a croissant (friendly)                    |
+| 2     | Order 2 espressos (in a hurry)                                    |
+| 3     | Complain about a cold cappuccino and seek resolution              |
+| 4     | Ask for a recommendation and order based on the suggestion        |
+| 5     | Order a tea and stubbornly refuse anything else                   |
+| 6     | Rich customer buys everything until the store is empty            |
 
 ## Agent Observatory Dashboard
 
@@ -285,15 +290,18 @@ Orders and inventory are persisted in a local SQLite database (`coffee_shop.db`)
 **Role**: Simulates a customer interacting with the coffee shop, and can also be driven manually from the dashboard
 **Scenarios**:
 
+- Ordering a plain espresso — nothing more, nothing less
 - Ordering a latte and croissant
 - Quickly ordering two espressos
 - Complaining about a cold drink and seeking resolution
+- Asking for a recommendation and ordering based on the suggestion
+- Ordering a tea and stubbornly refusing anything else
+- Buying everything in the store until it is empty
 
 **Manual mode**:
 
 - Use the dashboard's Customer mode switch to switch from the simulated AI customer to a manual experience.
 - Type customer messages directly in the sidebar, send them to the swarm, and submit feedback once the conversation is finished.
-- Asking for a recommendation and ordering based on the suggestion
 
 **Behavior**:
 
