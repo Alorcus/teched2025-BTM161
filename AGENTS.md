@@ -118,6 +118,7 @@ Squash branches before merging into `main` so each merged change is a single com
 - Snake_case for functions/variables, PascalCase for classes
 - Pydantic models and dataclasses for data structures
 - `unittest`-based test suite in `tests/`; new tests follow `class TestX(unittest.TestCase)` with `test_*` methods (see `tests/test_trace_table.py` for the canonical shape)
+- Follow the guiding principle: **good code documents itself.** Prefer clear names and structure over comments; only add a comment when it captures a non-obvious *why* (external constraint, subtle invariant, workaround) that the code can't express on its own.
 
 ## Important Constraints
 
