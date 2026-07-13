@@ -8,7 +8,6 @@ import time
 import panel as pn
 import psutil
 
-from src.agents import init_db
 from src.setups import list_setups, resolve_setup_name, setup_dir
 
 from .interaction import create_observatory_dashboard
@@ -127,8 +126,6 @@ def main():
     logging.getLogger("tornado.access").setLevel(logging.WARNING)
 
     _reclaim_port_if_orphaned(DASHBOARD_PORT)
-
-    init_db()
 
     # Multi-page routing
     routes = {

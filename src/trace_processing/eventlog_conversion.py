@@ -3,6 +3,7 @@ from datetime import datetime
 from pathlib import Path
 
 import json
+import logging
 import os
 
 import polars as pl
@@ -16,6 +17,9 @@ from .guardrail_log_loader import (
 )
 
 
+logger = logging.getLogger("coffee_shop.trace_processing.eventlog_conversion")
+
+
 def _resolve_guardrail_extension(
     eventlog: pl.DataFrame,
     guardrail_log_path: str | Path | None,
@@ -26,6 +30,17 @@ def _resolve_guardrail_extension(
     Never merges the two — embedded rows are the authoritative source once
     they exist (they were written from the same JSONL) so combining would
     just duplicate everything.
+
+    Timezone caveat: `load_guardrail_events_from_eventlog` requires
+    `time:timestamp` to still be a naive-UTC string, the shape
+    `_load_gateway_rows` writes it in. If the caller has already parsed the
+    column to a Datetime dtype (as `_load_combined_eventlog` does for the
+    dashboard) the value has been shifted to naive-LOCAL and the embedded
+    path would double-shift each gateway event by the local UTC offset. In
+    that case we prefer the on-disk JSONL when available; only when neither
+    the JSONL nor an unparsed string column is on hand do we fall back to
+    the potentially-shifted embedded rows, and we log a warning so the
+    corner case is visible.
     """
     if "concept:name" in eventlog.columns:
         has_embedded = (
@@ -34,6 +49,21 @@ def _resolve_guardrail_extension(
             > 0
         )
         if has_embedded:
+            ts_dtype = eventlog.schema.get("time:timestamp")
+            timestamp_is_string = ts_dtype in (pl.Utf8, pl.String)
+            if timestamp_is_string:
+                return load_guardrail_events_from_eventlog(eventlog)
+            if (
+                guardrail_log_path is not None
+                and Path(guardrail_log_path).exists()
+            ):
+                return load_guardrail_events(guardrail_log_path)
+            logger.warning(
+                "Guardrail rows are embedded in the eventlog but "
+                "time:timestamp is not a string column — gateway event "
+                "timestamps may be shifted by the local UTC offset. "
+                "Provide guardrail_log_path for the authoritative source."
+            )
             return load_guardrail_events_from_eventlog(eventlog)
     if guardrail_log_path is not None:
         return load_guardrail_events(guardrail_log_path)
@@ -261,6 +291,13 @@ class ObjectCentricEventlog:
         # events by the extension, and leaving the raw rows in would produce
         # a duplicate native `event_gateway_decision` table with no OCEL edges.
         ext = _resolve_guardrail_extension(eventlog, guardrail_log_path)
+        # First strip out gateway rows so they don't feed into the native OCEL
+        # as an unlinked event table — they were already re-emitted as
+        # gateway_flag/gateway_deny by the extension above. The
+        # `concept:name in columns` guard here is a presence check (the frame
+        # may lack the column entirely), distinct from the value check inside
+        # `_resolve_guardrail_extension` which asks whether any row IS a
+        # gateway_decision.
         if "concept:name" in eventlog.columns:
             eventlog = eventlog.filter(pl.col("concept:name") != "gateway_decision")
 

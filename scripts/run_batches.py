@@ -1,7 +1,8 @@
 """Run a configured list of simulation batches.
 
-Each batch is a (setup, scenario, count) tuple. Batches sharing a setup reuse
-the same CoffeeShop instance so we only pay the init cost once per setup.
+Each batch is a (setup, scenario, count) tuple. Consecutive batches sharing
+a setup reuse the same CoffeeShop instance, so keep same-setup entries next
+to each other in the list to pay the init cost once per contiguous block.
 
 Edit BATCHES below, then run from the repo root:
     python -m scripts.run_batches
@@ -34,7 +35,10 @@ logger = logging.getLogger("coffee_shop")
 
 
 def main() -> int:
-    logger.setLevel(logging.INFO)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
 
     for setup, scenario, count in BATCHES:
         if not (0 <= scenario < len(CUSTOMER_SCENARIOS)):

@@ -8,7 +8,7 @@ import threading
 
 from src.coffee_shop import CoffeeShop
 from src.config import CoffeeShopConfig
-from src.agents import CUSTOMER_SCENARIOS, build_default_prompt
+from src.agents import CUSTOMER_SCENARIOS, build_default_prompt, init_db
 from src.agents.barista_agent import start_coffee_machine, stop_coffee_machine
 from ..nav import header_nav
 from .event_bus import EventBus, EventType, DashboardEvent
@@ -75,6 +75,11 @@ def _resolve_setup_options(
 def create_observatory_dashboard(setup_name: str):
     """Create the Agent Observatory dashboard page."""
     pn.extension(sizing_mode="stretch_both")
+
+    # The Interaction page is the only page that touches the SQLite order
+    # store, so initialise the schema lazily on first visit. `init_db()` is
+    # idempotent — repeat visits are cheap.
+    init_db()
 
     available_setups = list_setups()
     setup_options = _resolve_setup_options(setup_name, available_setups)

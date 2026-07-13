@@ -166,9 +166,17 @@ def load_guardrail_events_from_eventlog(
     don't have the source JSONL on their machine. Every signal the dashboard
     reads must therefore round-trip through the CSV.
 
+    Timezone contract: `time:timestamp` MUST be a naive-UTC string (the shape
+    `_load_gateway_rows` writes). If the caller has already parsed the column
+    to a Datetime dtype, this function treats the value as naive-UTC — which
+    is wrong once the frame has been through `_load_combined_eventlog`, since
+    that converts to naive-LOCAL. Callers that can't guarantee the string
+    shape should route through `_resolve_guardrail_extension`, which prefers
+    the on-disk JSONL in that case to avoid a double-shift.
+
     Row contract (produced by TraceProcessor.extract_new_traces):
     - `concept:name == "gateway_decision"`
-    - `time:timestamp` — ISO-8601 (with millisecond precision)
+    - `time:timestamp` — ISO-8601 naive-UTC string (with millisecond precision)
     - `case_id` — thread_id
     - `org:resource` — agent_id
     - `gateway_setup_name`, `gateway_snapshot_id`, `gateway_tool_name`,

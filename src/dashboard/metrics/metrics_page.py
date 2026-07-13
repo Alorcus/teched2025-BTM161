@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from collections import OrderedDict
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -250,7 +252,10 @@ def create_metrics_dashboard():
         )
         apply_button.disabled = _same_filter(s, applied)
 
-    render_cache: "OrderedDict[tuple, tuple]" = OrderedDict()
+    render_cache: OrderedDict[
+        tuple[datetime, datetime, tuple[int, ...], tuple[str | None, ...]],
+        tuple[ObjectCentricEventlog, int],
+    ] = OrderedDict()
 
     def _render_from_applied() -> pn.viewable.Viewable:
         key = _filter_signature(
@@ -677,7 +682,7 @@ def _lazy_visualization_panel(ocel) -> pn.viewable.Viewable:
         width=220,
     )
 
-    def _on_click(_event=None) -> None:
+    def _on_click(_event) -> None:
         button.disabled = True
         button.name = "Generating…"
         try:
@@ -686,7 +691,13 @@ def _lazy_visualization_panel(ocel) -> pn.viewable.Viewable:
             panel = pn.pane.Alert(
                 f"Visualization failed: {e}", alert_type="warning"
             )
-        slot[:] = [panel]
+            button.disabled = False
+            button.name = "Retry visualization"
+            # Keep the button in the slot so the user can retry.
+            slot[:] = [panel, button]
+        else:
+            button.visible = False
+            slot[:] = [panel]
 
     button.on_click(_on_click)
     slot.append(button)

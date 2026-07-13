@@ -3,7 +3,7 @@ import uuid
 import pandas as pd
 
 
-def _is_langgraph_root(span_name: str) -> bool:
+def is_langgraph_root(span_name: str) -> bool:
     """MLflow autolog appends '_<n>' to the root span when the same LangGraph
     instance is invoked multiple times in one process (e.g. 'LangGraph_1').
     Accept the bare name and any numeric suffix."""
@@ -45,7 +45,7 @@ class LogGenerator:
 
         # This is the root node of the LangGraph trace
         langgraph_roots = [
-            span for span in self.spans if _is_langgraph_root(span["name"])
+            span for span in self.spans if is_langgraph_root(span["name"])
         ]
         if not langgraph_roots:
             return pd.DataFrame()
@@ -217,7 +217,7 @@ class LogGenerator:
 
         agent_name = None
 
-        if _is_langgraph_root(agent_span["name"]):
+        if is_langgraph_root(agent_span["name"]):
             agent_name = "root_agent"
         else:
             agent_name = agent_metadata["langgraph_node"]

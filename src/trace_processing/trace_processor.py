@@ -1,14 +1,25 @@
 import json
+import logging
 import os
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from .log_generator import LogGenerator, _is_langgraph_root
+from .log_generator import LogGenerator, is_langgraph_root
+from ..config import CoffeeShopConfig
 import pandas as pd
 
-COFFEE_MACHINE_LOG = Path("services/coffee_machine/logs/coffee_machine.csv")
-GUARDRAIL_LOG = Path("guardrail_log/events.jsonl")
+logger = logging.getLogger(__name__)
+
+# Anchor cwd-relative defaults to the project root so the trace processor
+# behaves the same whether invoked from the repo root, a notebook, or a
+# subprocess launched from elsewhere.
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+# Kept as module-level defaults for callers that want to override the paths
+# on the CSV loaders directly (see tests/test_guardrail_csv_roundtrip.py).
+COFFEE_MACHINE_LOG = PROJECT_ROOT / "services/coffee_machine/logs/coffee_machine.csv"
+GUARDRAIL_LOG = PROJECT_ROOT / "guardrail_log/events.jsonl"
 
 # Activities the coffee machine is allowed to emit. Anything else in the CSV
 # is a stale row from a previous version of the logger (e.g. pre-rename
@@ -21,6 +32,14 @@ _COFFEE_MACHINE_ACTIVITIES = {
     "brew_failed",
     "clean_machine",
 }
+
+
+def _resolve_under_project_root(path: str | os.PathLike[str] | Path) -> Path:
+    """Resolve `path` against `PROJECT_ROOT` when it is relative, so the
+    default config values (which are cwd-relative) behave the same regardless
+    of the invoking process's working directory."""
+    p = Path(path)
+    return p if p.is_absolute() else PROJECT_ROOT / p
 
 
 def _load_coffee_machine_rows(path: Path) -> pd.DataFrame:
@@ -102,8 +121,8 @@ def _load_gateway_rows(path: Path) -> pd.DataFrame:
     bad_lines = 0
     try:
         with path.open("r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
+            for raw_line in f:
+                line = raw_line.strip()
                 if not line:
                     continue
                 try:
@@ -159,15 +178,35 @@ def _load_gateway_rows(path: Path) -> pd.DataFrame:
     except OSError:
         return pd.DataFrame()
     if bad_lines:
-        print(f"   ⚠️  gateway log: skipped {bad_lines} malformed line(s) in {path}")
+        logger.warning("gateway log: skipped %d malformed line(s) in %s", bad_lines, path)
     if not rows:
         return pd.DataFrame()
     return pd.DataFrame(rows)
 
 
 class TraceProcessor:
-    def __init__(self, tracking_uri: str = "sqlite:///mlflow.db"):
+    def __init__(
+        self,
+        tracking_uri: str = "sqlite:///mlflow.db",
+        guardrail_log_path: str | os.PathLike[str] | None = None,
+        coffee_machine_log_path: str | os.PathLike[str] | None = None,
+    ):
         self.tracking_uri = tracking_uri
+        # Guardrail path default comes from CoffeeShopConfig so the trace
+        # processor and the dashboard read the same file. Coffee-machine
+        # path has no config field yet, so fall back to the module-level
+        # PROJECT_ROOT-anchored default.
+        if guardrail_log_path is None:
+            guardrail_log_path = CoffeeShopConfig.__dataclass_fields__[
+                "guardrail_log_path"
+            ].default
+        self.guardrail_log_path = _resolve_under_project_root(guardrail_log_path)
+        if coffee_machine_log_path is None:
+            self.coffee_machine_log_path = COFFEE_MACHINE_LOG
+        else:
+            self.coffee_machine_log_path = _resolve_under_project_root(
+                coffee_machine_log_path
+            )
 
     def _get_all_traces(self):
         """
@@ -204,7 +243,6 @@ class TraceProcessor:
         """Cheap read of the LangGraph thread_id (= case_id) without running
         LogGenerator over the whole trace. Returns None if the trace has no
         LangGraph root or no metadata (e.g. feedback-only traces)."""
-        info = trace_dict.get("info", {}) or {}
         # MLflow's client puts spans under trace_dict["data"]["spans"] when
         # this dict comes from Trace.to_dict(); LogGenerator also accepts a
         # bare "spans" key. Handle both shapes.
@@ -214,17 +252,17 @@ class TraceProcessor:
         if not spans:
             return None
         for span in spans:
-            if _is_langgraph_root(span.get("name", "")):
-                raw_meta = (span.get("attributes") or {}).get("metadata")
-                if not raw_meta:
-                    return None
-                try:
-                    parsed = json.loads(raw_meta)
-                except (TypeError, ValueError):
-                    return None
-                cid = parsed.get("thread_id")
-                return str(cid) if cid is not None else None
-        _ = info  # kept for future debug logging; explicit read silences linters.
+            if not is_langgraph_root(span.get("name", "")):
+                continue
+            raw_meta = (span.get("attributes") or {}).get("metadata")
+            if not raw_meta:
+                continue
+            try:
+                parsed = json.loads(raw_meta)
+            except (TypeError, ValueError):
+                continue
+            cid = parsed.get("thread_id")
+            return str(cid) if cid is not None else None
         return None
 
     def extract_new_traces(
@@ -241,7 +279,7 @@ class TraceProcessor:
         if existing_case_ids is None:
             existing_case_ids = set()
 
-        print("🔍 Searching for traces...")
+        logger.info("🔍 Searching for traces...")
         traces = self._get_all_traces()
 
         empty_result: tuple[pd.DataFrame, dict[str, tuple[str | None, int]], set[str]] = (
@@ -251,10 +289,10 @@ class TraceProcessor:
         )
 
         if not traces:
-            print("❌ No traces found in MLflow")
+            logger.error("❌ No traces found in MLflow")
             return empty_result
 
-        print(f"📁 Found {len(traces)} traces")
+        logger.info("📁 Found %d traces", len(traces))
 
         build_start = time.perf_counter()
 
@@ -298,13 +336,13 @@ class TraceProcessor:
                 per_trace_seconds.append(time.perf_counter() - trace_start)
                 continue
 
-            print(f"\t📂 Processing trace {i}/{len(traces)}: {trace_id}")
+            logger.info("\t📂 Processing trace %d/%d: %s", i, len(traces), trace_id)
 
             log_generator = LogGenerator()
             try:
                 trace_event_log = log_generator.generate_event_log_df(trace_dict)
             except Exception as e:
-                print(f"   ❌ Failed to generate event log for {trace_id}: {e}")
+                logger.error("❌ Failed to generate event log for %s: %s", trace_id, e)
                 failed_ingestions += 1
                 per_trace_seconds.append(time.perf_counter() - trace_start)
                 continue
@@ -327,10 +365,11 @@ class TraceProcessor:
             non_agent_names = {"user_prompt"}
             trace_event_types = set(trace_event_log["concept:name"].unique())
             if trace_event_types.issubset(non_agent_names):
-                print(
-                    f"   ⚠️  Trace {trace_id} produced no agent-side events "
-                    f"(only {sorted(trace_event_types)}). Check for extraction "
-                    f"gaps in LogGenerator."
+                logger.warning(
+                    "Trace %s produced no agent-side events (only %s). "
+                    "Check for extraction gaps in LogGenerator.",
+                    trace_id,
+                    sorted(trace_event_types),
                 )
 
             trace_frames.append(trace_event_log)
@@ -360,21 +399,20 @@ class TraceProcessor:
             else pd.DataFrame()
         )
 
-        # Sort combined logs by timestamp. combined_logs starts as an empty
-        # DataFrame with no columns; if every trace either failed ingestion or
-        # returned an empty frame (e.g. feedback-only traces with no LangGraph
-        # root — see log_generator.py:33), there is no "time:timestamp" column
-        # to sort by and pandas raises KeyError. Bail out cleanly instead so
-        # the dashboard's export button doesn't surface a cryptic
-        # "❌ time:timestamp".
+        # combined_logs starts as an empty DataFrame with no columns; if every
+        # trace either failed ingestion or returned an empty frame (e.g.
+        # feedback-only traces with no LangGraph root — see log_generator.py:33),
+        # there is no "time:timestamp" column to sort on and pandas raises
+        # KeyError. Bail out cleanly instead so the dashboard's export button
+        # doesn't surface a cryptic "❌ time:timestamp".
         if combined_logs.empty or "time:timestamp" not in combined_logs.columns:
             if skipped_already_covered:
-                print(
-                    f"⚠️  No new usable events extracted; "
-                    f"{skipped_already_covered} trace(s) already covered."
+                logger.warning(
+                    "No new usable events extracted; %d trace(s) already covered.",
+                    skipped_already_covered,
                 )
             else:
-                print("⚠️  No usable events extracted from traces; nothing to export.")
+                logger.warning("No usable events extracted from traces; nothing to export.")
             self._print_summary(
                 total=len(traces),
                 successful=successful_ingestions,
@@ -385,7 +423,12 @@ class TraceProcessor:
                 per_trace_seconds=per_trace_seconds,
             )
             return empty_result
-        combined_logs.sort_values(by="time:timestamp", inplace=True)
+
+        # Precompute the last timestamp per case in a single groupby so the
+        # feedback loop below is O(F + R) instead of O(F * R) (see todo 021).
+        # .max() over a Series doesn't require sorted input, so we can defer
+        # the sort until after all supplementary streams merge in.
+        max_ts_by_case = combined_logs.groupby("case_id")["time:timestamp"].max()
 
         # Append exactly one user_feedback event per NEW case, after all other
         # events. Scoping to `new_case_ids` matters for append mode: feedback
@@ -395,10 +438,9 @@ class TraceProcessor:
         for case_id, fb in feedback_store.items():
             if case_id not in new_case_ids:
                 continue
-            case_mask = combined_logs["case_id"] == case_id
-            if not case_mask.any():
+            if case_id not in max_ts_by_case.index:
                 continue
-            last_ts = combined_logs.loc[case_mask, "time:timestamp"].max()
+            last_ts = max_ts_by_case[case_id]
             feedback_ts = (
                 datetime.strptime(last_ts, "%Y-%m-%dT%H:%M:%S.%f") + timedelta(milliseconds=1)
             ).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
@@ -417,51 +459,54 @@ class TraceProcessor:
                 "scenario_index": fb.get("scenario_index"),
             })
 
+        # Accumulate all supplementary streams (feedback, coffee-machine,
+        # gateway) and do a single concat+sort at the end. Merging them one
+        # at a time forced the whole frame to be re-sorted up to four times.
+        supplementary: list[pd.DataFrame] = []
         if feedback_rows:
-            combined_logs = pd.concat(
-                [combined_logs, pd.DataFrame(feedback_rows)], ignore_index=True
-            ).sort_values(by="time:timestamp")
+            supplementary.append(pd.DataFrame(feedback_rows))
 
-        # Merge coffee machine rows (stream 2). Same shape as the feedback
-        # injection above: read the source CSV, map to canonical columns,
-        # filter to NEW case_ids, concat, re-sort. Rows keyed to already-
-        # covered cases remain in the caller's existing CSV.
-        machine_rows = _load_coffee_machine_rows(COFFEE_MACHINE_LOG)
+        # Merge coffee machine rows (stream 2). Filter to NEW case_ids so
+        # rows keyed to already-covered cases stay in the caller's existing
+        # CSV rather than getting duplicated.
+        machine_rows = _load_coffee_machine_rows(self.coffee_machine_log_path)
         if not machine_rows.empty:
             before = len(machine_rows)
             machine_rows = machine_rows[machine_rows["case_id"].isin(new_case_ids)]
             dropped = before - len(machine_rows)
             if dropped:
-                print(
-                    f"   ⚠️  Dropped {dropped} coffee-machine row(s) with "
-                    f"case_id not in the new agent log slice "
-                    f"(stale, mismatched, or belonging to an already-covered case)"
+                logger.warning(
+                    "Dropped %d coffee-machine row(s) with case_id not in the "
+                    "new agent log slice (stale, mismatched, or belonging to "
+                    "an already-covered case)",
+                    dropped,
                 )
             if not machine_rows.empty:
-                combined_logs = pd.concat(
-                    [combined_logs, machine_rows], ignore_index=True
-                ).sort_values(by="time:timestamp")
+                supplementary.append(machine_rows)
 
-        # Merge gateway decisions (stream 3). Same shape as the two blocks
-        # above: read the JSONL source, project to canonical columns, filter
-        # to NEW case_ids, concat, re-sort. This is what lets a shared
+        # Merge gateway decisions (stream 3). This is what lets a shared
         # `_all_traces.csv` reproduce the guardrail dashboard panel on a
         # machine that never had `guardrail_log/events.jsonl`.
-        gateway_rows = _load_gateway_rows(GUARDRAIL_LOG)
+        gateway_rows = _load_gateway_rows(self.guardrail_log_path)
         if not gateway_rows.empty:
             before = len(gateway_rows)
             gateway_rows = gateway_rows[gateway_rows["case_id"].isin(new_case_ids)]
             dropped = before - len(gateway_rows)
             if dropped:
-                print(
-                    f"   ⚠️  Dropped {dropped} gateway_decision row(s) whose "
-                    f"case_id is not in the new agent log slice "
-                    f"(stale, mismatched, or belonging to an already-covered case)"
+                logger.warning(
+                    "Dropped %d gateway_decision row(s) whose case_id is not "
+                    "in the new agent log slice (stale, mismatched, or "
+                    "belonging to an already-covered case)",
+                    dropped,
                 )
             if not gateway_rows.empty:
-                combined_logs = pd.concat(
-                    [combined_logs, gateway_rows], ignore_index=True
-                ).sort_values(by="time:timestamp")
+                supplementary.append(gateway_rows)
+
+        if supplementary:
+            combined_logs = pd.concat(
+                [combined_logs, *supplementary], ignore_index=True
+            )
+        combined_logs.sort_values(by="time:timestamp", inplace=True)
 
         # Broadcast per-case setup/scenario tags to every row so downstream
         # readers (e.g. the metrics dashboard) can filter without joining an
@@ -489,7 +534,7 @@ class TraceProcessor:
         )
 
         if successful_ingestions > 0:
-            print("\nLog generation process completed successfully!")
+            logger.info("Log generation process completed successfully!")
 
         return combined_logs, case_tags, new_case_ids
 
@@ -518,23 +563,28 @@ class TraceProcessor:
         per_trace_seconds: list[float],
         already_covered: int = 0,
     ) -> None:
-        print("\n📈 Processing Summary:")
-        print(f"   📊 Total traces processed: {total}")
-        print(f"   ✅ Successful: {successful}")
+        # Emit line-by-line via the module logger so callers (dashboard,
+        # simulate) can silence or redirect the summary through standard
+        # logging configuration rather than intercepting stdout.
+        logger.info("📈 Processing Summary:")
+        logger.info("   📊 Total traces processed: %d", total)
+        logger.info("   ✅ Successful: %d", successful)
         if already_covered:
-            print(f"   ⏩ Already covered (skipped): {already_covered}")
-        print(f"   ⏭️  Skipped (no events): {skipped}")
-        print(f"   ❌ Failed: {failed}")
-        print(f"   ⏱️  Build time: {total_seconds:.2f}s total", end="")
+            logger.info("   ⏩ Already covered (skipped): %d", already_covered)
+        logger.info("   ⏭️  Skipped (no events): %d", skipped)
+        logger.info("   ❌ Failed: %d", failed)
         if per_trace_seconds:
             avg = sum(per_trace_seconds) / len(per_trace_seconds)
-            print(
-                f" (avg {avg * 1000:.1f}ms/trace, "
-                f"min {min(per_trace_seconds) * 1000:.1f}ms, "
-                f"max {max(per_trace_seconds) * 1000:.1f}ms)"
+            logger.info(
+                "   ⏱️  Build time: %.2fs total (avg %.1fms/trace, "
+                "min %.1fms, max %.1fms)",
+                total_seconds,
+                avg * 1000,
+                min(per_trace_seconds) * 1000,
+                max(per_trace_seconds) * 1000,
             )
         else:
-            print("")
+            logger.info("   ⏱️  Build time: %.2fs total", total_seconds)
 
     def _generate_log_file(self, dataframe: pd.DataFrame, output_path: str, json_format: bool = False):
         """
@@ -564,8 +614,8 @@ class TraceProcessor:
                 dataframe.to_json(file_path, orient="index")
             else:
                 dataframe.to_csv(file_path, index=False)
-            print(f"\n✅ Log file generated at {file_path}")
+            logger.info("✅ Log file generated at %s", file_path)
             return file_path
         except Exception as e:
-            print(f"\n″❌ Failed to generate log file at {file_path}: {e}")
+            logger.error("❌ Failed to generate log file at %s: %s", file_path, e)
             return None
