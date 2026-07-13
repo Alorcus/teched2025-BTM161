@@ -1,3 +1,4 @@
+from collections import OrderedDict
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -249,12 +250,31 @@ def create_metrics_dashboard():
         )
         apply_button.disabled = _same_filter(s, applied)
 
+    render_cache: "OrderedDict[tuple, tuple]" = OrderedDict()
+
     def _render_from_applied() -> pn.viewable.Viewable:
-        return _render_metrics(
+        key = _filter_signature(
+            applied["start"], applied["end"],
+            applied["scenarios"], applied["setups"],
+        )
+        cached = render_cache.get(key)
+        if cached is not None:
+            render_cache.move_to_end(key)
+            ocel, event_count = cached
+            return _render_metrics_from_ocel(
+                ocel, event_count,
+                applied["start"], applied["end"],
+            )
+        view, entry = _build_metrics(
             combined, case_metadata,
             applied["start"], applied["end"],
             applied["scenarios"], applied["setups"],
         )
+        if entry is not None:
+            render_cache[key] = entry
+            while len(render_cache) > _RENDER_CACHE_SIZE:
+                render_cache.popitem(last=False)
+        return view
 
     metrics_pane = pn.Column(
         _render_from_applied(),
@@ -471,6 +491,28 @@ def _same_filter(a: dict, b: dict) -> bool:
     )
 
 
+# How many recent filter results to keep rendered in memory. Re-applying an
+# already-seen filter set (common: toggle a checkbox, apply, toggle back) then
+# skips the pm4py + polars rebuild entirely. 8 covers the typical
+# preset-hopping workflow without holding the whole product-space.
+_RENDER_CACHE_SIZE = 8
+
+
+def _filter_signature(
+    start: datetime,
+    end: datetime,
+    scenarios: list[int],
+    setups: list[str | None],
+) -> tuple:
+    """Hashable, order-insensitive key for the render cache."""
+    return (
+        start,
+        end,
+        tuple(sorted(scenarios)),
+        tuple(sorted(setups, key=lambda x: (x is None, x))),
+    )
+
+
 def _case_counts(
     case_metadata: pl.DataFrame,
     start: datetime,
@@ -549,32 +591,56 @@ def _format_span_hint(
     )
 
 
-def _render_metrics(
+def _build_metrics(
     eventlog: pl.DataFrame,
     case_metadata: pl.DataFrame,
     start: datetime,
     end: datetime,
     scenarios: list[int],
     setups: list[str | None],
-) -> pn.viewable.Viewable:
+) -> tuple[pn.viewable.Viewable, tuple | None]:
+    """Filter, build OCEL, render sections.
+
+    Returns `(view, cache_entry)`. `cache_entry` is `(ocel, event_count)` for
+    the render cache, or `None` when the filter yielded nothing (nothing worth
+    caching — a re-apply with the same empty filter is already fast).
+    """
     keep_ids = _apply_filters(case_metadata, start, end, scenarios, setups)["case_id"]
     if keep_ids.is_empty():
         return pn.pane.Alert(
             "No traces match the current filters.", alert_type="warning"
-        )
+        ), None
     filtered = eventlog.filter(pl.col("case_id").is_in(keep_ids))
     if filtered.is_empty():
         return pn.pane.Alert(
             "No traces match the current filters.", alert_type="warning"
-        )
+        ), None
     try:
         ocel = ObjectCentricEventlog.from_eventlog(
             filtered, guardrail_log_path=_GUARDRAIL_LOG_PATH
         )
     except Exception as e:
-        return pn.pane.Alert(f"Error processing events: {e}", alert_type="danger")
+        return pn.pane.Alert(
+            f"Error processing events: {e}", alert_type="danger"
+        ), None
+    view = _render_metrics_from_ocel(ocel, filtered.height, start, end)
+    return view, (ocel, filtered.height)
 
-    range_label = _RangeLabel(start, end, filtered.height)
+
+def _render_metrics_from_ocel(
+    ocel: ObjectCentricEventlog,
+    event_count: int,
+    start: datetime,
+    end: datetime,
+) -> pn.viewable.Viewable:
+    """Compose the section panels around a pre-built OCEL.
+
+    Kept separate from `_build_metrics` so a cached OCEL can produce a fresh
+    Panel tree without re-doing the polars work — Panel viewables can't
+    safely be reused across mount cycles, so we regenerate the tree each
+    Apply. The section constructors are cheap compared to `from_eventlog`.
+    """
+    range_label = _RangeLabel(start, end, event_count)
     return pn.Column(
         range_label.panel(),
         OverviewSection(ocel, range_label.fake_path()).panel(),
@@ -582,10 +648,49 @@ def _render_metrics(
         SystemMetricsSection(ocel).panel(),
         TimeMetricsSection(ocel).panel(),
         GuardrailSection(ocel).panel(),
-        VisualizationSection(ocel).panel(),
+        _lazy_visualization_panel(ocel),
         sizing_mode="stretch_width",
         styles={"padding": "4px 0"},
     )
+
+
+def _lazy_visualization_panel(ocel) -> pn.viewable.Viewable:
+    """Defer pm4py discovery + graphviz SVG rendering until the user asks.
+
+    Building `VisualizationSection` runs three pm4py discoveries and three
+    graphviz `dot` invocations — the dominant cost of an Apply. Users don't
+    always need the process maps, so we render a placeholder with a
+    "Generate visualization" button and only construct the section on click.
+    """
+    slot = pn.Column(
+        pn.pane.HTML(
+            '<div style="font-size:12px;color:#666;padding:4px 0;">'
+            "Process visualization (OC-DFG, OC-PN, Event → Object Types) is "
+            "generated on demand — it takes a few seconds.</div>",
+            sizing_mode="stretch_width",
+        ),
+        sizing_mode="stretch_width",
+    )
+    button = pn.widgets.Button(
+        name="Generate visualization",
+        button_type="primary",
+        width=220,
+    )
+
+    def _on_click(_event=None) -> None:
+        button.disabled = True
+        button.name = "Generating…"
+        try:
+            panel = VisualizationSection(ocel).panel()
+        except Exception as e:
+            panel = pn.pane.Alert(
+                f"Visualization failed: {e}", alert_type="warning"
+            )
+        slot[:] = [panel]
+
+    button.on_click(_on_click)
+    slot.append(button)
+    return slot
 
 
 class _RangeLabel:
