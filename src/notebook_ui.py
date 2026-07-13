@@ -10,6 +10,7 @@ from IPython.display import display, clear_output, HTML
 from src.llm import normalize_content
 from src.styles import ENHANCED_CSS
 from src.stream import extract_messages
+from src.conversation import _tag_trace
 from src.agents import (
     reset_inventory, set_item_stock, get_all_inventory,
     CUSTOMER_SCENARIOS,
@@ -55,10 +56,11 @@ AGENT_CONFIG = {
 class NotebookUI:
     """Jupyter ipywidgets interface for the coffee shop."""
 
-    def __init__(self, app, customer_agent, mlflow_enabled=True):
+    def __init__(self, app, customer_agent, mlflow_enabled=True, setup_name: str | None = None):
         self.app = app
         self.customer_agent = customer_agent
         self.mlflow_enabled = mlflow_enabled
+        self.setup_name = setup_name
         self.agent_config = AGENT_CONFIG
         self.traces_of_latest_conversations = []
         self.verbose_mode = True
@@ -216,6 +218,8 @@ class NotebookUI:
             if self.mlflow_enabled:
                 trace_id = mlflow.get_last_active_trace_id()
                 self.traces_of_latest_conversations.append(trace_id)
+                if trace_id is not None and self.setup_name is not None:
+                    _tag_trace(trace_id, self.setup_name, -1)
 
                 with output_widget:
                     display(HTML(f"""

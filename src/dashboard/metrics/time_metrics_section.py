@@ -5,7 +5,7 @@ import polars as pl
 from src.trace_processing.eventlog_conversion import ObjectCentricEventlog
 
 from .eventlog_helpers import flat_event_table, per_order_durations
-from .styling_helpers import COLOR_SCHEME, per_order_kpi_card, section_header, subsection_header
+from .styling_helpers import COLOR_SCHEME, kpi_row, per_order_kpi_card, section_header, subsection_header
 
 
 # Per-order KPI configuration. (label, subtitle, column-in-per_order_durations, unit)
@@ -28,12 +28,6 @@ _PER_ORDER_CARDS: list[tuple[str, str, str, str]] = [
         "confirm_to_tray_s",
         "orders",
     ),
-    (
-        "Customer Service Resolution",
-        "From handover to customer service until control returns to another agent.",
-        "cs_resolution_s",
-        "incidents",
-    ),
 ]
 
 
@@ -47,7 +41,6 @@ class TimeMetricsSection:
 
     def _build(self) -> pn.Column:
         column = section_header("Time Metrics")
-        column.append(subsection_header("Per-Order Durations"))
         column.append(self._per_order_cards())
         column.append(subsection_header("Average Activity Duration", top_margin=10))
         column.append(self._avg_activity_chart())
@@ -62,11 +55,7 @@ class TimeMetricsSection:
             per_order_kpi_card(title, subtitle, order_durations[col], unit=unit)
             for title, subtitle, col, unit in _PER_ORDER_CARDS
         )
-        return pn.pane.HTML(
-            f'<div style="padding:2px 0;display:grid;grid-template-columns:repeat(4, 1fr);'
-            f'gap:8px;width:100%;">{cards_html}</div>',
-            sizing_mode="stretch_width",
-        )
+        return kpi_row(cards_html, columns=3, top_padding=12)
 
     def _avg_activity_chart(self) -> pn.viewable.Viewable:
         events_flat = flat_event_table(self._ocel)

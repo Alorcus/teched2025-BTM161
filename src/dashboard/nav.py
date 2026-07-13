@@ -11,7 +11,7 @@ import panel as pn
 
 _TABS: tuple[tuple[str, str], ...] = (
     ("/", "Interaction Observatory"),
-    ("/metrics", "Metrics Observatory"),
+    ("/metrics", "Metrics Dashboard"),
     ("/trace", "Trace Table"),
 )
 

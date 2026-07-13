@@ -1,9 +1,9 @@
 import json
 import threading
-import time
 import uuid
 import logging
 
+import mlflow
 from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage, ToolMessage
 
 from src.coffee_shop import CoffeeShop
@@ -11,6 +11,7 @@ from src.agents import CUSTOMER_SCENARIOS
 from src.agents.tray import get_tray, clear_tray
 from src.agents.order_store import load_order, save_order
 from src.agents.shared_components import OrderStatus
+from src.conversation import _tag_trace
 from src.stream import SWARM_AGENTS
 from .event_bus import EventBus, DashboardEvent, EventType
 
@@ -63,6 +64,28 @@ def _rejected_content(msg: AIMessage) -> str:
     return _summarize_tool_calls(getattr(msg, "tool_calls", None) or [])
 
 
+def _extract_text(content) -> str:
+    """Flatten an AIMessage.content field into a plain string.
+
+    Anthropic tool-call turns yield a list of content blocks
+    (e.g. [{"type": "text", "text": "..."}, {"type": "tool_use", ...}]);
+    text-only turns yield a str. Callers that just want the model's prose
+    should use this rather than str(content), which would render list
+    repr syntax into the panel.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "text":
+                text = item.get("text", "")
+                if text:
+                    parts.append(text)
+        return "\n".join(parts)
+    return ""
+
+
 class ConversationRunner:
     def __init__(self, shop: CoffeeShop, event_bus: EventBus):
         self.shop = shop
@@ -74,6 +97,7 @@ class ConversationRunner:
         self._active_agent = "order_agent"
         self._current_order_id: str | None = None
         self._manual_thread_id = str(uuid.uuid4())
+        self._current_scenario_index: int | None = None
         cfg = getattr(shop, "config", None)
         from src.config import CoffeeShopConfig as _CoffeeShopConfig
 
@@ -146,6 +170,7 @@ class ConversationRunner:
         self.shop.customer_agent.reset(scenario_index, custom_prompt=custom_prompt)
         self._active_agent = "order_agent"
         self._current_order_id = None
+        self._current_scenario_index = scenario_index
         thread_id = str(uuid.uuid4())
 
         if scenario_index is None:
@@ -491,6 +516,7 @@ class ConversationRunner:
                             ),
                         )
                     )
+                self._tag_last_trace()
                 break  # normal completion (or exhaustion)
 
             # We got a rejection: patch the graph state and resume.
@@ -513,6 +539,17 @@ class ConversationRunner:
             )
 
         return last_agent_message
+
+    def _tag_last_trace(self) -> None:
+        """Attach setup + scenario tags to the MLflow trace produced by the
+        just-completed `app.stream(...)` call. No-op when mlflow is disabled or
+        no trace was produced (e.g. autolog off, or a stream that errored)."""
+        if not self.shop.config.mlflow_enabled:
+            return
+        trace_id = mlflow.get_last_active_trace_id()
+        if trace_id is None:
+            return
+        _tag_trace(trace_id, self.shop.config.setup_name, self._current_scenario_index)
 
     def _apply_state_patch_for_rejection(self, config: dict, rejection: dict) -> None:
         """Inject the supervisor's quoted-critique HumanMessage into the
@@ -796,6 +833,14 @@ class ConversationRunner:
 
         if isinstance(msg, AIMessage):
             if msg.tool_calls:
+                thought_text = _extract_text(msg.content).strip()
+                if thought_text:
+                    self.event_bus.publish(DashboardEvent(
+                        event_type=EventType.AGENT_THOUGHT,
+                        agent_name=agent_name,
+                        content=thought_text,
+                        tool_name=msg.tool_calls[0].get("name"),
+                    ))
                 for tc in msg.tool_calls:
                     self.event_bus.publish(
                         DashboardEvent(

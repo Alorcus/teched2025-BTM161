@@ -10,7 +10,6 @@ _PER_ORDER_SCHEMA = {
     "full_duration_s": pl.Float64,
     "pipeline_duration_s": pl.Float64,
     "confirm_to_tray_s": pl.Float64,
-    "cs_resolution_s": pl.Float64,
 }
 
 
@@ -55,7 +54,11 @@ def agent_event_counts(ocel: ObjectCentricEventlog) -> pl.DataFrame:
 
 def handover_matrix(ocel: ObjectCentricEventlog) -> pl.DataFrame:
     """Build a (source, target, count) matrix from agent-to-agent handover events."""
-    handover_events = ocel.events.filter(pl.col("ocel_type").str.contains("_handover_"))
+    handover_events = (
+        ocel.events
+        .filter(pl.col("ocel_type").str.contains("_handover_"))
+        .unique(subset=["ocel_id"])
+    )
     if handover_events.is_empty():
         return pl.DataFrame(schema={"source": str, "target": str, "count": pl.UInt32})
 
@@ -78,8 +81,7 @@ def per_order_durations(ocel: ObjectCentricEventlog) -> pl.DataFrame:
     """Compute per-order time windows in seconds.
 
     Returns one row per order with columns:
-      order_id, full_duration_s, pipeline_duration_s,
-      confirm_to_tray_s, cs_resolution_s
+      order_id, full_duration_s, pipeline_duration_s, confirm_to_tray_s
     Any column may be null when the relevant boundary event is missing
     for that order.
     """
@@ -102,17 +104,12 @@ def per_order_durations(ocel: ObjectCentricEventlog) -> pl.DataFrame:
     if events.is_empty():
         return pl.DataFrame(schema=_PER_ORDER_SCHEMA)
 
-    is_handover_to_cs = pl.col("ocel_type").str.ends_with("_handover_customer_service_agent")
-    is_handover_from_cs = pl.col("ocel_type").str.starts_with("customer_service_agent_handover_")
-
     t = pl.col("ocel_time")
     boundaries = events.group_by("order_id").agg(
         t.filter(pl.col("ocel_type") == "user_prompt").min().alias("first_user_prompt_t"),
         t.filter(pl.col("ocel_type") == "process_order").min().alias("process_order_t"),
         t.max().alias("last_event_t"),
         t.filter(pl.col("ocel_type") == "place_on_tray").max().alias("last_tray_t"),
-        t.filter(is_handover_to_cs).min().alias("first_cs_in_t"),
-        t.filter(is_handover_from_cs).min().alias("first_cs_out_t"),
     )
 
     def _seconds(end: str, start: str) -> pl.Expr:
@@ -122,5 +119,4 @@ def per_order_durations(ocel: ObjectCentricEventlog) -> pl.DataFrame:
         _seconds("last_event_t", "first_user_prompt_t").alias("full_duration_s"),
         _seconds("last_event_t", "process_order_t").alias("pipeline_duration_s"),
         _seconds("last_tray_t", "process_order_t").alias("confirm_to_tray_s"),
-        _seconds("first_cs_out_t", "first_cs_in_t").alias("cs_resolution_s"),
     ).select(*_PER_ORDER_SCHEMA.keys())
