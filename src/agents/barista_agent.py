@@ -188,7 +188,7 @@ def safe_post(url, payload):
         response = requests.post(url, json=payload, timeout=REQUEST_TIMEOUT)
         return response
     except requests.exceptions.RequestException as e:
-        logger.error(f"[CoffeeMachine] POST failed: {e}")
+        logger.debug(f"[CoffeeMachine] POST failed: {e}")
         return None
 
 
@@ -197,7 +197,7 @@ def safe_get(url):
         response = requests.get(url, timeout=REQUEST_TIMEOUT)
         return response
     except requests.exceptions.RequestException as e:
-        logger.error(f"[CoffeeMachine] GET failed: {e}")
+        logger.debug(f"[CoffeeMachine] GET failed: {e}")
         return None
 
 
