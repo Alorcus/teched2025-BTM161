@@ -36,6 +36,7 @@ _TARGETS: tuple[str, ...] = (
     "coffee_shop.db",
     "coffee_shop.db-shm",
     "coffee_shop.db-wal",
+    "services/coffee_machine/logs",
 )
 
 

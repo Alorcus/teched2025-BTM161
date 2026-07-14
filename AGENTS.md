@@ -60,6 +60,10 @@ LLM provider is configured via a `.env` file (see `.env.example`). Set `LLM_PROV
 - Order status lifecycle: `pending → inventory_confirmed → completed/preparation_error → refunded`
 - MLflow traces are stored under `./mlruns/` and converted to XES-compatible CSV event logs in `./generated_event_log/`
 
+### Event log schema
+
+The consolidated `_all_traces.csv` (and its schema version, timezone contract, and per-column sensitivity classification) is documented in [`EVENTLOG_SCHEMA.md`](EVENTLOG_SCHEMA.md). Treat that file as the single source of truth for the CSV's columns — update it in the same commit as any producer change in `LogGenerator`, `TraceProcessor`, or `trace_cache`.
+
 ## Customer Feedback
 
 After each conversation, `CustomerAgent.get_feedback()` invokes the LLM to rate service quality from the customer perspective. The result is a structured record with:
@@ -108,6 +112,7 @@ Squash branches before merging into `main` so each merged change is a single com
 - Snake_case for functions/variables, PascalCase for classes
 - Pydantic models and dataclasses for data structures
 - `unittest`-based test suite in `tests/`; new tests follow `class TestX(unittest.TestCase)` with `test_*` methods (see `tests/test_tools_order.py` for the canonical shape)
+- Follow the guiding principle: **good code documents itself.** Prefer clear names and structure over comments; only add a comment when it captures a non-obvious *why* (external constraint, subtle invariant, workaround) that the code can't express on its own.
 
 ## Important Constraints
 

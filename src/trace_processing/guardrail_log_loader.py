@@ -24,7 +24,7 @@ import json
 import logging
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -147,10 +147,96 @@ def load_guardrail_events(path: str | Path) -> GuardrailOcelExtension:
     if not decisions:
         return GuardrailOcelExtension()
 
-    return _project(decisions)
+    return project_decisions(decisions)
 
 
-def _project(decisions: list[dict[str, Any]]) -> GuardrailOcelExtension:
+def load_guardrail_events_from_eventlog(
+    eventlog: pl.DataFrame,
+) -> GuardrailOcelExtension:
+    """Rebuild the OCEL extension from `gateway_decision` rows embedded in
+    the flat event log CSV. Companion to `load_guardrail_events` (which
+    reads the JSONL on disk); both converge on `project_decisions` so the
+    resulting `GuardrailOcelExtension` is identical either way.
+
+    Timezone contract: the caller MUST pass a frame where `time:timestamp`
+    is naive-UTC — either the raw ISO string `_load_gateway_rows` writes,
+    or a Datetime that has NOT been through timezone conversion. Any naive
+    datetime is tagged as UTC before `.timestamp()` is called; a
+    naive-LOCAL Datetime here would shift each gateway event by the local
+    UTC offset (silent 2-hour skew in Europe/Berlin summer, invisible on
+    a UTC host).
+
+    Callers that can't guarantee the naive-UTC shape (the dashboard
+    shifts to naive-LOCAL for display) MUST route through
+    `eventlog_conversion._resolve_guardrail_extension`.
+    """
+    if eventlog.is_empty() or "concept:name" not in eventlog.columns:
+        return GuardrailOcelExtension()
+    rows = eventlog.filter(pl.col("concept:name") == "gateway_decision")
+    if rows.is_empty():
+        return GuardrailOcelExtension()
+
+    decisions: list[dict[str, Any]] = []
+    for r in rows.iter_rows(named=True):
+        raw_verdicts = r.get("gateway_verdicts_json") or "[]"
+        raw_args = r.get("gateway_tool_args_json") or "{}"
+        try:
+            verdicts = json.loads(raw_verdicts)
+        except (TypeError, ValueError):
+            verdicts = []
+        try:
+            tool_args = json.loads(raw_args)
+        except (TypeError, ValueError):
+            tool_args = {}
+
+        # `ts` is what project_decisions expects; convert the CSV's ISO
+        # string back to an epoch float so JSONL and CSV inputs go through
+        # the same projection. Naive datetimes are tagged UTC before
+        # `.timestamp()` — otherwise `.timestamp()` assumes LOCAL and would
+        # invert the fix at the producer side.
+        ts_raw = r.get("time:timestamp")
+        ts_epoch: float | None
+        if ts_raw is None:
+            ts_epoch = None
+        else:
+            try:
+                if isinstance(ts_raw, str):
+                    parsed = datetime.strptime(ts_raw, "%Y-%m-%dT%H:%M:%S.%f")
+                else:
+                    parsed = ts_raw
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=timezone.utc)
+                ts_epoch = parsed.timestamp()
+            except (TypeError, ValueError):
+                ts_epoch = None
+
+        decisions.append({
+            "event_type": "gateway_decision",
+            "ts": ts_epoch,
+            "thread_id": r.get("case_id"),
+            "agent_id": r.get("org:resource"),
+            "setup_name": r.get("gateway_setup_name"),
+            "snapshot_id": r.get("gateway_snapshot_id"),
+            "tool_name": r.get("gateway_tool_name") or "",
+            "tool_call_id": r.get("gateway_tool_call_id") or "",
+            "tool_args": tool_args,
+            "final_decision": r.get("gateway_final_decision") or "allow",
+            "verdicts": verdicts,
+        })
+
+    if not decisions:
+        return GuardrailOcelExtension()
+    return project_decisions(decisions)
+
+
+def project_decisions(decisions: list[dict[str, Any]]) -> GuardrailOcelExtension:
+    """Turn gateway_decision records into an OCEL extension.
+
+    Public because both `load_guardrail_events` (JSONL) and
+    `load_guardrail_events_from_eventlog` (CSV) share this projection —
+    keeping them convergent is what guarantees the shared `_all_traces.csv`
+    reproduces the same OCEL that a live JSONL would.
+    """
     # --- backfill maps -------------------------------------------------
     # `case_setup_map` assumes one setup per thread (true in practice; the
     # JSONL would have to be from multiple experiment runs sharing a
@@ -462,14 +548,16 @@ def _parse_snapshot_id(snapshot_id: str) -> tuple[str, str, str]:
 
 
 def _ts_to_datetime(ts: Any) -> datetime | None:
-    """Convert the JSONL `ts` (epoch float seconds) to a Python datetime.
+    """Convert the JSONL `ts` (epoch float seconds) to a naive-UTC datetime.
 
     Matches the dtype produced by `_preprocess_eventlog`'s
-    `pl.col("time_finished").str.to_datetime()` so the synthetic rows merge
-    cleanly with the rest of the OCEL. Returns `None` for unparseable input
-    so the caller can drop the offending record.
+    `pl.col("time_finished").str.to_datetime()` — naive-UTC because
+    LogGenerator writes CSV timestamps from OTel's `start_time_unix_nano`.
+    `datetime.fromtimestamp(ts)` without `tz=` returns naive-LOCAL, which
+    would shift gateway events by the local UTC offset relative to the rest
+    of the OCEL.
     """
     try:
-        return datetime.fromtimestamp(float(ts))
+        return datetime.fromtimestamp(float(ts), tz=timezone.utc).replace(tzinfo=None)
     except (TypeError, ValueError):
         return None
