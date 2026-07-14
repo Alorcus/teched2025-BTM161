@@ -55,8 +55,11 @@ class ComplexitySection:
             )
         return pn.Column(
             section_header("Feedback × Process Complexity"),
-            self._flag_impact_chart(),
-            self._repeats_impact_chart(),
+            pn.Row(
+                self._flag_impact_chart(),
+                self._repeats_impact_chart(),
+                sizing_mode="stretch_width",
+            ),
             self._activity_impact_table(),
             self._trace_length_scatter(),
             sizing_mode="stretch_width",
@@ -101,6 +104,12 @@ class ComplexitySection:
         return pn.Column(
             subsection_header(
                 f"Avg Feedback by Process Marker (n={self._fb.height} cases)"
+            ),
+            pn.pane.HTML(
+                '<div style="font-size:10px;color:#999;margin-bottom:2px;">'
+                "Avg score in cases with vs without the marker — "
+                "a wide gap flags the marker as a sign of unhappy customers.</div>",
+                sizing_mode="stretch_width",
             ),
             pn.pane.Plotly(fig, height=220, sizing_mode="stretch_width"),
             sizing_mode="stretch_width",
