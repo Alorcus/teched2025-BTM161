@@ -7,6 +7,7 @@ from pathlib import Path
 import panel as pn
 import polars as pl
 
+from src.agents import CUSTOMER_SCENARIO_LABELS
 from src.config import CoffeeShopConfig
 from src.trace_processing.eventlog_conversion import ObjectCentricEventlog
 
@@ -26,16 +27,14 @@ _TIMESTAMP_COL = "time:timestamp"
 _TIMESTAMP_UTC_NAIVE_COL = "time:timestamp_utc_naive"
 _GUARDRAIL_LOG_PATH = Path(CoffeeShopConfig.__dataclass_fields__["guardrail_log_path"].default)
 
-# Scenario labels mirror src/dashboard/interaction/interaction_page.py:93-98 so
-# both dashboards refer to the same customer-scenario shorthand. -1 is the
-# "no preset scenario" sentinel used at trace-tag time.
+# Scenario labels mirror the interaction observatory's dropdown
+# (src/dashboard/interaction/interaction_page.py) — both dashboards use
+# the "{index}: {label}" shorthand from CUSTOMER_SCENARIO_LABELS. -1 is
+# the "no preset scenario" sentinel used at trace-tag time.
 _SCENARIO_LABELS = {
-    0: "Latte & croissant (friendly)",
-    1: "2 espressos (in a hurry)",
-    2: "Complaint (cold cappuccino)",
-    3: "Ask for a recommendation",
-    -1: "Custom / Unspecified",
+    i: f"{i}: {label}" for i, label in enumerate(CUSTOMER_SCENARIO_LABELS)
 }
+_SCENARIO_LABELS[-1] = "Custom / Unspecified"
 # Setup filter's option label for cases whose MLflow trace carried no `setup`
 # tag (older traces, or a conversation that crashed before tagging). Kept as a
 # named constant because it's the string that both populates the checkbox and
