@@ -239,6 +239,26 @@ class TraceProcessor:
 
         return all_traces
 
+    def _get_traces_by_request_ids(self, request_ids: list[str]) -> list:
+        """Fetch specific traces by request_id.
+
+        Used by the SQLite fast path in `trace_cache`: SQL narrows the set
+        of candidate request_ids to only those we haven't materialized
+        yet, and we then pull each with a single `client.get_trace()`
+        call. Skips traces the client refuses to return (deleted, or
+        MLflow-schema mismatch) with a warning.
+        """
+        import mlflow
+
+        client = mlflow.MlflowClient(tracking_uri=self.tracking_uri)
+        traces = []
+        for rid in request_ids:
+            try:
+                traces.append(client.get_trace(rid))
+            except Exception as e:
+                logger.warning("Could not fetch trace %s: %s", rid, e)
+        return traces
+
     @staticmethod
     def _peek_case_id_from_info(trace_info) -> str | None:
         """Cheap read of the LangGraph thread_id from a `TraceInfo` object,
@@ -306,16 +326,49 @@ class TraceProcessor:
 
         logger.info("🔍 Searching for traces...")
         traces = self._get_all_traces()
+        return self._extract_from_traces(traces, existing_case_ids)
 
-        empty_result: tuple[pl.DataFrame, dict[str, tuple[str | None, int]], set[str]] = (
-            pl.DataFrame(),
-            {},
-            set(),
+    def extract_new_traces_by_request_ids(
+        self,
+        request_ids: list[str],
+        existing_case_ids: set[str] | None = None,
+    ) -> tuple[pl.DataFrame, dict[str, tuple[str | None, int]], set[str], set[str]]:
+        """Extract only the given request_ids.
+
+        Same return shape as `extract_new_traces` plus a fourth element:
+        the set of request_ids that were fetched but produced no
+        LangGraph case_id (feedback / standalone ChatAnthropic). The
+        caller adds them to the "no-session" ledger so we don't refetch
+        them on subsequent syncs.
+        """
+        if existing_case_ids is None:
+            existing_case_ids = set()
+
+        logger.info("🔍 Fetching %d target trace(s)...", len(request_ids))
+        traces = self._get_traces_by_request_ids(request_ids)
+        combined, tags, new_ids, no_session = self._extract_from_traces(
+            traces, existing_case_ids, return_no_session=True
         )
+        return combined, tags, new_ids, no_session
+
+    def _extract_from_traces(
+        self,
+        traces: list,
+        existing_case_ids: set[str],
+        return_no_session: bool = False,
+    ):
+        """Shared body of `extract_new_traces` and its request-id variant.
+
+        When `return_no_session=True`, returns a 4-tuple with the set of
+        request_ids that produced no case_id — used by the SQLite path's
+        no-session ledger.
+        """
+        empty_result_3 = (pl.DataFrame(), {}, set())
+        empty_result_4 = (pl.DataFrame(), {}, set(), set())
 
         if not traces:
             logger.error("❌ No traces found in MLflow")
-            return empty_result
+            return empty_result_4 if return_no_session else empty_result_3
 
         logger.info("📁 Found %d traces", len(traces))
 
@@ -338,6 +391,9 @@ class TraceProcessor:
         # case_id -> (setup_name, scenario_index) from MLflow trace tags.
         case_tags: dict[str, tuple[str | None, int]] = {}
         new_case_ids: set[str] = set()
+        # Request-ids that were fetched but produced no case_id (feedback,
+        # standalone ChatAnthropic). Only populated when the caller asked.
+        no_session_request_ids: set[str] = set()
 
         per_trace_seconds: list[float] = []
 
@@ -388,6 +444,11 @@ class TraceProcessor:
                 # calls from get_feedback()). These are legitimately skipped,
                 # not successful — counting them as such hides real bugs.
                 skipped_ingestions += 1
+                # Ledger: request_id (aka trace_id) has no session-derived
+                # case_id, so subsequent syncs shouldn't refetch it.
+                rid = trace_dict.get('info', {}).get('request_id') or trace_id
+                if rid:
+                    no_session_request_ids.add(str(rid))
                 per_trace_seconds.append(time.perf_counter() - trace_start)
                 continue
 
@@ -452,7 +513,9 @@ class TraceProcessor:
                 total_seconds=time.perf_counter() - build_start,
                 per_trace_seconds=per_trace_seconds,
             )
-            return empty_result
+            if return_no_session:
+                return pl.DataFrame(), {}, set(), no_session_request_ids
+            return empty_result_3
 
         # Precompute the last timestamp per case in a single group_by so the
         # feedback loop below is O(F + R) instead of O(F * R).
@@ -566,6 +629,8 @@ class TraceProcessor:
         if successful_ingestions > 0:
             logger.info("Log generation process completed successfully!")
 
+        if return_no_session:
+            return combined_logs, case_tags, new_case_ids, no_session_request_ids
         return combined_logs, case_tags, new_case_ids
 
     def process_all_traces(self, export_as_json: bool = False):

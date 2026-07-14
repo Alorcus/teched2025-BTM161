@@ -2,6 +2,10 @@
 
 `_all_traces.csv` is a shareable artefact: it must grow in append mode
 and never rewrite rows that are already present.
+
+These tests exercise the MLflow-client fallback path by using a non-sqlite
+tracking URI. The SQLite fast path (freshness sentinel + SQL diffing) is
+covered separately in `test_trace_cache_sqlite_fastpath.py`.
 """
 from __future__ import annotations
 
@@ -14,6 +18,10 @@ from unittest import mock
 import polars as pl
 
 from src.dashboard.metrics import trace_cache
+
+# Fallback-path URI so tests don't accidentally hit the real sqlite DB
+# on the SQLite fast path.
+_TEST_URI = "http://mocked-mlflow"
 
 
 def _make_row(case_id: str, name: str = "call_llm") -> dict:
@@ -93,7 +101,7 @@ class TestTraceCacheAppend(unittest.TestCase):
             "src.dashboard.metrics.trace_cache._mlflow_trace_count", return_value=2
         ):
             MockLogGen.return_value.generate_event_log_df.side_effect = fake_generate
-            trace_cache.ensure_trace_cache(self.log_dir)
+            trace_cache.ensure_trace_cache(self.log_dir, tracking_uri=_TEST_URI)
 
         self.assertEqual(generate_calls, ["case-new-1"])
 
@@ -107,7 +115,7 @@ class TestTraceCacheAppend(unittest.TestCase):
         with mock.patch(
             "src.dashboard.metrics.trace_cache._mlflow_trace_count", return_value=0
         ):
-            result = trace_cache.ensure_trace_cache(self.log_dir)
+            result = trace_cache.ensure_trace_cache(self.log_dir, tracking_uri=_TEST_URI)
 
         self.assertIsNotNone(result)
         df = pl.read_csv(str(self.log_dir / trace_cache.CACHE_FILENAME))
@@ -132,7 +140,7 @@ class TestTraceCacheAppend(unittest.TestCase):
             "src.dashboard.metrics.trace_cache._mlflow_trace_count", return_value=1
         ):
             MockLogGen.return_value.generate_event_log_df.side_effect = fake_generate
-            trace_cache.ensure_trace_cache(self.log_dir)
+            trace_cache.ensure_trace_cache(self.log_dir, tracking_uri=_TEST_URI)
 
         df = pl.read_csv(str(self.log_dir / trace_cache.CACHE_FILENAME))
         self.assertEqual(
@@ -166,7 +174,7 @@ class TestTraceCacheAppend(unittest.TestCase):
             "src.dashboard.metrics.trace_cache._mlflow_trace_count", return_value=1
         ):
             MockLogGen.return_value.generate_event_log_df.side_effect = fake_generate
-            trace_cache.ensure_trace_cache(self.log_dir)
+            trace_cache.ensure_trace_cache(self.log_dir, tracking_uri=_TEST_URI)
 
         df = pl.read_csv(str(self.log_dir / trace_cache.CACHE_FILENAME))
         self.assertEqual(set(df["case_id"].to_list()), {"case-new-after-bump"})
@@ -209,7 +217,7 @@ class TestTraceCacheAppend(unittest.TestCase):
             "src.dashboard.metrics.trace_cache._mlflow_trace_count", return_value=1
         ):
             MockLogGen.return_value.generate_event_log_df.side_effect = fake_generate
-            trace_cache.ensure_trace_cache(self.log_dir)
+            trace_cache.ensure_trace_cache(self.log_dir, tracking_uri=_TEST_URI)
 
         quarantine = self.log_dir / "_all_traces.unknown-schema.csv"
         self.assertTrue(
