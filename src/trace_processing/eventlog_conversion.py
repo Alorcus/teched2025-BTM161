@@ -625,6 +625,14 @@ class ObjectCentricEventlog:
             json.dump(ocel_json, f, indent=2)
 
 
+_HANDOVER_AGENTS = [
+    "order_agent",
+    "barista_agent",
+    "inventory_agent",
+    "customer_service_agent",
+]
+
+
 def _preprocess_eventlog(eventlog: pl.DataFrame) -> pl.DataFrame:
     """
     Helper function used to preprocess a given eventlog from the coffee shop.
@@ -685,6 +693,8 @@ def _preprocess_eventlog(eventlog: pl.DataFrame) -> pl.DataFrame:
             handover_flag=(
                 (pl.col("event_type") == "transfer_to_agent")
                 & (pl.col("object_type_agent") != pl.col("next_agent"))
+                & pl.col("next_agent").is_in(_HANDOVER_AGENTS)
+                & pl.col("object_type_agent").is_in(_HANDOVER_AGENTS)
             ),
             previous_event_type=pl.col("event_type").shift(1),
             previous_object_id_message=pl.col("object_id_message").shift(1),
