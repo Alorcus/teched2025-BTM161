@@ -9,11 +9,8 @@ from .logger import log_event
 
 logger = logging.getLogger("coffee_shop.coffee_machine.state")
 
-# ----------------------------
-# Config
-# ----------------------------
 SEED = int(os.environ.get("COFFEE_MACHINE_SEED", "100"))
-FAILURE_RATE = 0.2  # 20% failure rate
+FAILURE_RATE = 0.2
 
 rng = random.Random(SEED)
 
@@ -24,28 +21,21 @@ def _generate_outcome() -> str:
     return "FAIL" if rng.random() < FAILURE_RATE else "SUCC"
 
 
-# ----------------------------
-# In-memory stores
-# ----------------------------
 jobs = {}
-job_events = defaultdict(list)  # job_id -> event list
+job_events = defaultdict(list)
 machine_dirty = False
 outcome_queue: list[str] = [_generate_outcome() for _ in range(4)]
 
 
-# ----------------------------
-# OCEL Event Emitter
-# ----------------------------
 def emit_event(job, activity: str, duration: float = None):
     timestamp = time.time()
 
     event = {
-        "case_id": job["correlation_id"],   # OCEL case (process instance)
-        "activity": activity,               # event type
-        "timestamp": timestamp,             # OCEL time
+        "case_id": job["correlation_id"],
+        "activity": activity,
+        "timestamp": timestamp,
         "duration": duration,
 
-        # optional object attributes (for OCEL enrichment)
         "job_id": job["job_id"],
         "drink": job["drink"],
     }
@@ -58,9 +48,6 @@ def emit_event(job, activity: str, duration: float = None):
     return event
 
 
-# ----------------------------
-# Create Job (entry event)
-# ----------------------------
 def create_job(drink: str, correlation_id: str):
     global machine_dirty
     job_id = str(uuid.uuid4())
@@ -91,16 +78,12 @@ def create_job(drink: str, correlation_id: str):
 
     jobs[job_id] = job
 
-    # OCEL lifecycle start
     emit_event(job, "job_created")
     logger.info("Job created: %s (drink=%s, duration=%.1fs, contaminated=%s)", job_id[:8], drink, duration, job["contaminated"])
 
     return job
 
 
-# ----------------------------
-# Status computation (pure function)
-# ----------------------------
 def compute_status(job):
     now = time.time()
     start = job["created_at"]
@@ -112,9 +95,6 @@ def compute_status(job):
     return "failed" if job["will_fail"] else "ready"
 
 
-# ----------------------------
-# Read model (GET = side-effect controlled)
-# ----------------------------
 def get_job(job_id: str):
     global machine_dirty
     job = jobs.get(job_id)
@@ -128,15 +108,9 @@ def get_job(job_id: str):
     events = job_events[job_id]
     last_activity = events[-1]["activity"] if events else None
 
-    # ----------------------------
-    # Brewing transition event
-    # ----------------------------
     if status == "brewing" and last_activity != "process_order":
         emit_event(job, "process_order", duration=job["duration"])
 
-    # ----------------------------
-    # Completion event
-    # ----------------------------
     if status in ["ready", "failed"] and not job["logged_finished"]:
         emit_event(
             job,
@@ -155,9 +129,6 @@ def get_job(job_id: str):
     return result
 
 
-# ----------------------------
-# Debug helper
-# ----------------------------
 def get_job_events(job_id: str):
     return job_events.get(job_id, [])
 
@@ -166,9 +137,6 @@ def get_queue() -> list[str]:
     return list(outcome_queue)
 
 
-# ----------------------------
-# Machine cleaning
-# ----------------------------
 def clean_machine(correlation_id: str):
     global machine_dirty
 
@@ -176,7 +144,7 @@ def clean_machine(correlation_id: str):
         case_id=correlation_id,
         activity="clean_machine",
         timestamp=time.time(),
-        duration=0.0,  # instantaneous
+        duration=0.0,
     )
 
     if machine_dirty:

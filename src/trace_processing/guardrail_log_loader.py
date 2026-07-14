@@ -237,7 +237,6 @@ def project_decisions(decisions: list[dict[str, Any]]) -> GuardrailOcelExtension
     keeping them convergent is what guarantees the shared `_all_traces.csv`
     reproduces the same OCEL that a live JSONL would.
     """
-    # --- backfill maps -------------------------------------------------
     # `case_setup_map` assumes one setup per thread (true in practice; the
     # JSONL would have to be from multiple experiment runs sharing a
     # thread_id, which doesn't normally happen). If violated, the most recent
@@ -246,17 +245,14 @@ def project_decisions(decisions: list[dict[str, Any]]) -> GuardrailOcelExtension
     case_setup_conflicts: set[str] = set()
     case_agent_snapshot_map: dict[tuple[str, str], str] = {}
 
-    # Object accumulators (deduped at the end).
     guardrail_obj: dict[str, dict[str, Any]] = {}  # name@version → row
     setup_obj: dict[str, dict[str, Any]] = {}
     snapshot_obj: dict[str, dict[str, Any]] = {}
     tool_call_obj: dict[str, dict[str, Any]] = {}
 
-    # Event accumulators (one row per emitted gateway event).
     flag_rows: list[dict[str, Any]] = []
     deny_rows: list[dict[str, Any]] = []
 
-    # E2O accumulator.
     event_object_rows: list[dict[str, Any]] = []
     # O2O accumulator (snapshot → agent), deduped by (source, target).
     o2o_seen: set[tuple[str, str]] = set()
@@ -283,7 +279,6 @@ def project_decisions(decisions: list[dict[str, Any]]) -> GuardrailOcelExtension
             logger.warning("guardrail_log: skipping record with unparseable ts=%r", ts)
             continue
 
-        # --- backfill maps -------------------------------------------
         prior = case_setup_map.get(thread_id)
         if prior and prior != setup_name and thread_id not in case_setup_conflicts:
             logger.warning(
@@ -295,7 +290,6 @@ def project_decisions(decisions: list[dict[str, Any]]) -> GuardrailOcelExtension
         case_setup_map[thread_id] = setup_name
         case_agent_snapshot_map[(thread_id, agent_id)] = snapshot_id
 
-        # --- objects --------------------------------------------------
         setup_obj.setdefault(setup_name, {"ocel_id": setup_name})
 
         if snapshot_id not in snapshot_obj:
@@ -312,10 +306,10 @@ def project_decisions(decisions: list[dict[str, Any]]) -> GuardrailOcelExtension
             tool_call_id, {"ocel_id": tool_call_id, "tool_name": tool_name},
         )
 
-        # --- O2O: snapshot → agent ------------------------------------
-        # Emitted unconditionally for every (snapshot, agent_obj) pair seen,
-        # not gated on the event being emitted — the relationship is a fact
-        # about the run regardless of whether a deny/flag occurred.
+        # O2O snapshot → agent is emitted unconditionally for every
+        # (snapshot, agent_obj) pair seen, not gated on the event being
+        # emitted — the relationship is a fact about the run regardless of
+        # whether a deny/flag occurred.
         agent_obj_id = f"{thread_id}_{agent_id}"
         o2o_key = (snapshot_id, agent_obj_id)
         if o2o_key not in o2o_seen:
@@ -326,7 +320,6 @@ def project_decisions(decisions: list[dict[str, Any]]) -> GuardrailOcelExtension
                 "ocel_qualifier": "version_of",
             })
 
-        # Sort verdicts by effect for tidy attribute output.
         denied_by: list[str] = []
         flagged_by: list[str] = []
         consulted: list[str] = []
@@ -351,7 +344,6 @@ def project_decisions(decisions: list[dict[str, Any]]) -> GuardrailOcelExtension
             if reason:
                 reasons.append(reason)
 
-        # --- emit event? ---------------------------------------------
         emit_deny = final_decision == "deny"
         emit_flag = (not emit_deny) and bool(flagged_by)
         if not (emit_deny or emit_flag):
@@ -382,7 +374,6 @@ def project_decisions(decisions: list[dict[str, Any]]) -> GuardrailOcelExtension
         else:
             flag_rows.append(row)
 
-        # --- E2O for this gateway event ------------------------------
         agent_obj_id_for_event = f"{thread_id}_{agent_id}"
         event_object_rows.extend([
             {"ocel_event_id": event_id, "ocel_object_id": agent_obj_id_for_event, "ocel_qualifier": "evaluated_for"},
@@ -405,7 +396,6 @@ def project_decisions(decisions: list[dict[str, Any]]) -> GuardrailOcelExtension
                 "ocel_qualifier": qualifier,
             })
 
-    # --- finalize --------------------------------------------------------
     ext = GuardrailOcelExtension(
         case_setup_map=case_setup_map,
         case_agent_snapshot_map=case_agent_snapshot_map,
@@ -450,7 +440,6 @@ def project_decisions(decisions: list[dict[str, Any]]) -> GuardrailOcelExtension
         "gateway_deny": _event_df(deny_rows),
     }
 
-    # Per-type object tables.
     ext.object_tables = {
         "guardrail": _object_df(
             guardrail_obj.values(),

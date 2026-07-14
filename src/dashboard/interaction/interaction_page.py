@@ -125,7 +125,7 @@ def create_observatory_dashboard(setup_name: str):
     _conversation_has_run: list[bool] = [
         False
     ]  # mutable container so closure can write to it
-    _export_in_progress = threading.Event()  # set while a daemon export is running
+    _export_in_progress = threading.Event()
 
     status_indicator = pn.indicators.LoadingSpinner(value=False, size=25)
     conversation_log = pn.pane.HTML(
@@ -217,7 +217,6 @@ def create_observatory_dashboard(setup_name: str):
         margin=(0, 0, 5, 0),
     )
     prompt_textarea = pn.widgets.TextAreaInput(
-        # name="Customer Prompt",
         value=build_default_prompt(0),
         height=200,
         sizing_mode="stretch_width",
@@ -382,7 +381,6 @@ def create_observatory_dashboard(setup_name: str):
 
     setup_select.param.watch(on_setup_change, "value")
 
-    # ── Mode Toggle (als nativer HTML-Switch, wie der Theme-Toggle in der Navbar) ──
     mode_toggle = pn.widgets.RadioButtonGroup(
         name="Customer mode",
         options={"🤖  AI agent": "ai", "👤  Manuell": "manual"},
@@ -392,7 +390,6 @@ def create_observatory_dashboard(setup_name: str):
         margin=(0, 4, 10, 0),
     )
 
-    # ── AI-Panel ─────────────────────────────────────
     ai_panel = pn.Column(
         pn.Row(
             pn.Column(
@@ -442,7 +439,6 @@ def create_observatory_dashboard(setup_name: str):
         sizing_mode="stretch_width",
     )
 
-    # ── Manual-Panel ─────────────────────────────────
     chat_input = pn.widgets.TextAreaInput(
         placeholder="Nachricht eingeben…",
         height=120,
@@ -561,7 +557,6 @@ def create_observatory_dashboard(setup_name: str):
         sizing_mode="stretch_width",
     )
 
-    # ── Reaktiver Wechsel: visible statt pn.bind ──────────────────────────────
     def on_mode_change(event):
         ai_panel.visible = event.new == "ai"
         manual_panel.visible = event.new == "manual"
@@ -594,13 +589,10 @@ def create_observatory_dashboard(setup_name: str):
         sizing_mode="stretch_height",
     )
 
-    # Navigation tabs for header
-    nav_tabs = header_nav(active="/")
-
     template = pn.template.FastListTemplate(
         title=f"Coffee Shop Agent Observatory — {setup_name}",
         sidebar=[sidebar],
-        header=[nav_tabs],
+        header=[header_nav(active="/")],
         main=[
             pn.Column(
                 pn.Row(

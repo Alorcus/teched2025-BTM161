@@ -61,7 +61,6 @@ class _HandoffDeferrer:
         logger.debug("model returned tool_calls=%s | pending=%s",
                       names, self._pending["name"] if self._pending else None)
 
-        # --- 1. Handle any previously deferred handoff ----------------------
         if self._pending is not None:
             has_handoff_now = any(
                 tc["name"].startswith("transfer_to_")
@@ -72,7 +71,6 @@ class _HandoffDeferrer:
                             "(new message will be re-evaluated)")
                 self._pending = None
                 self._defer_count = 0
-                # fall through: section 2 will handle the new message normally
             elif not tool_calls:
                 logger.info("injecting deferred handoff %s into text-only response",
                             self._pending["name"])
@@ -85,7 +83,6 @@ class _HandoffDeferrer:
                 logger.debug("LLM made more non-handoff calls %s — keeping pending "
                              "(defer count: %d)", names, self._defer_count)
 
-        # --- 2. Check current message for parallel handoff + other tools ----
         if len(tool_calls) <= 1:
             return message
 

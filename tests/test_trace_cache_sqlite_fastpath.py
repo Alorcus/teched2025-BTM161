@@ -142,7 +142,6 @@ class TestFreshnessSentinel(unittest.TestCase):
 
         def fake_generate(trace_dict):
             cid = trace_dict.get("info", {}).get("trace_id", "case-?")
-            # Return a trivially-valid event log for case-1.
             return pl.DataFrame([
                 {
                     "case_id": "case-1",

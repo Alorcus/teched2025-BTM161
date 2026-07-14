@@ -88,7 +88,6 @@ class TestResolveFromAgent(unittest.TestCase):
     """Tests 4-6: _resolve_from_agent logic."""
 
     def test_uses_active_agent_when_present(self):
-        """Test 4: Prefers state['active_agent']."""
         state = {
             "active_agent": "inventory_agent",
             "messages": [AIMessage(content="hi", name="order_agent")],
@@ -96,7 +95,6 @@ class TestResolveFromAgent(unittest.TestCase):
         self.assertEqual(_resolve_from_agent(state), "inventory_agent")
 
     def test_fallback_to_message_name(self):
-        """Test 5: Falls back to last AIMessage.name ending in '_agent'."""
         state = {
             "active_agent": "unknown",
             "messages": [
@@ -107,7 +105,6 @@ class TestResolveFromAgent(unittest.TestCase):
         self.assertEqual(_resolve_from_agent(state), "barista_agent")
 
     def test_returns_unknown_when_no_info(self):
-        """Test 6: Returns 'unknown' when no agent info available."""
         state = {"messages": [HumanMessage(content="hi")]}
         self.assertEqual(_resolve_from_agent(state), "unknown")
 
@@ -133,7 +130,6 @@ class TestHandoffContextClearedOnNewTurn(unittest.TestCase):
 
         config = {"configurable": {"thread_id": "test-clear-ctx"}}
 
-        # Turn 1: inject handoff_context
         graph.invoke(
             {
                 "messages": [HumanMessage(content="turn 1")],
@@ -146,7 +142,6 @@ class TestHandoffContextClearedOnNewTurn(unittest.TestCase):
             config,
         )
 
-        # Turn 2: pass handoff_context=None (as our fix does)
         graph.invoke(
             {
                 "messages": [HumanMessage(content="turn 2")],
@@ -155,7 +150,6 @@ class TestHandoffContextClearedOnNewTurn(unittest.TestCase):
             config,
         )
 
-        # Check checkpoint state
         snapshot = graph.get_state(config)
         self.assertIsNone(snapshot.values.get("handoff_context"))
 
@@ -164,20 +158,14 @@ class TestNoMessageDuplicationAcrossHandoffs(unittest.TestCase):
     """Test 8: Multiple handoffs don't cause message explosion."""
 
     def test_message_count_grows_linearly(self):
-        # Simulate what happens when 3 handoff commands are applied to state.
-        # Since MessagesState appends, each handoff adds exactly 1 ToolMessage.
         initial_messages = [HumanMessage(content="order please")]
 
-        # Each handoff tool returns update with [tool_message] only
         total_messages = list(initial_messages)
         for tool, target in TOOLS_AND_TARGETS[:3]:
             cmd = _invoke_handoff(tool, target=target)
-            # The reducer appends cmd.update["messages"] to existing state
             total_messages.extend(cmd.update["messages"])
 
-        # 1 initial + 3 tool messages = 4 total
         self.assertEqual(len(total_messages), 4)
-        # All appended messages are ToolMessages
         for msg in total_messages[1:]:
             self.assertIsInstance(msg, ToolMessage)
 

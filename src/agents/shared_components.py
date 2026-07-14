@@ -31,10 +31,6 @@ def _resolve_from_agent(state: dict) -> str:
     return "unknown"
 
 
-# ---------------------------------------------------------------------------
-# Enums
-# ---------------------------------------------------------------------------
-
 class OrderStatus(str, Enum):
     PENDING = "pending"
     INVENTORY_CONFIRMED = "inventory_confirmed"
@@ -52,10 +48,6 @@ class Size(str, Enum):
     LARGE = "large"
 
 
-# ---------------------------------------------------------------------------
-# Global allowed extras
-# ---------------------------------------------------------------------------
-
 ALLOWED_EXTRAS: set[str] = {
     "soy milk", "oat milk", "almond milk",
     "extra shot", "decaf",
@@ -63,10 +55,6 @@ ALLOWED_EXTRAS: set[str] = {
     "hot", "cold", "iced",
 }
 
-
-# ---------------------------------------------------------------------------
-# SQLModel table classes
-# ---------------------------------------------------------------------------
 
 class MenuItem(SQLModel, table=True):
     __tablename__ = "inventory"
@@ -120,10 +108,6 @@ class Order(SQLModel, table=True):
         return f"ORD{self.id:04d}" if self.id else "ORD????"
 
 
-# ---------------------------------------------------------------------------
-# Menu
-# ---------------------------------------------------------------------------
-
 MENU = {
     "espresso": MenuItem(name="espresso", price=2.50, stock=3, category="coffee"),
     "latte": MenuItem(name="latte", price=4.00, stock=2, category="coffee"),
@@ -135,10 +119,6 @@ MENU = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Extended Swarm State with handoff context
-# ---------------------------------------------------------------------------
-
 class HandoffContext(TypedDict, total=False):
     from_agent: str
     context_summary: str
@@ -149,19 +129,11 @@ class CoffeeShopState(SwarmState):
     handoff_context: Optional[HandoffContext]
 
 
-# ---------------------------------------------------------------------------
-# Pydantic schema for tools that operate on an existing order by ID
-# ---------------------------------------------------------------------------
-
 class OrderIdSchema(BaseModel):
     order_id: str = Field(description="The order ID (e.g. 'ORD0001')")
 
 
-# ---------------------------------------------------------------------------
-# Handoff Tools — each requires explicit context summary and expectation
-# ---------------------------------------------------------------------------
-
-@tool 
+@tool
 def transfer_to_agent(
     target_agent: Annotated[str, "The agent to transfer to (e.g. 'inventory_agent')"],
     context_summary: Annotated[str, "Summary of what you know so far that is relevant for the next agent"],

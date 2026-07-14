@@ -1,5 +1,4 @@
 import logging
-from pathlib import Path
 
 import mlflow
 
@@ -8,13 +7,44 @@ from src.config import CoffeeShopConfig
 from src.setups import setup_dir
 from src.agents.order_store import create_order_store_engine, set_engine
 from src.agents import (
-    init_db, reset_inventory, set_item_stock, get_all_inventory,
-    CustomerAgent, CUSTOMER_SCENARIOS,
+    init_db, reset_inventory, CustomerAgent,
 )
 from src.control_plane import AgentRepo, Catalog, JsonlLogSink, ProcessSupervisor
 from src.graph import build_coffee_shop_graph
 from src.conversation import ConversationEngine
-from src.notebook_ui import NotebookUI, AGENT_CONFIG
+
+AGENT_CONFIG = {
+    'order_agent': {
+        'icon': '\U0001f4dd',
+        'name': 'Order Agent',
+        'color': '#2196F3',
+        'bg_color': '#E3F2FD',
+    },
+    'inventory_agent': {
+        'icon': '\U0001f4e6',
+        'name': 'Inventory Agent',
+        'color': '#FF9800',
+        'bg_color': '#FFF3E0',
+    },
+    'barista_agent': {
+        'icon': '☕',
+        'name': 'Barista Agent',
+        'color': '#8BC34A',
+        'bg_color': '#F1F8E9',
+    },
+    'customer_service_agent': {
+        'icon': '\U0001f4ac',
+        'name': 'Customer Service',
+        'color': '#E91E63',
+        'bg_color': '#FCE4EC',
+    },
+    'user': {
+        'icon': '\U0001f464',
+        'name': 'You',
+        'color': '#424242',
+        'bg_color': '#F5F5F5',
+    },
+}
 
 class _PaddedNameFormatter(logging.Formatter):
     """Left-pads %(name)s to the widest logger name seen so far, so child loggers stay aligned."""
@@ -38,25 +68,20 @@ if not _coffee_shop_logger.handlers:
 
 
 class CoffeeShop:
-    """Facade combining graph construction, conversation engine, and UI."""
+    """Facade combining graph construction and the conversation engine."""
 
     def __init__(self, config: CoffeeShopConfig | None = None):
         self.config = config or CoffeeShopConfig()
         self.traces_of_latest_conversations = []
-        self.verbose_mode = True
-        self.customer_agent_enabled = False
         self.customer_agent = None
-        self._last_agent_message = None
         self.agent_config = AGENT_CONFIG
         self._engine = None
-        self._ui = None
         self.agent_repo: AgentRepo | None = None
         self.catalog: Catalog | None = None
         self.log_sink: JsonlLogSink | None = None
         self.process_supervisor: ProcessSupervisor | None = None
 
     def open_shop(self, reset_inventory_first=True):
-        """Start the coffee shop application after potentially updating agent definitions"""
         engine = create_order_store_engine(self.config.db_url)
         set_engine(engine)
         self._engine = engine
@@ -121,7 +146,6 @@ class CoffeeShop:
         """Send a message through the swarm and return the last customer-facing agent response."""
         result = self._conversation_engine.send_message(thread_id, message)
         self.traces_of_latest_conversations = self._conversation_engine.traces_of_latest_conversations
-        self._last_agent_message = result
         return result
 
     def run_conversation(self, scenario_index=None, on_message=None, reset_inventory_first=True):
@@ -133,16 +157,6 @@ class CoffeeShop:
         )
         self.traces_of_latest_conversations = self._conversation_engine.traces_of_latest_conversations
         return trace_ids
-
-    def create_interactive_interface(self, success_only=False):
-        """Create an enhanced interactive widget interface for the coffee shop"""
-        self._ui = NotebookUI(
-            self.app, self.customer_agent,
-            mlflow_enabled=self.config.mlflow_enabled,
-            setup_name=self.config.setup_name,
-        )
-        self._ui.traces_of_latest_conversations = self.traces_of_latest_conversations
-        return self._ui.create_interactive_interface(success_only=success_only)
 
     def capture_feedback(self, thread_id: str, order_id: str | None = None) -> dict:
         """Capture customer feedback for a completed conversation and persist it."""
@@ -160,7 +174,3 @@ class CoffeeShop:
         """Return the most recently recorded customer feedback entry."""
         log = self._conversation_engine.feedback_log
         return next(reversed(log.values()), None) if log else None
-
-    def display_current_inventory(self):
-        if self._ui:
-            self._ui.display_current_inventory()

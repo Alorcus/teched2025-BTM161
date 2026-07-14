@@ -43,7 +43,6 @@ class LogGenerator:
         else:
             raise Exception("Cannot locate spans in trace data!")
 
-        # This is the root node of the LangGraph trace
         langgraph_roots = [
             span for span in self.spans if is_langgraph_root(span["name"])
         ]
@@ -69,7 +68,7 @@ class LogGenerator:
                 self._process_agent_span(agent_span)
 
         dataframe = pl.DataFrame(self.process_events).sort("time:timestamp")
-        # if the trace was canceled before LLM answers
+        # Trace may have been canceled before any LLM answer was recorded.
         if "duration" not in dataframe.columns:
             dataframe = dataframe.with_columns(
                 pl.lit(None, dtype=pl.Int64).alias("duration")

@@ -8,11 +8,6 @@ POLL_INTERVAL = 1.0
 
 
 def run_worker():
-    """
-    Background OCEL simulation engine.
-    Continuously advances job states and triggers event emissions.
-    """
-
     while True:
         for job_id in list(jobs.keys()):
             if jobs[job_id].get("logged_finished"):

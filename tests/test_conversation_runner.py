@@ -34,7 +34,6 @@ class TestRunnerStartSetsIsRunning(unittest.TestCase):
 
     def test_flag_set_immediately(self):
         shop = _make_mock_shop()
-        # Make stream block until we release it
         block = threading.Event()
         shop.app.stream.side_effect = lambda *a, **kw: iter([]) if block.wait(0.5) else iter([])
         shop.customer_agent.get_initial_message.return_value = "hello"
@@ -108,7 +107,6 @@ class TestRunnerIsRunningClearedOnError(unittest.TestCase):
         runner._thread.join(timeout=5)
 
         self.assertFalse(runner.is_running)
-        # Should have published an error event
         events = bus.drain()
         error_events = [e for e in events if "error" in (e.content or "").lower()]
         self.assertTrue(len(error_events) > 0)
@@ -120,7 +118,6 @@ class TestStreamErrorPublishesEventAndReturnsNone(unittest.TestCase):
     def test_mid_stream_error(self):
         shop = _make_mock_shop()
 
-        # Stream yields one item then raises
         def failing_stream(*a, **kw):
             yield (("order_agent:abc",), {"agent": {"messages": [AIMessage(content="hi", name="order_agent")]}})
             raise RuntimeError("API rate limit")
@@ -148,7 +145,6 @@ class TestStreamDeduplicatesMessages(unittest.TestCase):
         msg = AIMessage(content="Order received!", name="order_agent", id="msg-001")
 
         def dup_stream(*a, **kw):
-            # Same message appears twice
             yield (("order_agent:abc",), {"agent": {"messages": [msg]}})
             yield (("order_agent:abc",), {"agent": {"messages": [msg]}})
 
@@ -213,7 +209,6 @@ class TestMaxTurnsLimit(unittest.TestCase):
         shop.customer_agent.get_initial_message.return_value = "hi"
         # Customer always responds (would loop forever without limit)
         shop.customer_agent.respond_to.return_value = "more please"
-
         bus = EventBus()
         runner = ConversationRunner(shop, bus)
         runner.start(scenario_index=0)
@@ -292,7 +287,6 @@ class TestUserVisibleFollowsHandoff(unittest.TestCase):
             nonlocal call_count
             call_count[0] += 1
             if call_count[0] == 1:
-                # First turn: order_agent replies then hands off to barista
                 msg = AIMessage(content="Let me brew that", name="order_agent", id="msg-1")
                 yield (("order_agent:abc",), {"agent": {
                     "messages": [msg],
@@ -304,7 +298,6 @@ class TestUserVisibleFollowsHandoff(unittest.TestCase):
                     },
                 }})
             else:
-                # Second turn: barista replies
                 msg = AIMessage(content="Coffee is ready!", name="barista_agent", id="msg-2")
                 yield (("barista_agent:def",), {"agent": {"messages": [msg]}})
 
@@ -450,7 +443,6 @@ class TestActiveAgentResetsOnNewConversation(unittest.TestCase):
         def stream_handoff(*a, **kw):
             call_count[0] += 1
             if call_count[0] == 1:
-                # Handoff to barista on first conversation
                 msg = AIMessage(content="Handing off", name="order_agent", id=f"msg-h{call_count[0]}")
                 yield (("order_agent:abc",), {"agent": {
                     "messages": [msg],
@@ -462,7 +454,6 @@ class TestActiveAgentResetsOnNewConversation(unittest.TestCase):
                     },
                 }})
             else:
-                # Simple reply
                 msg = AIMessage(content="Hello!", name="order_agent", id=f"msg-s{call_count[0]}")
                 yield (("order_agent:abc",), {"agent": {"messages": [msg]}})
 
@@ -473,12 +464,10 @@ class TestActiveAgentResetsOnNewConversation(unittest.TestCase):
         bus = EventBus()
         runner = ConversationRunner(shop, bus)
 
-        # First run — triggers handoff
         runner.start(scenario_index=0)
         runner._thread.join(timeout=5)
         bus.drain()
 
-        # Second run — should reset active agent
         runner.start(scenario_index=0)
         runner._thread.join(timeout=5)
 
@@ -486,18 +475,6 @@ class TestActiveAgentResetsOnNewConversation(unittest.TestCase):
         user_visible = [e for e in events if e.event_type == EventType.USER_VISIBLE]
         self.assertTrue(len(user_visible) >= 1)
         self.assertEqual(user_visible[0].agent_name, "order_agent")
-
-
-# =============================================================================
-# Active-mode supervisor tests
-# =============================================================================
-#
-# These exercise the new "active" Process Supervisor: when the config flag
-# `process_supervisor_active` is True and observe() returns a Violation:* on
-# an AIMessage from a swarm agent, the runner must (a) suppress the normal
-# AGENT_MESSAGE / TOOL_CALL publishes, (b) emit AGENT_MESSAGE_REJECTED, (c)
-# patch the LangGraph state via update_state with a quoted-critique
-# HumanMessage, and (d) re-stream from the patched checkpoint.
 
 
 def _active_shop():
@@ -943,11 +920,6 @@ class TestSupervisorDisabledNoOp(unittest.TestCase):
         shop.app.update_state.assert_not_called()
 
 
-# =============================================================================
-# Handover pause toggle (integration test for the dashboard pause feature)
-# =============================================================================
-
-
 class TestHandoverPauseAndResume(unittest.TestCase):
     """End-to-end test for the dashboard's pause/go toggle.
 
@@ -1118,7 +1090,6 @@ class TestHandoverPauseAndResume(unittest.TestCase):
 
         bus = EventBus()
         runner = ConversationRunner(shop, bus)
-        # Explicitly off (matches the default but make it explicit).
         runner.pause_on_next_handover = False
         runner.start(scenario_index=0)
         runner._thread.join(timeout=5)

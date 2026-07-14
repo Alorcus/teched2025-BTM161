@@ -50,7 +50,6 @@ def subsection_header(title: str, top_margin: int = 8) -> pn.pane.HTML:
     )
 
 
-# ---- Shared KPI card styling ------------------------------------------------
 # Every KPI card in the metrics dashboard is a flex-column with the same
 # outer shell (padding, border, radius, background, height alignment) and
 # the same title / subtitle typography. Only the "body" underneath the

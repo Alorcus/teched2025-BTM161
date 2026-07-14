@@ -91,7 +91,6 @@ def create_metrics_dashboard():
         else:
             setup_options[s] = s
 
-    # ---- widgets -----------------------------------------------------------
     start_picker = pn.widgets.DatetimePicker(
         name="From",
         value=full_start,
@@ -197,7 +196,6 @@ def create_metrics_dashboard():
         sizing_mode="stretch_width",
     )
 
-    # ---- cards -------------------------------------------------------------
     time_card = pn.Card(
         preset_row_top, preset_row_mid, preset_row_bot,
         start_picker, end_picker,
@@ -225,7 +223,6 @@ def create_metrics_dashboard():
         styles={"margin-bottom": "6px"},
     )
 
-    # ---- staged vs applied state -----------------------------------------
     # Applied state = filter values currently reflected by the metrics pane.
     # Staged state = whatever the widgets say right now. Apply button is
     # enabled iff the two diverge.
@@ -323,12 +320,10 @@ def create_metrics_dashboard():
         styles={"padding": "10px 12px 10px 16px"},
     )
 
-    nav_tabs = header_nav(active="/metrics")
-
     return pn.template.FastListTemplate(
         title="Coffee Shop Agent Observatory",
         sidebar=[sidebar],
-        header=[nav_tabs],
+        header=[header_nav(active="/metrics")],
         main=[metrics_pane],
         accent_base_color="#795548",
         header_background="#4E342E",

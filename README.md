@@ -12,33 +12,25 @@ Five agents work together in a LangGraph Swarm:
 - **Customer Service Agent** — handles complaints and refunds
 - **Customer Agent** — drives the conversation from outside the swarm, simulating a customer
 
-The repository contains three Jupyter notebooks for stepping through the system, a CLI for headless trace generation, and a Panel-based observatory dashboard for live exploration and metrics.
+The repository contains a CLI for headless trace generation and a Panel-based observatory dashboard for live exploration and metrics.
 
 ## Requirements
 
 - [Python](https://www.python.org/downloads/) >= 3.13
 - (Recommended) [Poetry](https://python-poetry.org/) for dependency and virtualenv management.
   - Alternative: pip with the provided `requirements.txt`.
-- (Recommended) [poetry-jupyter-plugin](https://pypi.org/project/poetry-jupyter-plugin/) to register the Poetry venv as a Jupyter kernel:
-
-  ```
-  $ poetry self add poetry-jupyter-plugin
-  ```
-
 - An API key for an [LLM provider supported by LangChain](https://python.langchain.com/docs/integrations/chat/#featured-providers), or a local Ollama runtime.
 
 ## Installation
 
 1. Install dependencies: `poetry install`
-2. Install the Jupyter kernel: `poetry jupyter install`
-3. Activate the venv: run `poetry env activate` and use the printed command (or prefix commands with `poetry run`).
-4. Install the LangChain integration for your LLM provider, for example:
+2. Activate the venv: run `poetry env activate` and use the printed command (or prefix commands with `poetry run`).
+3. Install the LangChain integration for your LLM provider, for example:
    ```
    pip install "langchain[openai]<1.0.0"
    pip install "langchain[anthropic]<1.0.0"
    ```
-5. Configure your LLM provider via a `.env` file (see `.env.example`). Set `LLM_PROVIDER=ollama` (default) or `LLM_PROVIDER=anthropic`.
-6. Start Jupyter: `jupyter notebook`
+4. Configure your LLM provider via a `.env` file (see `.env.example`). Set `LLM_PROVIDER=ollama` (default) or `LLM_PROVIDER=anthropic`.
 
 ## Pre-commit Hook
 
@@ -49,14 +41,6 @@ brew install pre-commit          # macOS
 pip install pre-commit           # Linux (or: poetry install)
 pre-commit install
 ```
-
-## Notebooks
-
-Three self-contained exercises:
-
-1. [`1_Standard_agentic_coffee_shop`](1_Standard_agentic_coffee_shop.ipynb) — get familiar with the setup and generate a first trace.
-2. [`2_Exceptions_agentic_coffee_shop`](2_Exceptions_agentic_coffee_shop.ipynb) — explore agent behavior under errors and edge cases, producing process variants.
-3. [`3_Extending_agentic_coffee_shop`](3_Extending_agentic_coffee_shop.ipynb) — experiment with agent definitions (instructions, tools) and observe how changes affect the multi-agent system.
 
 ## Setups
 
@@ -89,7 +73,7 @@ poetry run simulate --setup my_setup --traces 1
 
 ## Headless Simulation
 
-You can generate traces in bulk without the jupyter UI using the `simulate` CLI command. This runs the Customer Agent against the coffee shop swarm and captures MLflow traces for each conversation.
+You can generate traces in bulk without the dashboard UI using the `simulate` CLI command. This runs the Customer Agent against the coffee shop swarm and captures MLflow traces for each conversation.
 
 ### Usage
 
@@ -167,8 +151,6 @@ A two-page observability dashboard built with [Panel](https://panel.holoviz.org/
 - **Interaction Observatory** (`/`) — a real-time view of all agents in a grid layout. Each panel displays the system prompt, available tools, current status, handoff context, context-isolated message history, and tool call log, updating live as a conversation streams through the system.
 - **Metrics Dashboard** (`/metrics`) — analytics over previously-generated event logs (KPIs, per-agent workload, per-order timings, OCEL-based visualizations).
 
-Switch between pages via the tabs in the header.
-
 ### Launch
 
 ```bash
@@ -220,36 +202,13 @@ The command refuses to run while the dashboard is listening on port 5006 — sto
 
 ### How It Works
 
-The dashboard runs the same `CoffeeShop` multi-agent graph used by the notebooks and CLI. A background thread drives the conversation (using the simulated Customer Agent), while the Panel UI polls for events every 100ms. Stream events from LangGraph are parsed into typed dashboard events (agent messages, tool calls, handoffs, etc.) and dispatched to the corresponding agent panel.
+The dashboard runs the same `CoffeeShop` multi-agent graph used by the CLI. A background thread drives the conversation (using the simulated Customer Agent), while the Panel UI polls for events every 100ms. Stream events from LangGraph are parsed into typed dashboard events (agent messages, tool calls, handoffs, etc.) and dispatched to the corresponding agent panel.
 
 The Metrics Dashboard loads the consolidated `_all_traces.csv` cache into an `ObjectCentricEventlog` and renders sections from it. The cache is rebuilt from MLflow on page entry whenever the trace count has changed; aside from that single write, the page is read-only.
 
 ### Sharing the event log CSV
 
 `generated_event_log/_all_traces.csv` is designed to be handed to colleagues who don't have your MLflow store — but it embeds free-text content: verbatim customer utterances (in `message` on `user_prompt` rows), LLM assistant responses, and LLM reasoning from the guardrail gateway (in `gateway_tool_args_json`, `gateway_verdicts_json`, and `feedback_reason`). In this TechEd repository the "customer" is an LLM-simulated persona, so those cells are synthetic. **In any real deployment, the same columns would carry PII and unredacted model reasoning — review the file before sharing.** The complete column list, per-column sensitivity classification, and timezone/versioning contract live in [`EVENTLOG_SCHEMA.md`](EVENTLOG_SCHEMA.md); consult it before forwarding the CSV or attaching it to a ticket.
-
-## Trace Table Dashboard
-
-The Trace Table is the third page of the multi-page Agent Observatory dashboard, focused on the global message trace: one row per emitted message, with columns per agent plus a Process Supervisor column. It shares the same `CoffeeShop` graph and event bus as the Interaction Observatory but presents the conversation as a single, globally ordered table next to the live tray, stock, and coffee machine status.
-
-### Launch
-
-```bash
-# The Trace Table is served by the regular dashboard command
-poetry run dashboard
-# Then open: http://localhost:5006/trace
-```
-
-Use the header tabs to switch between the Interaction, Metrics, and Trace pages.
-
-### Features
-
-- **Global trace table**: every agent message, tool call, tool result, and handoff as one row, in emission order
-- **Top status strip**: tray, stock, and coffee machine widgets shared with the Agent Observatory
-- **Sidebar controls**: scenario picker, log level, editable customer prompt, run button
-- **Conversation log**: chat-style log below the sidebar with smart auto-scroll (sticks to bottom only when already at the bottom)
-
----
 
 ## Observing the Database
 

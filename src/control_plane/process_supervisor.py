@@ -319,8 +319,6 @@ class ProcessSupervisor:
         with self._lock:
             return list(self._lines)
 
-    # ------------------------------------------------------------- active mode
-
     def allowed_next_activities_for(self, agent: str) -> list[Activity]:
         """Activities that `agent` may perform next, per the BPMN model.
 

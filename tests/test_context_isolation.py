@@ -90,7 +90,6 @@ class TestNoBriefingWhenHandoffContextIsNone(unittest.TestCase):
         messages = [HumanMessage(content="Hi there")]
         state = {"messages": messages, "handoff_context": None}
         result = hook(state)
-        # No briefing — just the original message
         self.assertEqual(len(result["llm_input_messages"]), 1)
         self.assertEqual(result["llm_input_messages"][0].content, "Hi there")
 
@@ -114,7 +113,6 @@ class TestNonDictHandoffContextHandledSafely(unittest.TestCase):
         hook = create_context_isolation_hook("order_agent")
         messages = [HumanMessage(content="Hey")]
         state = {"messages": messages, "handoff_context": "some_stale_value"}
-        # Should not raise AttributeError
         result = hook(state)
         self.assertEqual(len(result["llm_input_messages"]), 1)
 
@@ -151,7 +149,6 @@ class TestOrphanedToolMessagesAreStripped(unittest.TestCase):
         ]
         state = {"messages": messages, "handoff_context": None}
         result = hook(state)
-        # The orphaned ToolMessage should be removed
         self.assertEqual(len(result["llm_input_messages"]), 1)
         self.assertEqual(result["llm_input_messages"][0].content, "Ring it up")
 

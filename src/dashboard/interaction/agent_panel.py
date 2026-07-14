@@ -6,11 +6,11 @@ import param
 import panel as pn
 
 
-# Per-agent scroll-preservation script. Mirrors trace_app._CONV_SCROLL_SCRIPT:
-# caches {atBottom, top} on `window` so re-renders restore position, with a
-# 32px sticky-bottom threshold so new messages glue to the bottom unless the
-# user has scrolled up. Selector and state key are parameterized by
-# agent_name so the four AgentPanel instances do not share window state.
+# Per-agent scroll-preservation script: caches {atBottom, top} on `window`
+# so re-renders restore position, with a 32px sticky-bottom threshold so new
+# messages glue to the bottom unless the user has scrolled up. Selector and
+# state key are parameterized by agent_name so the four AgentPanel instances
+# do not share window state.
 _AP_SCROLL_SCRIPT_TEMPLATE = """
 <script>
 (function () {
@@ -20,7 +20,6 @@ _AP_SCROLL_SCRIPT_TEMPLATE = """
 
   // Panel injects scripts via replaceChild, so document.currentScript is
   // unreliable. Walk every shadow root from document to find the scroller.
-  // Pattern mirrors trace_table_panel._SCROLL_SCRIPT.
   function findScrollerRoot() {
     const cs = document.currentScript;
     if (cs && cs.getRootNode) {
@@ -116,8 +115,6 @@ class AgentPanel(param.Parameterized):
         # HTML (script included) — Panel only executes <script> tags
         # that are present on the FIRST render. Subsequent `.object`
         # updates do re-inject the script but do not execute it.
-        # See trace_table_panel.TraceTablePanel.__init__ for the same
-        # pattern.
         self._messages_pane = pn.pane.HTML(
             self._render_messages_html(),
             sizing_mode="stretch_width",
