@@ -12,7 +12,6 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import pandas as pd
 import polars as pl
 
 from src.trace_processing.eventlog_conversion import _resolve_guardrail_extension
@@ -129,7 +128,7 @@ class TestGuardrailCsvRoundTrip(unittest.TestCase):
             self._write_jsonl(jsonl_path, records)
             rows = _load_gateway_rows(jsonl_path)
             csv_path = Path(tmp) / "eventlog.csv"
-            rows.to_csv(csv_path, index=False)
+            rows.write_csv(str(csv_path))
             el = pl.read_csv(str(csv_path), infer_schema_length=10_000)
         return load_guardrail_events_from_eventlog(el)
 
@@ -238,9 +237,9 @@ class TestGatewayAppendScoping(unittest.TestCase):
                 + json.dumps(_decision(ts=1783868903.0, thread_id="t-2")) + "\n"
             )
             rows = _load_gateway_rows(jsonl)
-        self.assertEqual(set(rows["case_id"]), {"t-1", "t-2"})
-        filtered = rows[rows["case_id"].isin({"t-1"})]
-        self.assertEqual(len(filtered), 1)
+        self.assertEqual(set(rows["case_id"].to_list()), {"t-1", "t-2"})
+        filtered = rows.filter(pl.col("case_id").is_in(["t-1"]))
+        self.assertEqual(filtered.height, 1)
 
     def test_load_gateway_rows_writes_naive_utc_timestamps(self):
         """Pins UTC convention on gateway CSV rows.
@@ -260,7 +259,7 @@ class TestGatewayAppendScoping(unittest.TestCase):
                 json.dumps(_decision(ts=1783868902.0, thread_id="t-1")) + "\n"
             )
             rows = _load_gateway_rows(jsonl)
-        ts_str = rows["time:timestamp"].iloc[0]
+        ts_str = rows["time:timestamp"][0]
         # Anchoring on a UTC-rendered string (not a local datetime
         # comparison) makes this fail identically on WSL/CET, macOS/PST,
         # and UTC CI runners.

@@ -1,6 +1,6 @@
 import json
 import uuid
-import pandas as pd
+import polars as pl
 
 
 def is_langgraph_root(span_name: str) -> bool:
@@ -17,7 +17,7 @@ def is_langgraph_root(span_name: str) -> bool:
 
 
 class LogGenerator:
-    def generate_event_log_df(self, trace_source) -> pd.DataFrame:
+    def generate_event_log_df(self, trace_source) -> pl.DataFrame:
         self.process_events = []
         self.case_id = None
         self.spans = None
@@ -48,7 +48,7 @@ class LogGenerator:
             span for span in self.spans if is_langgraph_root(span["name"])
         ]
         if not langgraph_roots:
-            return pd.DataFrame()
+            return pl.DataFrame()
         self.langgraph_root_span = langgraph_roots[0]
         self.case_id = json.loads(self.langgraph_root_span["attributes"]["metadata"])[
             "thread_id"
@@ -68,17 +68,22 @@ class LogGenerator:
             for agent_span in agent_spans:
                 self._process_agent_span(agent_span)
 
-        dataframe = pd.DataFrame(self.process_events).sort_values(
-            ["time:timestamp"], ascending=True
-        )
+        dataframe = pl.DataFrame(self.process_events).sort("time:timestamp")
         # if the trace was canceled before LLM answers
         if "duration" not in dataframe.columns:
-            dataframe["duration"] = None
-        dataframe["time_finished"] = (
-            dataframe["time:timestamp"] + dataframe["duration"].fillna(0)
-        ).apply(lambda t: pd.to_datetime(t).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3])
-        dataframe["time:timestamp"] = dataframe["time:timestamp"].apply(
-            lambda t: pd.to_datetime(t).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
+            dataframe = dataframe.with_columns(
+                pl.lit(None, dtype=pl.Int64).alias("duration")
+            )
+        # `time:timestamp` is nanosecond epoch (Int64) at this point; format
+        # both it and `time_finished` as ms-precision naive ISO strings — the
+        # shape trace_processor and the dashboard read downstream. Polars'
+        # `%.3f` yields milliseconds directly, matching pandas' `%f[:-3]`.
+        ts_dt = pl.from_epoch(pl.col("time:timestamp"), time_unit="ns")
+        dataframe = dataframe.with_columns(
+            (ts_dt + pl.duration(nanoseconds=pl.col("duration").fill_null(0)))
+                .dt.strftime("%Y-%m-%dT%H:%M:%S%.3f")
+                .alias("time_finished"),
+            ts_dt.dt.strftime("%Y-%m-%dT%H:%M:%S%.3f").alias("time:timestamp"),
         )
 
         return dataframe

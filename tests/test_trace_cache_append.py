@@ -11,7 +11,6 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-import pandas as pd
 import polars as pl
 
 from src.dashboard.metrics import trace_cache
@@ -64,7 +63,7 @@ class TestTraceCacheAppend(unittest.TestCase):
 
     def _seed_cache(self, case_ids: list[str]) -> None:
         rows = [_make_row(cid) for cid in case_ids]
-        pd.DataFrame(rows).to_csv(self.log_dir / trace_cache.CACHE_FILENAME, index=False)
+        pl.DataFrame(rows).write_csv(str(self.log_dir / trace_cache.CACHE_FILENAME))
         (self.log_dir / trace_cache.META_FILENAME).write_text(
             f"{trace_cache._SCHEMA_VERSION}\n"
         )
@@ -82,7 +81,7 @@ class TestTraceCacheAppend(unittest.TestCase):
         def fake_generate(trace_dict):
             cid = json.loads(trace_dict["spans"][0]["attributes"]["metadata"])["thread_id"]
             generate_calls.append(cid)
-            return pd.DataFrame([_make_row(cid, name="new_event")])
+            return pl.DataFrame([_make_row(cid, name="new_event")])
 
         with mock.patch.object(
             trace_cache.TraceProcessor, "_get_all_traces", return_value=traces
@@ -123,7 +122,7 @@ class TestTraceCacheAppend(unittest.TestCase):
 
         def fake_generate(trace_dict):
             cid = json.loads(trace_dict["spans"][0]["attributes"]["metadata"])["thread_id"]
-            return pd.DataFrame([_make_row(cid)])
+            return pl.DataFrame([_make_row(cid)])
 
         with mock.patch.object(
             trace_cache.TraceProcessor, "_get_all_traces", return_value=traces
@@ -146,7 +145,7 @@ class TestTraceCacheAppend(unittest.TestCase):
         rebuilt from MLflow."""
         old_schema = trace_cache._SCHEMA_VERSION - 1
         rows = [_make_row("case-stale-1"), _make_row("case-stale-2")]
-        pd.DataFrame(rows).to_csv(self.log_dir / trace_cache.CACHE_FILENAME, index=False)
+        pl.DataFrame(rows).write_csv(str(self.log_dir / trace_cache.CACHE_FILENAME))
         # Legacy two-line sidecar format — also covers the backward-compat
         # read path.
         (self.log_dir / trace_cache.META_FILENAME).write_text(
@@ -157,7 +156,7 @@ class TestTraceCacheAppend(unittest.TestCase):
 
         def fake_generate(trace_dict):
             cid = json.loads(trace_dict["spans"][0]["attributes"]["metadata"])["thread_id"]
-            return pd.DataFrame([_make_row(cid)])
+            return pl.DataFrame([_make_row(cid)])
 
         with mock.patch.object(
             trace_cache.TraceProcessor, "_get_all_traces", return_value=traces
@@ -191,8 +190,8 @@ class TestTraceCacheAppend(unittest.TestCase):
         shape may not match the current writer, so quarantine it rather
         than risk mixing shapes."""
         rows = [_make_row("case-orphan-1"), _make_row("case-orphan-2")]
-        pd.DataFrame(rows).to_csv(
-            self.log_dir / trace_cache.CACHE_FILENAME, index=False
+        pl.DataFrame(rows).write_csv(
+            str(self.log_dir / trace_cache.CACHE_FILENAME)
         )
         self.assertFalse((self.log_dir / trace_cache.META_FILENAME).exists())
 
@@ -200,7 +199,7 @@ class TestTraceCacheAppend(unittest.TestCase):
 
         def fake_generate(trace_dict):
             cid = json.loads(trace_dict["spans"][0]["attributes"]["metadata"])["thread_id"]
-            return pd.DataFrame([_make_row(cid)])
+            return pl.DataFrame([_make_row(cid)])
 
         with mock.patch.object(
             trace_cache.TraceProcessor, "_get_all_traces", return_value=traces

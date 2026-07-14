@@ -157,11 +157,11 @@ def _sync_cache(log_dir: Path, tracking_uri: str, mlflow_count: int) -> None:
         except OSError:
             pass
 
-    if new_df.empty:
+    if new_df.is_empty():
         _write_cache_schema(meta_path)
         return
 
-    new_frame = pl.from_pandas(new_df)
+    new_frame = new_df
 
     if cache_path.exists():
         try:

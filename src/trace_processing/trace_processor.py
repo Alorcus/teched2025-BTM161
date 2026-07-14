@@ -8,7 +8,7 @@ from pathlib import Path
 from .log_generator import LogGenerator, is_langgraph_root
 from .naive_utc import from_epoch_naive_utc
 from ..config import CoffeeShopConfig
-import pandas as pd
+import polars as pl
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +41,7 @@ def _resolve_under_project_root(path: str | os.PathLike[str] | Path) -> Path:
     return p if p.is_absolute() else PROJECT_ROOT / p
 
 
-def _load_coffee_machine_rows(path: Path) -> pd.DataFrame:
+def _load_coffee_machine_rows(path: Path) -> pl.DataFrame:
     """Read the coffee machine's raw CSV and map it to the canonical schema.
 
     The expected column names mirror `FIXED_HEADER` in
@@ -49,56 +49,80 @@ def _load_coffee_machine_rows(path: Path) -> pd.DataFrame:
 
     Returns an empty DataFrame if the file is missing or contains only the
     header. Optional canonical columns (message/model/tokens/tool/feedback_*)
-    are left absent so pandas → CSV writes them as empty cells, which polars
-    reads back as null. Do NOT fillna("") here — the OCEL converter checks
+    are left absent so the CSV write emits empty cells, which polars reads
+    back as null. Do NOT fill them with "" here — the OCEL converter checks
     via is_not_null() and a literal empty string would slip past.
     """
     if not path.exists() or path.stat().st_size == 0:
-        return pd.DataFrame()
+        return pl.DataFrame()
     try:
-        raw = pd.read_csv(path)
-    except pd.errors.EmptyDataError:
-        return pd.DataFrame()
-    if raw.empty:
-        return pd.DataFrame()
+        raw = pl.read_csv(path, infer_schema_length=10_000)
+    except pl.exceptions.NoDataError:
+        return pl.DataFrame()
+    if raw.is_empty():
+        return pl.DataFrame()
 
     # Drop rows whose activity isn't part of the current canonical set —
     # protects against stale CSV content from older logger versions.
-    raw = raw[raw["concept:name"].isin(_COFFEE_MACHINE_ACTIVITIES)]
-    if raw.empty:
-        return pd.DataFrame()
-    raw = raw.reset_index(drop=True)
+    raw = raw.filter(pl.col("concept:name").is_in(_COFFEE_MACHINE_ACTIVITIES))
+    if raw.is_empty():
+        return pl.DataFrame()
 
-    # epoch float seconds → ISO-8601 ms strings
-    ts = pd.to_datetime(raw["ocel_time"], unit="s")
-    ts_str = ts.dt.strftime("%Y-%m-%dT%H:%M:%S.%f").str[:-3]
-
-    # duration may be NaN (header-only or instantaneous events) → 0
-    dur_seconds = raw["duration"].fillna(0.0)
-    finish = ts + pd.to_timedelta(dur_seconds, unit="s")
-    finish_str = finish.dt.strftime("%Y-%m-%dT%H:%M:%S.%f").str[:-3]
-
-    drink_safe = raw.get("drink", pd.Series([""] * len(raw))).fillna("")
-    instance = (
-        "coffee machine " + raw["concept:name"].astype(str)
-        + drink_safe.apply(lambda d: f" ({d})" if d else "")
+    # Optional columns: fill in defaults when absent so the projection is
+    # uniform. `drink` is used both to build `concept:instance` and to
+    # populate its own column; `job_id` passes through untouched.
+    if "drink" not in raw.columns:
+        raw = raw.with_columns(pl.lit("").alias("drink"))
+    if "job_id" not in raw.columns:
+        raw = raw.with_columns(pl.lit("").alias("job_id"))
+    # `duration` may be null (header-only or instantaneous events) → 0.
+    raw = raw.with_columns(
+        pl.col("drink").fill_null(""),
+        pl.col("duration").fill_null(0.0).alias("_duration_s"),
     )
 
-    return pd.DataFrame({
-        "case_id":          raw["case_id"].astype(str),
-        "identity:id":      [str(uuid.uuid4()) for _ in range(len(raw))],
-        "time:timestamp":   ts_str,
-        "time_finished":    finish_str,
-        "concept:name":     raw["concept:name"],
-        "concept:instance": instance,
-        "org:resource":     "coffee_machine",
-        "duration":         (dur_seconds * 1e9).astype("int64"),
-        "job_id":           raw.get("job_id", pd.Series([""] * len(raw))),
-        "drink":            drink_safe,
-    })
+    ts_dt = pl.from_epoch(pl.col("ocel_time"), time_unit="s")
+    # `_duration_s` is float seconds; multiply into nanoseconds for the
+    # duration expression and for the canonical Int64 `duration` column.
+    dur_ns = (pl.col("_duration_s") * 1_000_000_000).cast(pl.Int64)
+
+    projected = raw.with_columns(
+        pl.Series(
+            "identity:id", [str(uuid.uuid4()) for _ in range(raw.height)]
+        ),
+        ts_dt.dt.strftime("%Y-%m-%dT%H:%M:%S%.3f").alias("time:timestamp"),
+        (ts_dt + pl.duration(nanoseconds=dur_ns))
+            .dt.strftime("%Y-%m-%dT%H:%M:%S%.3f")
+            .alias("time_finished"),
+        pl.concat_str(
+            [
+                pl.lit("coffee machine "),
+                pl.col("concept:name").cast(pl.Utf8),
+                pl.when(pl.col("drink") != "")
+                    .then(pl.concat_str([pl.lit(" ("), pl.col("drink"), pl.lit(")")]))
+                    .otherwise(pl.lit("")),
+            ]
+        ).alias("concept:instance"),
+        pl.lit("coffee_machine").alias("org:resource"),
+        dur_ns.alias("duration"),
+        pl.col("case_id").cast(pl.Utf8),
+    )
+
+    return projected.select(
+        "case_id",
+        "identity:id",
+        "time:timestamp",
+        "time_finished",
+        "concept:name",
+        "concept:instance",
+        "org:resource",
+        "duration",
+        "job_id",
+        "drink",
+    )
 
 
-def _load_gateway_rows(path: Path) -> pd.DataFrame:
+def _load_gateway_rows(path: Path) -> pl.DataFrame:
     """Read `guardrail_log/events.jsonl` and project each `gateway_decision`
     record into one canonical event-log row so the flat `_all_traces.csv`
     can carry the signal to users who don't have the JSONL on disk.
@@ -108,7 +132,7 @@ def _load_gateway_rows(path: Path) -> pd.DataFrame:
     to dicts/lists before feeding them to `project_decisions`.
     """
     if not path.exists() or path.stat().st_size == 0:
-        return pd.DataFrame()
+        return pl.DataFrame()
     rows: list[dict] = []
     bad_lines = 0
     try:
@@ -157,12 +181,12 @@ def _load_gateway_rows(path: Path) -> pd.DataFrame:
                     "gateway_verdicts_json":  json.dumps(rec.get("verdicts") or []),
                 })
     except OSError:
-        return pd.DataFrame()
+        return pl.DataFrame()
     if bad_lines:
         logger.warning("gateway log: skipped %d malformed line(s) in %s", bad_lines, path)
     if not rows:
-        return pd.DataFrame()
-    return pd.DataFrame(rows)
+        return pl.DataFrame()
+    return pl.DataFrame(rows)
 
 
 class TraceProcessor:
@@ -268,7 +292,7 @@ class TraceProcessor:
 
     def extract_new_traces(
         self, existing_case_ids: set[str] | None = None
-    ) -> tuple[pd.DataFrame, dict[str, tuple[str | None, int]], set[str]]:
+    ) -> tuple[pl.DataFrame, dict[str, tuple[str | None, int]], set[str]]:
         """Run the trace-extraction pipeline for MLflow traces whose case_id
         is NOT already in `existing_case_ids`. Feedback and coffee-machine
         rows are joined in but scoped to the *new* case_ids only — the caller
@@ -283,8 +307,8 @@ class TraceProcessor:
         logger.info("🔍 Searching for traces...")
         traces = self._get_all_traces()
 
-        empty_result: tuple[pd.DataFrame, dict[str, tuple[str | None, int]], set[str]] = (
-            pd.DataFrame(),
+        empty_result: tuple[pl.DataFrame, dict[str, tuple[str | None, int]], set[str]] = (
+            pl.DataFrame(),
             {},
             set(),
         )
@@ -308,9 +332,9 @@ class TraceProcessor:
         skipped_ingestions = 0  # processed without error but produced 0 events
         skipped_already_covered = 0
 
-        # Per-trace extraction accumulates into a list; a single pd.concat at
+        # Per-trace extraction accumulates into a list; a single pl.concat at
         # the end avoids the O(n²) copy cost of concatenating in the loop.
-        trace_frames: list[pd.DataFrame] = []
+        trace_frames: list[pl.DataFrame] = []
         # case_id -> (setup_name, scenario_index) from MLflow trace tags.
         case_tags: dict[str, tuple[str | None, int]] = {}
         new_case_ids: set[str] = set()
@@ -358,7 +382,7 @@ class TraceProcessor:
                 per_trace_seconds.append(time.perf_counter() - trace_start)
                 continue
 
-            if trace_event_log.empty:
+            if trace_event_log.is_empty():
                 # LogGenerator returns an empty frame for traces with no
                 # spans or no LangGraph root (e.g. standalone ChatOllama
                 # calls from get_feedback()). These are legitimately skipped,
@@ -371,7 +395,7 @@ class TraceProcessor:
             # some agent-side event failed extraction. Warn so future
             # extraction gaps stay visible.
             non_agent_names = {"user_prompt"}
-            trace_event_types = set(trace_event_log["concept:name"].unique())
+            trace_event_types = set(trace_event_log["concept:name"].unique().to_list())
             if trace_event_types.issubset(non_agent_names):
                 logger.warning(
                     "Trace %s produced no agent-side events (only %s). "
@@ -386,8 +410,10 @@ class TraceProcessor:
             # Stash the trace's tag values under this trace's case_id.
             # Missing tags → setup=None, scenario=-1 (the "unspecified"
             # sentinel used across the pipeline).
-            case_ids_in_trace = trace_event_log["case_id"].dropna().unique()
-            if len(case_ids_in_trace) > 0:
+            case_ids_in_trace = (
+                trace_event_log["case_id"].drop_nulls().unique().to_list()
+            )
+            if case_ids_in_trace:
                 setup_tag = trace_tags.get("setup")
                 scenario_tag_raw = trace_tags.get("scenario_index")
                 try:
@@ -400,17 +426,16 @@ class TraceProcessor:
             per_trace_seconds.append(time.perf_counter() - trace_start)
 
         combined_logs = (
-            pd.concat(trace_frames, ignore_index=True)
+            pl.concat(trace_frames, how="diagonal_relaxed")
             if trace_frames
-            else pd.DataFrame()
+            else pl.DataFrame()
         )
 
         # combined_logs starts as an empty DataFrame with no columns; if every
         # trace either failed ingestion or returned an empty frame, there is
-        # no "time:timestamp" column to sort on and pandas raises KeyError.
-        # Bail out cleanly so the dashboard's export button doesn't surface a
-        # cryptic "❌ time:timestamp".
-        if combined_logs.empty or "time:timestamp" not in combined_logs.columns:
+        # no "time:timestamp" column to sort on. Bail out cleanly so the
+        # dashboard's export button doesn't surface a cryptic error.
+        if combined_logs.is_empty() or "time:timestamp" not in combined_logs.columns:
             if skipped_already_covered:
                 logger.warning(
                     "No new usable events extracted; %d trace(s) already covered.",
@@ -429,9 +454,14 @@ class TraceProcessor:
             )
             return empty_result
 
-        # Precompute the last timestamp per case in a single groupby so the
+        # Precompute the last timestamp per case in a single group_by so the
         # feedback loop below is O(F + R) instead of O(F * R).
-        max_ts_by_case = combined_logs.groupby("case_id")["time:timestamp"].max()
+        max_ts_agg = combined_logs.group_by("case_id").agg(
+            pl.col("time:timestamp").max().alias("_max_ts")
+        )
+        max_ts_by_case = dict(
+            zip(max_ts_agg["case_id"].to_list(), max_ts_agg["_max_ts"].to_list())
+        )
 
         # Scoping to `new_case_ids` matters for append mode: feedback rows
         # for already-covered cases live in the caller's existing CSV and
@@ -440,7 +470,7 @@ class TraceProcessor:
         for case_id, fb in feedback_store.items():
             if case_id not in new_case_ids:
                 continue
-            if case_id not in max_ts_by_case.index:
+            if case_id not in max_ts_by_case:
                 continue
             last_ts = max_ts_by_case[case_id]
             feedback_ts = (
@@ -464,15 +494,15 @@ class TraceProcessor:
         # Accumulate all supplementary streams and do a single concat+sort
         # at the end. Merging them one at a time forced the whole frame to
         # be re-sorted up to four times.
-        supplementary: list[pd.DataFrame] = []
+        supplementary: list[pl.DataFrame] = []
         if feedback_rows:
-            supplementary.append(pd.DataFrame(feedback_rows))
+            supplementary.append(pl.DataFrame(feedback_rows))
 
         machine_rows = _load_coffee_machine_rows(self.coffee_machine_log_path)
-        if not machine_rows.empty:
-            before = len(machine_rows)
-            machine_rows = machine_rows[machine_rows["case_id"].isin(new_case_ids)]
-            dropped = before - len(machine_rows)
+        if not machine_rows.is_empty():
+            before = machine_rows.height
+            machine_rows = machine_rows.filter(pl.col("case_id").is_in(new_case_ids))
+            dropped = before - machine_rows.height
             if dropped:
                 logger.warning(
                     "Dropped %d coffee-machine row(s) with case_id not in the "
@@ -480,14 +510,14 @@ class TraceProcessor:
                     "an already-covered case)",
                     dropped,
                 )
-            if not machine_rows.empty:
+            if not machine_rows.is_empty():
                 supplementary.append(machine_rows)
 
         gateway_rows = _load_gateway_rows(self.guardrail_log_path)
-        if not gateway_rows.empty:
-            before = len(gateway_rows)
-            gateway_rows = gateway_rows[gateway_rows["case_id"].isin(new_case_ids)]
-            dropped = before - len(gateway_rows)
+        if not gateway_rows.is_empty():
+            before = gateway_rows.height
+            gateway_rows = gateway_rows.filter(pl.col("case_id").is_in(new_case_ids))
+            dropped = before - gateway_rows.height
             if dropped:
                 logger.warning(
                     "Dropped %d gateway_decision row(s) whose case_id is not "
@@ -495,27 +525,33 @@ class TraceProcessor:
                     "belonging to an already-covered case)",
                     dropped,
                 )
-            if not gateway_rows.empty:
+            if not gateway_rows.is_empty():
                 supplementary.append(gateway_rows)
 
         if supplementary:
-            combined_logs = pd.concat(
-                [combined_logs, *supplementary], ignore_index=True
+            combined_logs = pl.concat(
+                [combined_logs, *supplementary], how="diagonal_relaxed"
             )
-        combined_logs.sort_values(by="time:timestamp", inplace=True)
+        combined_logs = combined_logs.sort("time:timestamp")
 
         # Broadcast per-case setup/scenario tags to every row so downstream
-        # readers can filter without joining an extra table.
-        if case_tags and not combined_logs.empty and "case_id" in combined_logs.columns:
-            combined_logs["case_setup"] = combined_logs["case_id"].map(
-                lambda cid: case_tags.get(cid, (None, -1))[0]
-            )
-            combined_logs["case_scenario_index"] = combined_logs["case_id"].map(
-                lambda cid: case_tags.get(cid, (None, -1))[1]
-            )
+        # readers can filter without joining an extra table. A left join
+        # against a small tag frame is dramatically faster than a per-row
+        # python callback.
+        if case_tags and not combined_logs.is_empty() and "case_id" in combined_logs.columns:
+            tag_frame = pl.DataFrame({
+                "case_id": list(case_tags.keys()),
+                "case_setup": [t[0] for t in case_tags.values()],
+                "case_scenario_index": [t[1] for t in case_tags.values()],
+            })
+            combined_logs = combined_logs.join(
+                tag_frame, on="case_id", how="left"
+            ).with_columns(pl.col("case_scenario_index").fill_null(-1))
         else:
-            combined_logs["case_setup"] = None
-            combined_logs["case_scenario_index"] = -1
+            combined_logs = combined_logs.with_columns(
+                pl.lit(None, dtype=pl.Utf8).alias("case_setup"),
+                pl.lit(-1, dtype=pl.Int64).alias("case_scenario_index"),
+            )
 
         self._print_summary(
             total=len(traces),
@@ -537,7 +573,7 @@ class TraceProcessor:
         event-log file. Entrypoint for the headless
         `simulate --export-logs` path."""
         combined_logs, _tags, _new_ids = self.extract_new_traces(set())
-        if combined_logs.empty:
+        if combined_logs.is_empty():
             return
         self._generate_log_file(
             combined_logs, "./generated_event_log", json_format=export_as_json
@@ -575,7 +611,7 @@ class TraceProcessor:
         else:
             logger.info("   ⏱️  Build time: %.2fs total", total_seconds)
 
-    def _generate_log_file(self, dataframe: pd.DataFrame, output_path: str, json_format: bool = False):
+    def _generate_log_file(self, dataframe: pl.DataFrame, output_path: str, json_format: bool = False):
         """
         Generate a log file from the given DataFrame.
 
@@ -600,9 +636,9 @@ class TraceProcessor:
 
         try:
             if json_format:
-                dataframe.to_json(file_path, orient="index")
+                dataframe.write_json(file_path)
             else:
-                dataframe.to_csv(file_path, index=False)
+                dataframe.write_csv(file_path)
             logger.info("✅ Log file generated at %s", file_path)
             return file_path
         except Exception as e:
