@@ -61,10 +61,6 @@ def get_engine() -> Engine:
         return _default_engine
 
 
-# ---------------------------------------------------------------------------
-# Schema initialisation
-# ---------------------------------------------------------------------------
-
 def init_db() -> None:
     """Create tables if they don't exist and seed inventory from MENU."""
     SQLModel.metadata.create_all(get_engine())
@@ -84,10 +80,6 @@ def init_db() -> None:
             session.commit()
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
 def _parse_order_id(order_id: str) -> Optional[int]:
     """Parse 'ORD0042' -> 42, or return None on bad format."""
     try:
@@ -96,13 +88,8 @@ def _parse_order_id(order_id: str) -> Optional[int]:
         return None
 
 
-# ---------------------------------------------------------------------------
-# Order CRUD
-# ---------------------------------------------------------------------------
-
 def save_order(order: Order) -> None:
     """Persist an Order (insert or update)."""
-    # may want to check for allowed status transitions here in the future
     is_new = order.id is None
     order.last_modified = datetime.now(timezone.utc)
     with _write_lock:
@@ -153,10 +140,6 @@ def load_recent_order() -> Optional[Order]:
             make_transient(item)
         return order
 
-
-# ---------------------------------------------------------------------------
-# Inventory operations
-# ---------------------------------------------------------------------------
 
 def check_inventory_availability(order: Order) -> dict:
     """Check stock levels for every item in the order (read-only)."""
@@ -299,10 +282,6 @@ def get_alternatives_from_db(item_name: str) -> list[dict]:
         alts = session.exec(statement).all()
         return [{"name": a.name, "price": a.price, "stock": a.stock} for a in alts]
 
-
-# ---------------------------------------------------------------------------
-# Shared LangChain tool — all agents get this
-# ---------------------------------------------------------------------------
 
 class GetOrderSchema(BaseModel):
     order_id: str = Field(description="The order ID to look up (e.g. 'ORD0001')")

@@ -36,9 +36,7 @@ class VisualizationSection:
         return column
 
     def _visualization_tabs(self) -> pn.viewable.Viewable:
-        """Create tabs for different visualization types."""
         try:
-            # Validate OCEL has required data
             if self._ocel.events.is_empty() or self._ocel.objects.is_empty():
                 return pn.pane.Alert(
                     "Event log is empty or has no objects. Run a conversation first.",
@@ -48,7 +46,6 @@ class VisualizationSection:
             # Generate unique export name to avoid collisions
             export_name = f"observatory_{uuid.uuid4().hex[:8]}"
 
-            # Step 1: Export OCEL to JSON
             try:
                 self._ocel.export_to_json(export_name)
             except Exception as e:
@@ -57,7 +54,6 @@ class VisualizationSection:
                     alert_type="warning",
                 )
 
-            # Step 2: Create visualizations using existing Visualizer
             try:
                 config = VisualizationConfig(
                     ocel_path=Path("generated_ocel") / f"{export_name}.json",
@@ -68,7 +64,6 @@ class VisualizationSection:
                 visualizer = Visualizer(config)
                 outputs = visualizer.run()
 
-                # Read SVG files
                 ocdfg_svg = outputs["oc_dfg"].read_text()
                 ocpn_svg = outputs["oc_pn"].read_text()
                 eto_svg = outputs["object_types"].read_text()
@@ -100,7 +95,6 @@ class VisualizationSection:
 
                     return pn.Column(zoom, view)
 
-                # Create tabs with scrollable SVG visualizations
                 tabs = pn.Tabs(
                     ("Object-Centric DFG", _wrap_svg(ocdfg_svg)),
                     ("Object-Centric PN", _wrap_svg(ocpn_svg)),

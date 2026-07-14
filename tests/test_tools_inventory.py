@@ -47,7 +47,6 @@ class TestCheckInventoryAllAvailable(unittest.TestCase):
         self.assertTrue(data["all_available"])
         self.assertEqual(data["status"], "inventory_confirmed")
 
-        # Verify DB state
         order = load_order(order_id)
         self.assertEqual(order.status, OrderStatus.INVENTORY_CONFIRMED)
 
@@ -104,7 +103,6 @@ class TestUpdateStockDecrementsCorrectly(unittest.TestCase):
         self.assertEqual(data["status"], "success")
         self.assertEqual(data["items_updated"], 1)
 
-        # Verify DB
         from src.agents.order_store import get_all_inventory
         inventory = get_all_inventory()
         self.assertEqual(inventory["espresso"].stock, original_stock - 3)
@@ -172,7 +170,6 @@ class TestUpdateStockRaceCondition(unittest.TestCase):
         t1.join()
         t2.join()
 
-        # Exactly one should succeed, one should fail
         successes = sum(1 for r in results if r is not None)
         failures = sum(1 for e in errors if e is not None)
         self.assertEqual(successes, 1, "Exactly one thread should succeed")

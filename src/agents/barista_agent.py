@@ -43,7 +43,6 @@ COFFEE_MACHINE_PORT = 8001
 COFFEE_MACHINE_PROCESS = None
 _MACHINE_LOCK = threading.Lock()
 
-# Persistent state for machine jobs
 ORDER_JOB_MAP: Dict[str, str] = {}
 ORDER_STATUS_CACHE: Dict[str, dict] = {}
 
@@ -51,7 +50,7 @@ ORDER_STATUS_CACHE: Dict[str, dict] = {}
 def is_machine_running() -> bool:
     """Check if coffee machine is responsive."""
     try:
-        response = safe_get(f"{COFFEE_MACHINE_URL}/docs")  # FastAPI docs endpoint
+        response = safe_get(f"{COFFEE_MACHINE_URL}/docs")
         return response is not None and response.status_code < 500
     except:
         return False
@@ -73,11 +72,9 @@ def start_coffee_machine() -> bool:
     global COFFEE_MACHINE_PROCESS
 
     with _MACHINE_LOCK:
-        # Check if already running
         if is_machine_running():
             return True
 
-        # Check if port is in use but machine not responding (stuck process)
         if check_port_in_use(COFFEE_MACHINE_PORT):
             logger.warning(
                 f"Port {COFFEE_MACHINE_PORT} is in use but machine not responding"
@@ -180,9 +177,6 @@ def stop_coffee_machine():
             _kill_process_on_port(COFFEE_MACHINE_PORT)
 
 
-# ----------------------------
-# SAFE HTTP HELPERS
-# ----------------------------
 def safe_post(url, payload):
     try:
         response = requests.post(url, json=payload, timeout=REQUEST_TIMEOUT)
@@ -207,9 +201,6 @@ def safe_get(url):
         return None
 
 
-# ----------------------------
-# HELPER FUNCTIONS
-# ----------------------------
 def tool_response(status, message, order_id: str, extra=None):
     payload = {
         "status": status,
@@ -221,16 +212,12 @@ def tool_response(status, message, order_id: str, extra=None):
     return json.dumps(payload)
 
 
-# ----------------------------
-# MACHINE TOOLS
-# ----------------------------
 @tool(args_schema=OrderIdSchema)
 def start_preparation(order_id: str, config: RunnableConfig = None) -> str:
     """Start coffee preparation and automatically wait for completion."""
     logger.debug("start_preparation called for %s", order_id)
 
     if not is_machine_running():
-        # Try to start the coffee machine
         if not start_coffee_machine():
             return tool_response(
                 "error",
@@ -260,7 +247,6 @@ def start_preparation(order_id: str, config: RunnableConfig = None) -> str:
             order_id,
         )
 
-    # Start brewing — use the first item's name as the drink type
     drink_name = order.items[0].name if order.items else "coffee"
     # The coffee machine writes events to its CSV keyed by `correlation_id` —
     # which the trace processor merges into the export only if it matches a
@@ -299,7 +285,6 @@ def start_preparation(order_id: str, config: RunnableConfig = None) -> str:
     except InvalidTransitionError as e:
         return json.dumps({"order_id": order_id, "error": f"Cannot start preparation: {e}"})
 
-    # Increment attempt count
     attempt_count = ORDER_STATUS_CACHE.get(order_id, {}).get("attempt_count", 0) + 1
 
     ORDER_JOB_MAP[order_id] = job_id

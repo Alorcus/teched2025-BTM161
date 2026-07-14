@@ -35,7 +35,6 @@ class FeedbackSection:
             if "event_user_feedback" in self._ocel.event_tables:
                 df = self._ocel.event_tables["event_user_feedback"]
                 if df is not None and not df.is_empty():
-                    # Convert feedback_score to float
                     if "feedback_score" in df.columns:
                         df = df.with_columns(pl.col("feedback_score").cast(pl.Float64))
                     return df

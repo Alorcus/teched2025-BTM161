@@ -467,7 +467,7 @@ class ConversationRunner:
                                     rejection = outcome
                                     rejection["msg"] = msg
                                     rejection["agent"] = msg_agent
-                                    break  # leave inner update loop
+                                    break
                                 if outcome.get("status") == "exhausted_suppressed":
                                     # Hard stop: the agent has hit the retry
                                     # cap. Don't re-stream; let the outer
@@ -485,7 +485,7 @@ class ConversationRunner:
                                     last_agent_message = msg.content
 
                     if rejection is not None:
-                        break  # leave outer for ns, update loop
+                        break
                     if exhausted:
                         break
             except Exception as e:
@@ -517,7 +517,7 @@ class ConversationRunner:
                         )
                     )
                 self._tag_last_trace()
-                break  # normal completion (or exhaustion)
+                break
 
             # We got a rejection: patch the graph state and resume.
             try:
@@ -624,7 +624,6 @@ class ConversationRunner:
             if target_content and cand_content == target_content:
                 return getattr(cand, "id", None)
             if target_tcs and cand_tcs:
-                # Match on first tool call name + args.
                 if cand_tcs[0].get("name") == target_tcs[0].get("name") and cand_tcs[
                     0
                 ].get("args") == target_tcs[0].get("args"):
@@ -964,7 +963,7 @@ class ConversationRunner:
             if self.is_running:
                 return
             self.is_running = True
-        thread_id = self._manual_thread_id  # persistente thread_id für den Chat-Verlauf
+        thread_id = self._manual_thread_id
         threading.Thread(
             target=self._run_manual_turn, args=(thread_id, message), daemon=True
         ).start()

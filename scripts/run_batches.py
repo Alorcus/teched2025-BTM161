@@ -68,7 +68,6 @@ def _parse_triple(raw: str) -> tuple[str, int, int]:
 
 
 def _parse_batches_arg(values: list[str]) -> list[tuple[str, int, int]]:
-    """Accept either repeated triples or a single comma-separated string."""
     triples: list[tuple[str, int, int]] = []
     for value in values:
         for chunk in value.split(","):
@@ -181,7 +180,6 @@ def _build_parser() -> argparse.ArgumentParser:
 def _resolve_settings(
     args: argparse.Namespace,
 ) -> tuple[list[tuple[str, int, int]], bool, bool, bool]:
-    """CLI args override config file values, which override module defaults."""
     batches: list[tuple[str, int, int]] = BATCHES
     reset = RESET_INVENTORY
     supervisor = PROCESS_SUPERVISOR

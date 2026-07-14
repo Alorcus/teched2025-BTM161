@@ -15,7 +15,6 @@ from .order_store import (
 from .order_state_machine import state_machine, InvalidTransitionError
 
 
-# INVENTORY AGENT TOOLS
 @tool(args_schema=OrderIdSchema)
 def check_inventory(order_id: str) -> str:
     """Check if all items in the order are available in inventory."""

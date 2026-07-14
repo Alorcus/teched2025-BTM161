@@ -63,7 +63,6 @@ class TestSimulationE2E(unittest.TestCase):
         stderr = result.stderr
         exit_code = result.returncode
 
-        # Query the DB created by the subprocess
         order = None
         order_repr = "Order not found in database"
         try:

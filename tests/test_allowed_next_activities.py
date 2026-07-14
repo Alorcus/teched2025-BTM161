@@ -78,7 +78,6 @@ class TestAllowedNextActivities(unittest.TestCase):
         sup._lines.append(
             "Execution:A01:identify_customer_request | AIMessage[order_agent] text=hi"
         )
-        # A01 → both order branch (A02) and complaint branch (A08) allowed
         self.assertIn("A08", sup._allowed_next_activities("customer_service_agent"))
 
 
@@ -104,7 +103,6 @@ class TestVerdictCacheRoundTrip(unittest.TestCase):
         first_call_count = llm.invoke.call_count
         verdict = sup.decide_action(msg, agent_name="order_agent")
         self.assertTrue(verdict.is_violation)
-        # decide_action must NOT have re-invoked the LLM.
         self.assertEqual(llm.invoke.call_count, first_call_count,
                          "decide_action should reuse cached verdict, not re-classify")
 

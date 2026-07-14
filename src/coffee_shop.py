@@ -82,7 +82,6 @@ class CoffeeShop:
         self.process_supervisor: ProcessSupervisor | None = None
 
     def open_shop(self, reset_inventory_first=True):
-        """Start the coffee shop application after potentially updating agent definitions"""
         engine = create_order_store_engine(self.config.db_url)
         set_engine(engine)
         self._engine = engine

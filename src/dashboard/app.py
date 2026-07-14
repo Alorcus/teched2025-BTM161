@@ -126,7 +126,6 @@ def main():
 
     _reclaim_port_if_orphaned(DASHBOARD_PORT)
 
-    # Multi-page routing
     routes = {
         "/": lambda: create_observatory_dashboard(setup_name),
         "/metrics": create_metrics_dashboard,

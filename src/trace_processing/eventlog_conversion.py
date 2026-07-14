@@ -520,7 +520,6 @@ class ObjectCentricEventlog:
 
         NOW = datetime.utcnow().isoformat() + "Z"
 
-        # ---- eventTypes ----
         event_types = []
         for name, df in self.event_tables.items():
             attrs = [
@@ -530,7 +529,6 @@ class ObjectCentricEventlog:
             ]
             event_types.append({"name": name, "attributes": attrs})
 
-        # ---- objectTypes ----
         object_types = []
         for name, df in self.object_tables.items():
             attrs = [
@@ -540,13 +538,11 @@ class ObjectCentricEventlog:
             ]
             object_types.append({"name": name, "attributes": attrs})
 
-        # ---- event relationships (grouped) ----
         event_rels = self.event_object.group_by("ocel_event_id").agg(
             pl.struct(["ocel_object_id", "ocel_qualifier"]).alias("rels")
         )
         event_rels_dict = {r["ocel_event_id"]: r["rels"] for r in event_rels.to_dicts()}
 
-        # ---- object relationships (grouped) ----
         object_rels = self.object_object.group_by("ocel_source_id").agg(
             pl.struct(["ocel_target_id", "ocel_qualifier"]).alias("rels")
         )
@@ -554,7 +550,6 @@ class ObjectCentricEventlog:
             r["ocel_source_id"]: r["rels"] for r in object_rels.to_dicts()
         }
 
-        # ---- events ----
         events = []
         for event_type, df in self.event_tables.items():
             for row in df.to_dicts():
@@ -580,7 +575,6 @@ class ObjectCentricEventlog:
                     }
                 )
 
-        # ---- objects ----
         objects = []
         for obj_type, df in self.object_tables.items():
             for row in df.to_dicts():
@@ -609,7 +603,6 @@ class ObjectCentricEventlog:
                     }
                 )
 
-        # ---- final JSON ----
         ocel_json = {
             "eventTypes": event_types,
             "objectTypes": object_types,
@@ -617,7 +610,6 @@ class ObjectCentricEventlog:
             "objects": objects,
         }
 
-        # ---- write file ----
         os.makedirs("./generated_ocel/", exist_ok=True)
         if not export_name:
             export_name = f"ocel_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
@@ -733,7 +725,6 @@ def _preprocess_eventlog(eventlog: pl.DataFrame) -> pl.DataFrame:
         event_type=pl.col("object_type_agent") + "_handover_" + pl.col("next_agent"),
     )
 
-    # handover for each agent
     null_columns = [col for col in handover_rows.columns if col not in cols_to_keep]
     handover_one_direction = handover_rows.with_columns(
         object_type_agent=pl.col("object_type_agent"),

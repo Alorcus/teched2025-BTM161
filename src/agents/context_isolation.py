@@ -61,7 +61,6 @@ def _extract_handoff_context_from_boundary(messages: list, agent_name: str) -> d
     if match:
         context_summary = match.group(1).strip()
         expectation = (match.group(2) or "").strip()
-        # Determine source agent from content
         from_match = re.search(r"transferred to (\w+)", content)
         from_agent = "previous_agent"
         if from_match:
@@ -69,7 +68,6 @@ def _extract_handoff_context_from_boundary(messages: list, agent_name: str) -> d
             # so we need to look at what came before
             pass
 
-        # Look backward to find the AI message that initiated the transfer
         for i in range(boundary_idx - 1, -1, -1):
             msg = messages[i]
             if isinstance(msg, AIMessage):

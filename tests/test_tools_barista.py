@@ -173,7 +173,6 @@ class TestStartPreparationRetryAfterFailure(unittest.TestCase):
 
         # Simulate a previous attempt
         ORDER_STATUS_CACHE[order.order_id_str] = {"attempt_count": 1}
-
         mock_post.return_value = _mock_brew_response()
         mock_get.return_value = _mock_status_response("ready")
 

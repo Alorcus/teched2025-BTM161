@@ -273,7 +273,7 @@ def _sync_cache(log_dir: Path, tracking_uri: str, mlflow_count: int) -> None:
     # Clean up per-run CSVs from older cache behavior. Must skip anything
     # starting with the cache stem so quarantine backups (`_all_traces.v5.csv`,
     # `_all_traces.unknown-schema.csv`, etc.) aren't collected as leftover.
-    cache_stem = Path(CACHE_FILENAME).stem  # "_all_traces"
+    cache_stem = Path(CACHE_FILENAME).stem
     for p in log_dir.glob("*.csv"):
         if p.name == CACHE_FILENAME:
             continue

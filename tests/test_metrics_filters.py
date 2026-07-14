@@ -113,7 +113,6 @@ class ApplyFiltersTests(unittest.TestCase):
         t0 = datetime(2026, 7, 6, 10, 0, 0)
         self.t_early = t0
         self.t_late = t0 + timedelta(hours=1)
-        # 5 cases: (id, setup, scenario, start_offset_min, dur_sec)
         cases = [
             ("c0", "baseline", 0, 0, 60),
             ("c1", "baseline", 1, 5, 60),
