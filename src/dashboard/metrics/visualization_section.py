@@ -10,14 +10,12 @@ import polars as pl
 
 from src.trace_processing.eventlog_conversion import ObjectCentricEventlog
 from src.visualization.visualizer import Visualizer, VisualizationConfig, export_case_dfg
-from .eventlog_helpers import flat_event_table
+from .eventlog_helpers import case_feedback_scores, event_case_map, flat_event_table
 from .styling_helpers import COLOR_SCHEME, AGENT_COLORS, section_header, subsection_header
 
 
 logger = logging.getLogger(__name__)
 
-_AGENT_OR_USER = [*AGENT_COLORS, "user"]
-_SUFFIX_RE = "_(?:" + "|".join(_AGENT_OR_USER) + ")$"
 _CASE_DFG_UNAVAILABLE = "Case-centric DFG unavailable."
 
 _COLOR_MAP = {
@@ -70,17 +68,7 @@ class VisualizationSection:
         """
         try:
             flat = flat_event_table(self._ocel)
-            case_objs = self._ocel.objects.filter(pl.col("ocel_type").is_in(_AGENT_OR_USER))
-            eo = (
-                self._ocel.event_object
-                .join(case_objs, left_on="ocel_object_id", right_on="ocel_id", how="inner")
-                .select(
-                    pl.col("ocel_event_id"),
-                    pl.col("ocel_object_id").str.replace(_SUFFIX_RE, "").alias("case_id"),
-                    pl.col("ocel_type").alias("agent_type"),
-                )
-                .unique()
-            )
+            eo = event_case_map(self._ocel)
             # Display name: "customer_service_agent" -> "Customer Service", "barista_agent" -> "Barista"
             agent_display = (
                 pl.col("agent_type")
@@ -109,21 +97,10 @@ class VisualizationSection:
             ).to_pandas()
 
             # Case-level feedback enrichment
-            feedback_tbl = self._ocel.event_tables.get("event_user_feedback")
-            if feedback_tbl is not None and "feedback_score" in feedback_tbl.columns:
+            feedback = case_feedback_scores(self._ocel)
+            if not feedback.is_empty():
                 case_feedback = (
-                    feedback_tbl
-                    .select(["ocel_id", "feedback_score"])
-                    .drop_nulls()
-                    .join(
-                        eo.select(["ocel_event_id", "case_id"]).unique(),
-                        left_on="ocel_id", right_on="ocel_event_id",
-                        how="inner",
-                    )
-                    .group_by("case_id")
-                    .agg(pl.col("feedback_score").last())
-                    .to_pandas()
-                    .set_index("case_id")["feedback_score"]
+                    feedback.to_pandas().set_index("case_id")["feedback_score"]
                 )
                 df_pd["case_feedback_score"] = df_pd["case:concept:name"].map(case_feedback)
                 df_pd["case_feedback_class"] = pd.cut(
@@ -141,7 +118,7 @@ class VisualizationSection:
         """Export DFG SVG from a pandas event log DataFrame, return SVG text or None."""
         try:
             cols = ["case:concept:name", "concept:name", "time:timestamp"]
-            export_case_dfg(df_pd[cols], out_path, export_format="svg")
+            export_case_dfg(df_pd[cols].copy(), out_path, export_format="svg")
             return out_path.read_text()
         except Exception:
             logger.exception("DFG export to %s failed", out_path.name)

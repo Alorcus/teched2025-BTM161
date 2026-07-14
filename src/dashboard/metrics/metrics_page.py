@@ -5,6 +5,7 @@ import panel as pn
 from src.trace_processing.eventlog_conversion import ObjectCentricEventlog
 
 from ..nav import header_nav
+from .complexity_section import ComplexitySection
 from .overview_section import OverviewSection
 from .system_metrics_section import SystemMetricsSection
 from .time_metrics_section import TimeMetricsSection
@@ -43,6 +44,7 @@ def create_metrics_dashboard():
         return pn.Column(
             OverviewSection(ocel, selected_file).panel(),
             FeedbackSection(ocel).panel(),
+            ComplexitySection(ocel).panel(),
             SystemMetricsSection(ocel).panel(),
             TimeMetricsSection(ocel).panel(),
             VisualizationSection(ocel).panel(),
