@@ -16,13 +16,20 @@ from .styling_helpers import COLOR_SCHEME, section_header, subsection_header
 # Categorical color palette
 _WITH_COLOR = "#3E7CB1"
 _WITHOUT_COLOR = "#A7AEB5"
+# Assigned to scenarios by index; scenarios beyond the list fall back to gray.
+_SCENARIO_COLORS = [
+    "#B3541E",  # 0 Large latte & croissant
+    "#3E7CB1",  # 1 2 espressos (hurry)
+    "#8E3A6E",  # 2 Complaint & resolution
+    "#4E9A43",  # 3 Ask for recommendation
+    "#B08300",  # 4 Tea only (stubborn)
+    "#5A67D8",  # 5 Buy everything (rich)
+]
 _SCENARIO_COLOR_MAP = {
-    _SCENARIO_NAMES[0]: "#B3541E",  # Large latte & croissant
-    _SCENARIO_NAMES[1]: "#3E7CB1",  # 2 espressos (hurry)
-    _SCENARIO_NAMES[2]: "#8E3A6E",  # Complaint & resolution
-    _SCENARIO_NAMES[3]: "#4E9A43",  # Ask for recommendation
-    "Unknown scenario": "#8A8A8A",
-}
+    name: _SCENARIO_COLORS[i]
+    for i, name in _SCENARIO_NAMES.items()
+    if i < len(_SCENARIO_COLORS)
+} | {"Unknown scenario": "#8A8A8A"}
 
 _FLAG_LABELS = {
     "has_brew_failure": "Brew failure",
