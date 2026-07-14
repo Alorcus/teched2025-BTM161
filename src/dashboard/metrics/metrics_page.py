@@ -1,9 +1,13 @@
+from __future__ import annotations
+
+from collections import OrderedDict
 from datetime import datetime, timedelta
 from pathlib import Path
 
 import panel as pn
 import polars as pl
 
+from src.agents import CUSTOMER_SCENARIO_LABELS
 from src.config import CoffeeShopConfig
 from src.trace_processing.eventlog_conversion import ObjectCentricEventlog
 
@@ -18,18 +22,19 @@ from .visualization_section import VisualizationSection
 
 
 _TIMESTAMP_COL = "time:timestamp"
+# Naive-UTC sibling of `time:timestamp`. Read by the guardrail-extension
+# resolver so it doesn't double-shift the already UTC→local converted column.
+_TIMESTAMP_UTC_NAIVE_COL = "time:timestamp_utc_naive"
 _GUARDRAIL_LOG_PATH = Path(CoffeeShopConfig.__dataclass_fields__["guardrail_log_path"].default)
 
-# Scenario labels mirror src/dashboard/interaction/interaction_page.py:93-98 so
-# both dashboards refer to the same customer-scenario shorthand. -1 is the
-# "no preset scenario" sentinel used at trace-tag time.
+# Scenario labels mirror the interaction observatory's dropdown
+# (src/dashboard/interaction/interaction_page.py) — both dashboards use
+# the "{index}: {label}" shorthand from CUSTOMER_SCENARIO_LABELS. -1 is
+# the "no preset scenario" sentinel used at trace-tag time.
 _SCENARIO_LABELS = {
-    0: "Latte & croissant (friendly)",
-    1: "2 espressos (in a hurry)",
-    2: "Complaint (cold cappuccino)",
-    3: "Ask for a recommendation",
-    -1: "Custom / Unspecified",
+    i: f"{i}: {label}" for i, label in enumerate(CUSTOMER_SCENARIO_LABELS)
 }
+_SCENARIO_LABELS[-1] = "Custom / Unspecified"
 # Setup filter's option label for cases whose MLflow trace carried no `setup`
 # tag (older traces, or a conversation that crashed before tagging). Kept as a
 # named constant because it's the string that both populates the checkbox and
@@ -249,12 +254,34 @@ def create_metrics_dashboard():
         )
         apply_button.disabled = _same_filter(s, applied)
 
+    render_cache: OrderedDict[
+        tuple[datetime, datetime, tuple[int, ...], tuple[str | None, ...]],
+        tuple[ObjectCentricEventlog, int],
+    ] = OrderedDict()
+
     def _render_from_applied() -> pn.viewable.Viewable:
-        return _render_metrics(
+        key = _filter_signature(
+            applied["start"], applied["end"],
+            applied["scenarios"], applied["setups"],
+        )
+        cached = render_cache.get(key)
+        if cached is not None:
+            render_cache.move_to_end(key)
+            ocel, event_count = cached
+            return _render_metrics_from_ocel(
+                ocel, event_count,
+                applied["start"], applied["end"],
+            )
+        view, entry = _build_metrics(
             combined, case_metadata,
             applied["start"], applied["end"],
             applied["scenarios"], applied["setups"],
         )
+        if entry is not None:
+            render_cache[key] = entry
+            while len(render_cache) > _RENDER_CACHE_SIZE:
+                render_cache.popitem(last=False)
+        return view
 
     metrics_pane = pn.Column(
         _render_from_applied(),
@@ -325,6 +352,11 @@ def _load_combined_eventlog(csv_files: list[Path]) -> tuple[pl.DataFrame, pl.Dat
     honest we convert UTC → local here on load. Naive datetimes throughout
     the dashboard match the user's clock; a CET user sees CET times, and
     "Last 10 min" arithmetic just works.
+
+    We also keep the pre-conversion naive-UTC datetime as
+    `time:timestamp_utc_naive` for the guardrail-extension resolver, whose
+    loader assumes every naive datetime is UTC and would double-shift the
+    already-converted column.
     """
     frames: list[pl.DataFrame] = []
     for path in csv_files:
@@ -339,6 +371,10 @@ def _load_combined_eventlog(csv_files: list[Path]) -> tuple[pl.DataFrame, pl.Dat
         return pl.DataFrame(), pl.DataFrame()
     local_tz = _local_tz_name()
     combined = pl.concat(frames, how="diagonal_relaxed").with_columns(
+        pl.col(_TIMESTAMP_COL)
+        .str.to_datetime(strict=False)
+        .alias(_TIMESTAMP_UTC_NAIVE_COL)
+    ).with_columns(
         pl.col(_TIMESTAMP_COL)
         .str.to_datetime(strict=False)
         .dt.replace_time_zone("UTC")
@@ -471,6 +507,26 @@ def _same_filter(a: dict, b: dict) -> bool:
     )
 
 
+# 8 covers the typical preset-hopping workflow (toggle a filter, apply,
+# toggle back) without holding the whole product-space of filter states.
+_RENDER_CACHE_SIZE = 8
+
+
+def _filter_signature(
+    start: datetime,
+    end: datetime,
+    scenarios: list[int],
+    setups: list[str | None],
+) -> tuple:
+    """Hashable, order-insensitive key for the render cache."""
+    return (
+        start,
+        end,
+        tuple(sorted(scenarios)),
+        tuple(sorted(setups, key=lambda x: (x is None, x))),
+    )
+
+
 def _case_counts(
     case_metadata: pl.DataFrame,
     start: datetime,
@@ -549,32 +605,51 @@ def _format_span_hint(
     )
 
 
-def _render_metrics(
+def _build_metrics(
     eventlog: pl.DataFrame,
     case_metadata: pl.DataFrame,
     start: datetime,
     end: datetime,
     scenarios: list[int],
     setups: list[str | None],
-) -> pn.viewable.Viewable:
+) -> tuple[pn.viewable.Viewable, tuple | None]:
+    """Returns `(view, cache_entry)`. `cache_entry` is `(ocel, event_count)`
+    for the render cache, or `None` when the filter yielded nothing."""
     keep_ids = _apply_filters(case_metadata, start, end, scenarios, setups)["case_id"]
     if keep_ids.is_empty():
         return pn.pane.Alert(
             "No traces match the current filters.", alert_type="warning"
-        )
+        ), None
     filtered = eventlog.filter(pl.col("case_id").is_in(keep_ids))
     if filtered.is_empty():
         return pn.pane.Alert(
             "No traces match the current filters.", alert_type="warning"
-        )
+        ), None
     try:
         ocel = ObjectCentricEventlog.from_eventlog(
             filtered, guardrail_log_path=_GUARDRAIL_LOG_PATH
         )
     except Exception as e:
-        return pn.pane.Alert(f"Error processing events: {e}", alert_type="danger")
+        return pn.pane.Alert(
+            f"Error processing events: {e}", alert_type="danger"
+        ), None
+    view = _render_metrics_from_ocel(ocel, filtered.height, start, end)
+    return view, (ocel, filtered.height)
 
-    range_label = _RangeLabel(start, end, filtered.height)
+
+def _render_metrics_from_ocel(
+    ocel: ObjectCentricEventlog,
+    event_count: int,
+    start: datetime,
+    end: datetime,
+) -> pn.viewable.Viewable:
+    """Compose the section panels around a pre-built OCEL.
+
+    Separate from `_build_metrics` because Panel viewables can't safely be
+    reused across mount cycles — we regenerate the tree each Apply even when
+    the OCEL is cached.
+    """
+    range_label = _RangeLabel(start, end, event_count)
     return pn.Column(
         range_label.panel(),
         OverviewSection(ocel, range_label.fake_path()).panel(),
@@ -582,10 +657,52 @@ def _render_metrics(
         SystemMetricsSection(ocel).panel(),
         TimeMetricsSection(ocel).panel(),
         GuardrailSection(ocel).panel(),
-        VisualizationSection(ocel).panel(),
+        _lazy_visualization_panel(ocel),
         sizing_mode="stretch_width",
         styles={"padding": "4px 0"},
     )
+
+
+def _lazy_visualization_panel(ocel) -> pn.viewable.Viewable:
+    """Defer pm4py discovery + graphviz rendering behind a button click.
+
+    Building `VisualizationSection` runs three pm4py discoveries and three
+    graphviz `dot` invocations — the dominant cost of an Apply.
+    """
+    slot = pn.Column(
+        pn.pane.HTML(
+            '<div style="font-size:12px;color:#666;padding:4px 0;">'
+            "Process visualization (OC-DFG, OC-PN, Event → Object Types) is "
+            "generated on demand — it takes a few seconds.</div>",
+            sizing_mode="stretch_width",
+        ),
+        sizing_mode="stretch_width",
+    )
+    button = pn.widgets.Button(
+        name="Generate visualization",
+        button_type="primary",
+        width=220,
+    )
+
+    def _on_click(_event) -> None:
+        button.disabled = True
+        button.name = "Generating…"
+        try:
+            panel = VisualizationSection(ocel).panel()
+        except Exception as e:
+            panel = pn.pane.Alert(
+                f"Visualization failed: {e}", alert_type="warning"
+            )
+            button.disabled = False
+            button.name = "Retry visualization"
+            slot[:] = [panel, button]
+        else:
+            button.visible = False
+            slot[:] = [panel]
+
+    button.on_click(_on_click)
+    slot.append(button)
+    return slot
 
 
 class _RangeLabel:

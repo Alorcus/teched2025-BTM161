@@ -141,6 +141,25 @@ Defined in `src/agents/customer_agent.py` (`CUSTOMER_SCENARIO_DEFS`) — single 
 | 5     | Order a tea and stubbornly refuse anything else                   |
 | 6     | Rich customer buys everything until the store is empty            |
 
+### Batch Script
+
+For mixing setups and scenarios in a single run (e.g. 10 traces of scenario 0 under `baseline`, then 10 of scenario 2 under `unconstrained`), use `scripts/run_batches.py`. Three ways to drive it — no-flag runs use the module-level defaults, or pass explicit batches via CLI or JSON:
+
+```bash
+# 1. Run the built-in default batch set (edit the module-level BATCHES to change it)
+poetry run python -m scripts.run_batches
+
+# 2. Pass batches on the command line as `setup:scenario:count` triples
+poetry run python -m scripts.run_batches --batches baseline:0:10 unconstrained:2:10
+
+# 3. Load batches (and toggles) from a JSON config file
+poetry run python -m scripts.run_batches --config batches.json
+```
+
+Boolean toggles: `--reset-inventory` / `--no-reset-inventory`, `--process-supervisor` / `--no-process-supervisor`, `--export-logs` / `--no-export-logs`. The JSON config schema is `{"batches": [["baseline", 0, 50], ...], "reset_inventory": true, "process_supervisor": false, "export_logs": false}`.
+
+Make sure the Poetry virtual environment is active (`poetry env activate`) or prefix with `poetry run` as shown; the script imports from `src/` and needs the project's dependencies. Batches sharing a setup reuse the same `CoffeeShop` instance, so keep same-setup entries consecutive in the list.
+
 ## Agent Observatory Dashboard
 
 A two-page observability dashboard built with [Panel](https://panel.holoviz.org/):
@@ -204,6 +223,10 @@ The command refuses to run while the dashboard is listening on port 5006 — sto
 The dashboard runs the same `CoffeeShop` multi-agent graph used by the notebooks and CLI. A background thread drives the conversation (using the simulated Customer Agent), while the Panel UI polls for events every 100ms. Stream events from LangGraph are parsed into typed dashboard events (agent messages, tool calls, handoffs, etc.) and dispatched to the corresponding agent panel.
 
 The Metrics Dashboard loads the consolidated `_all_traces.csv` cache into an `ObjectCentricEventlog` and renders sections from it. The cache is rebuilt from MLflow on page entry whenever the trace count has changed; aside from that single write, the page is read-only.
+
+### Sharing the event log CSV
+
+`generated_event_log/_all_traces.csv` is designed to be handed to colleagues who don't have your MLflow store — but it embeds free-text content: verbatim customer utterances (in `message` on `user_prompt` rows), LLM assistant responses, and LLM reasoning from the guardrail gateway (in `gateway_tool_args_json`, `gateway_verdicts_json`, and `feedback_reason`). In this TechEd repository the "customer" is an LLM-simulated persona, so those cells are synthetic. **In any real deployment, the same columns would carry PII and unredacted model reasoning — review the file before sharing.** The complete column list, per-column sensitivity classification, and timezone/versioning contract live in [`EVENTLOG_SCHEMA.md`](EVENTLOG_SCHEMA.md); consult it before forwarding the CSV or attaching it to a ticket.
 
 ## Trace Table Dashboard
 
