@@ -52,12 +52,6 @@ class ObjectCardinalitySection:
         agents_avg = f"{agents['agent_count'].mean():.1f}" if agents.height else "—"
         handovers_avg = f"{handovers['handover_count'].mean():.1f}" if handovers.height else "0.0"
         tool_calls_avg = f"{tool_calls['tool_call_count'].mean():.1f}" if tool_calls.height else "—"
-        if tool_calls.height:
-            total_calls = tool_calls["tool_call_count"].sum()
-            total_friction = tool_calls["flagged_count"].sum() + tool_calls["denied_count"].sum()
-            friction_pct = f"{(100 * total_friction / total_calls):.0f}%" if total_calls else "—"
-        else:
-            friction_pct = "—"
 
         cards_html = "".join([
             subtitled_kpi_card(
@@ -68,9 +62,6 @@ class ObjectCardinalitySection:
             ),
             subtitled_kpi_card(
                 "Tool Calls per Case", "Distinct tool_call objects executed per case.", tool_calls_avg,
-            ),
-            subtitled_kpi_card(
-                "Guardrail Friction", "Share of tool calls flagged or denied.", friction_pct,
             ),
         ])
         return kpi_row(cards_html, columns=4, top_padding=12)
