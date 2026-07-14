@@ -1,5 +1,7 @@
 import re
 
+from src.agents.order_store import load_order
+
 from .types import Effect, GuardrailContext, Verdict
 
 _ORDER_ID_RE = re.compile(r"\bORD\d{3,}\b")
@@ -73,9 +75,55 @@ def transfer_includes_order_id_predicate(context: GuardrailContext) -> Verdict:
     )
 
 
+def require_order_status_predicate(allowed: list[str], effect: str = "deny"):
+    """Factory: block (or flag) a tool call unless the order's *current* status is in
+    `allowed`. This is how the order lifecycle is enforced now that there is no state
+    machine — each state-gated tool declares the source statuses it may be called from.
+
+    The order is resolved from the tool's `order_id` argument. The transition target the
+    tool computes at runtime is always legal from an allowed source, so a source-status
+    precondition is equivalent to validating the transition. Unresolvable orders return
+    ALLOW so the tool itself can report 'not found'. `effect` selects deny vs flag.
+    """
+    allowed_set = {str(s) for s in allowed}
+    violation_effect = Effect(effect)
+
+    def _eval(context: GuardrailContext) -> Verdict:
+        order_id = str(context.tool_args.get("order_id", ""))
+        order = load_order(order_id) if order_id else None
+        if order is None:
+            return Verdict(
+                effect=Effect.ALLOW,
+                guardrail_name="",
+                guardrail_type="",
+                reason_internal=f"order {order_id!r} not resolvable; precondition not evaluated",
+            )
+        current = order.status.value
+        if current in allowed_set:
+            return Verdict(
+                effect=Effect.ALLOW,
+                guardrail_name="",
+                guardrail_type="",
+                reason_internal=f"order {order_id} status={current} in allowed={sorted(allowed_set)}",
+            )
+        return Verdict(
+            effect=violation_effect,
+            guardrail_name="",
+            guardrail_type="",
+            reason_internal=f"order {order_id} status={current} not in allowed={sorted(allowed_set)}",
+            reason_for_llm=(
+                f"Cannot call {context.tool_name!r} while order {order_id} is '{current}'. "
+                f"This tool is only valid when the order status is one of: "
+                f"{', '.join(sorted(allowed_set))}."
+            ),
+        )
+
+    return _eval
+
+
 PREDICATE_REGISTRY = {
     "allowed_handover_targets": allowed_handover_targets_predicate,
     "discount_within_limit": discount_within_limit_predicate,
     "transfer_includes_order_id": transfer_includes_order_id_predicate,
-    "transfer_includes_order_id": transfer_includes_order_id_predicate,
+    "require_order_status": require_order_status_predicate,
 }

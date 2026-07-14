@@ -9,7 +9,7 @@ from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage, Tool
 from src.coffee_shop import CoffeeShop
 from src.agents import CUSTOMER_SCENARIOS
 from src.agents.tray import get_tray, clear_tray
-from src.agents.order_store import load_order, save_order
+from src.agents.order_store import load_order, set_order_status
 from src.agents.shared_components import OrderStatus
 from src.conversation import _tag_trace
 from src.stream import SWARM_AGENTS
@@ -287,8 +287,9 @@ class ConversationRunner:
 
         order = load_order(order_id)
         if order and order.status != OrderStatus.COMPLETED:
-            order.status = OrderStatus.COMPLETED
-            save_order(order)
+            set_order_status(
+                order, OrderStatus.COMPLETED, context="tray pickup by customer"
+            )
 
         clear_tray(order_id)
 
@@ -834,12 +835,14 @@ class ConversationRunner:
             if msg.tool_calls:
                 thought_text = _extract_text(msg.content).strip()
                 if thought_text:
-                    self.event_bus.publish(DashboardEvent(
-                        event_type=EventType.AGENT_THOUGHT,
-                        agent_name=agent_name,
-                        content=thought_text,
-                        tool_name=msg.tool_calls[0].get("name"),
-                    ))
+                    self.event_bus.publish(
+                        DashboardEvent(
+                            event_type=EventType.AGENT_THOUGHT,
+                            agent_name=agent_name,
+                            content=thought_text,
+                            tool_name=msg.tool_calls[0].get("name"),
+                        )
+                    )
                 for tc in msg.tool_calls:
                     self.event_bus.publish(
                         DashboardEvent(

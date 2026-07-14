@@ -57,7 +57,7 @@ LLM provider is configured via a `.env` file (see `.env.example`). Set `LLM_PROV
 - Agents are non-hierarchical (swarm pattern), coordinated via `create_handoff_tool()`
 - Agents run sequentially (not in parallel) for Ollama compatibility
 - The Customer Agent drives conversations externally — it is not part of the swarm graph
-- Order status lifecycle: `pending → inventory_confirmed → completed/preparation_error → refunded`
+- Order status lifecycle: `pending → inventory_confirmed → in_preparation → completed/preparation_error → refunded` (also `inventory_issues`, `cancelled`). Legal transitions are enforced by per-setup **gateway guardrails** (`require_order_status` in `src/control_plane/predicates.py`), not a separate state machine: each state-changing tool declares, in its setup's `guardrails/*.yaml`, the order statuses it may be called from (`deny` to block, `flag` to allow-and-label). Omit those entries in a setup to leave the lifecycle unconstrained. Status is written by the non-validating `set_order_status` helper in `src/agents/order_store.py`.
 - MLflow traces are stored under `./mlruns/` and converted to XES-compatible CSV event logs in `./generated_event_log/`
 
 ### Event log schema
