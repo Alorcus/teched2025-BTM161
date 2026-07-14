@@ -18,7 +18,6 @@ class PartialRefundSchema(BaseModel):
     refund_percent: int = Field(default=50, description="Refund percentage to apply")
 
 
-# CUSTOMER SERVICE AGENT TOOLS
 @tool(args_schema=OrderIdSchema)
 def offer_refund(order_id: str) -> str:
     """Process a full refund for an order."""

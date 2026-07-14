@@ -1,5 +1,6 @@
 from .trace_processor import TraceProcessor
 from .log_generator import LogGenerator
+from .naive_utc import NaiveUTC, to_naive_utc, from_epoch_naive_utc
 
 
 def __getattr__(name):
@@ -13,4 +14,7 @@ __all__ = [
     'TraceProcessor',
     'LogGenerator',
     'ObjectCentricEventlog',
+    'NaiveUTC',
+    'to_naive_utc',
+    'from_epoch_naive_utc',
 ]

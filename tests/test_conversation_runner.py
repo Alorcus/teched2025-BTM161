@@ -17,6 +17,7 @@ from src.dashboard.interaction.conversation_runner import (
     MAX_CONVERSATION_TURNS,
     _summarize_tool_calls,
     _rejected_content,
+    _extract_text,
 )
 
 
@@ -33,7 +34,6 @@ class TestRunnerStartSetsIsRunning(unittest.TestCase):
 
     def test_flag_set_immediately(self):
         shop = _make_mock_shop()
-        # Make stream block until we release it
         block = threading.Event()
         shop.app.stream.side_effect = lambda *a, **kw: iter([]) if block.wait(0.5) else iter([])
         shop.customer_agent.get_initial_message.return_value = "hello"
@@ -107,7 +107,6 @@ class TestRunnerIsRunningClearedOnError(unittest.TestCase):
         runner._thread.join(timeout=5)
 
         self.assertFalse(runner.is_running)
-        # Should have published an error event
         events = bus.drain()
         error_events = [e for e in events if "error" in (e.content or "").lower()]
         self.assertTrue(len(error_events) > 0)
@@ -119,7 +118,6 @@ class TestStreamErrorPublishesEventAndReturnsNone(unittest.TestCase):
     def test_mid_stream_error(self):
         shop = _make_mock_shop()
 
-        # Stream yields one item then raises
         def failing_stream(*a, **kw):
             yield (("order_agent:abc",), {"agent": {"messages": [AIMessage(content="hi", name="order_agent")]}})
             raise RuntimeError("API rate limit")
@@ -147,7 +145,6 @@ class TestStreamDeduplicatesMessages(unittest.TestCase):
         msg = AIMessage(content="Order received!", name="order_agent", id="msg-001")
 
         def dup_stream(*a, **kw):
-            # Same message appears twice
             yield (("order_agent:abc",), {"agent": {"messages": [msg]}})
             yield (("order_agent:abc",), {"agent": {"messages": [msg]}})
 
@@ -212,7 +209,6 @@ class TestMaxTurnsLimit(unittest.TestCase):
         shop.customer_agent.get_initial_message.return_value = "hi"
         # Customer always responds (would loop forever without limit)
         shop.customer_agent.respond_to.return_value = "more please"
-
         bus = EventBus()
         runner = ConversationRunner(shop, bus)
         runner.start(scenario_index=0)
@@ -291,7 +287,6 @@ class TestUserVisibleFollowsHandoff(unittest.TestCase):
             nonlocal call_count
             call_count[0] += 1
             if call_count[0] == 1:
-                # First turn: order_agent replies then hands off to barista
                 msg = AIMessage(content="Let me brew that", name="order_agent", id="msg-1")
                 yield (("order_agent:abc",), {"agent": {
                     "messages": [msg],
@@ -303,7 +298,6 @@ class TestUserVisibleFollowsHandoff(unittest.TestCase):
                     },
                 }})
             else:
-                # Second turn: barista replies
                 msg = AIMessage(content="Coffee is ready!", name="barista_agent", id="msg-2")
                 yield (("barista_agent:def",), {"agent": {"messages": [msg]}})
 
@@ -449,7 +443,6 @@ class TestActiveAgentResetsOnNewConversation(unittest.TestCase):
         def stream_handoff(*a, **kw):
             call_count[0] += 1
             if call_count[0] == 1:
-                # Handoff to barista on first conversation
                 msg = AIMessage(content="Handing off", name="order_agent", id=f"msg-h{call_count[0]}")
                 yield (("order_agent:abc",), {"agent": {
                     "messages": [msg],
@@ -461,7 +454,6 @@ class TestActiveAgentResetsOnNewConversation(unittest.TestCase):
                     },
                 }})
             else:
-                # Simple reply
                 msg = AIMessage(content="Hello!", name="order_agent", id=f"msg-s{call_count[0]}")
                 yield (("order_agent:abc",), {"agent": {"messages": [msg]}})
 
@@ -472,12 +464,10 @@ class TestActiveAgentResetsOnNewConversation(unittest.TestCase):
         bus = EventBus()
         runner = ConversationRunner(shop, bus)
 
-        # First run — triggers handoff
         runner.start(scenario_index=0)
         runner._thread.join(timeout=5)
         bus.drain()
 
-        # Second run — should reset active agent
         runner.start(scenario_index=0)
         runner._thread.join(timeout=5)
 
@@ -485,18 +475,6 @@ class TestActiveAgentResetsOnNewConversation(unittest.TestCase):
         user_visible = [e for e in events if e.event_type == EventType.USER_VISIBLE]
         self.assertTrue(len(user_visible) >= 1)
         self.assertEqual(user_visible[0].agent_name, "order_agent")
-
-
-# =============================================================================
-# Active-mode supervisor tests
-# =============================================================================
-#
-# These exercise the new "active" Process Supervisor: when the config flag
-# `process_supervisor_active` is True and observe() returns a Violation:* on
-# an AIMessage from a swarm agent, the runner must (a) suppress the normal
-# AGENT_MESSAGE / TOOL_CALL publishes, (b) emit AGENT_MESSAGE_REJECTED, (c)
-# patch the LangGraph state via update_state with a quoted-critique
-# HumanMessage, and (d) re-stream from the patched checkpoint.
 
 
 def _active_shop():
@@ -942,11 +920,6 @@ class TestSupervisorDisabledNoOp(unittest.TestCase):
         shop.app.update_state.assert_not_called()
 
 
-# =============================================================================
-# Handover pause toggle (integration test for the dashboard pause feature)
-# =============================================================================
-
-
 class TestHandoverPauseAndResume(unittest.TestCase):
     """End-to-end test for the dashboard's pause/go toggle.
 
@@ -1117,7 +1090,6 @@ class TestHandoverPauseAndResume(unittest.TestCase):
 
         bus = EventBus()
         runner = ConversationRunner(shop, bus)
-        # Explicitly off (matches the default but make it explicit).
         runner.pause_on_next_handover = False
         runner.start(scenario_index=0)
         runner._thread.join(timeout=5)
@@ -1195,6 +1167,129 @@ class TestHandoverPauseAndResume(unittest.TestCase):
         # Dedup means exactly one HANDOFF was published even though the
         # stream emitted handoff_context twice.
         self.assertEqual(len(handoffs), 1)
+
+
+class TestExtractTextHelper(unittest.TestCase):
+    """_extract_text flattens both str and list-of-blocks content."""
+
+    def test_str_content_passthrough(self):
+        self.assertEqual(_extract_text("hello"), "hello")
+
+    def test_empty_str(self):
+        self.assertEqual(_extract_text(""), "")
+
+    def test_list_of_blocks_extracts_text(self):
+        content = [
+            {"type": "text", "text": "Let me check inventory first"},
+            {"type": "tool_use", "name": "check_inventory", "input": {}},
+        ]
+        self.assertEqual(_extract_text(content), "Let me check inventory first")
+
+    def test_list_with_only_tool_use(self):
+        content = [{"type": "tool_use", "name": "check_inventory", "input": {}}]
+        self.assertEqual(_extract_text(content), "")
+
+    def test_list_multiple_text_blocks_joined(self):
+        content = [
+            {"type": "text", "text": "First thought."},
+            {"type": "text", "text": "Second thought."},
+        ]
+        self.assertEqual(_extract_text(content), "First thought.\nSecond thought.")
+
+    def test_unknown_shape_returns_empty(self):
+        self.assertEqual(_extract_text(None), "")
+        self.assertEqual(_extract_text(42), "")
+
+
+class TestPublishMessageNormallyThoughtSalvage(unittest.TestCase):
+    """AGENT_THOUGHT is emitted before TOOL_CALL when an AIMessage carries
+    both prose and tool_calls; without prose, only TOOL_CALL fires."""
+
+    def _make_runner(self):
+        shop = _make_mock_shop()
+        bus = EventBus()
+        runner = ConversationRunner(shop, bus)
+        return runner, bus
+
+    def test_thought_emitted_before_tool_call_str_content(self):
+        runner, bus = self._make_runner()
+        msg = AIMessage(
+            content="Let me check inventory first",
+            tool_calls=[{"name": "check_inventory", "args": {}, "id": "tc1"}],
+        )
+        runner._publish_message_normally(msg, "barista", None)
+        events = bus.drain()
+        self.assertEqual(
+            [e.event_type for e in events],
+            [EventType.AGENT_THOUGHT, EventType.TOOL_CALL],
+        )
+        self.assertEqual(events[0].content, "Let me check inventory first")
+        self.assertEqual(events[0].tool_name, "check_inventory")
+        self.assertEqual(events[0].agent_name, "barista")
+        self.assertEqual(events[1].tool_name, "check_inventory")
+
+    def test_thought_emitted_for_list_of_blocks_content(self):
+        runner, bus = self._make_runner()
+        msg = AIMessage(
+            content=[
+                {"type": "text", "text": "Espresso needs a fresh shot."},
+                {"type": "tool_use", "name": "start_preparation",
+                 "input": {"drink": "espresso"}, "id": "tc1"},
+            ],
+            tool_calls=[{"name": "start_preparation",
+                         "args": {"drink": "espresso"}, "id": "tc1"}],
+        )
+        runner._publish_message_normally(msg, "barista", None)
+        events = bus.drain()
+        self.assertEqual(
+            [e.event_type for e in events],
+            [EventType.AGENT_THOUGHT, EventType.TOOL_CALL],
+        )
+        self.assertEqual(events[0].content, "Espresso needs a fresh shot.")
+        self.assertEqual(events[0].tool_name, "start_preparation")
+
+    def test_no_thought_when_content_empty_str(self):
+        runner, bus = self._make_runner()
+        msg = AIMessage(
+            content="",
+            tool_calls=[{"name": "check_inventory", "args": {}, "id": "tc1"}],
+        )
+        runner._publish_message_normally(msg, "barista", None)
+        events = bus.drain()
+        self.assertEqual([e.event_type for e in events], [EventType.TOOL_CALL])
+
+    def test_no_thought_when_content_only_tool_use_block(self):
+        runner, bus = self._make_runner()
+        msg = AIMessage(
+            content=[
+                {"type": "tool_use", "name": "check_inventory",
+                 "input": {}, "id": "tc1"},
+            ],
+            tool_calls=[{"name": "check_inventory", "args": {}, "id": "tc1"}],
+        )
+        runner._publish_message_normally(msg, "barista", None)
+        events = bus.drain()
+        self.assertEqual([e.event_type for e in events], [EventType.TOOL_CALL])
+
+    def test_no_thought_when_content_only_whitespace(self):
+        runner, bus = self._make_runner()
+        msg = AIMessage(
+            content="   \n  \t ",
+            tool_calls=[{"name": "check_inventory", "args": {}, "id": "tc1"}],
+        )
+        runner._publish_message_normally(msg, "barista", None)
+        events = bus.drain()
+        self.assertEqual([e.event_type for e in events], [EventType.TOOL_CALL])
+
+    def test_text_only_message_still_emits_agent_message(self):
+        """The elif msg.content branch is untouched — text-only turns still
+        emit AGENT_MESSAGE, not AGENT_THOUGHT."""
+        runner, bus = self._make_runner()
+        msg = AIMessage(content="Your latte is ready.", tool_calls=[])
+        runner._publish_message_normally(msg, "barista", None)
+        events = bus.drain()
+        self.assertEqual([e.event_type for e in events], [EventType.AGENT_MESSAGE])
+        self.assertEqual(events[0].content, "Your latte is ready.")
 
 
 if __name__ == "__main__":

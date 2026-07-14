@@ -6,11 +6,11 @@ import param
 import panel as pn
 
 
-# Per-agent scroll-preservation script. Mirrors trace_app._CONV_SCROLL_SCRIPT:
-# caches {atBottom, top} on `window` so re-renders restore position, with a
-# 32px sticky-bottom threshold so new messages glue to the bottom unless the
-# user has scrolled up. Selector and state key are parameterized by
-# agent_name so the four AgentPanel instances do not share window state.
+# Per-agent scroll-preservation script: caches {atBottom, top} on `window`
+# so re-renders restore position, with a 32px sticky-bottom threshold so new
+# messages glue to the bottom unless the user has scrolled up. Selector and
+# state key are parameterized by agent_name so the four AgentPanel instances
+# do not share window state.
 _AP_SCROLL_SCRIPT_TEMPLATE = """
 <script>
 (function () {
@@ -20,7 +20,6 @@ _AP_SCROLL_SCRIPT_TEMPLATE = """
 
   // Panel injects scripts via replaceChild, so document.currentScript is
   // unreliable. Walk every shadow root from document to find the scroller.
-  // Pattern mirrors trace_table_panel._SCROLL_SCRIPT.
   function findScrollerRoot() {
     const cs = document.currentScript;
     if (cs && cs.getRootNode) {
@@ -116,8 +115,6 @@ class AgentPanel(param.Parameterized):
         # HTML (script included) — Panel only executes <script> tags
         # that are present on the FIRST render. Subsequent `.object`
         # updates do re-inject the script but do not execute it.
-        # See trace_table_panel.TraceTablePanel.__init__ for the same
-        # pattern.
         self._messages_pane = pn.pane.HTML(
             self._render_messages_html(),
             sizing_mode="stretch_width",
@@ -185,10 +182,10 @@ class AgentPanel(param.Parameterized):
             },
         )
 
-    def add_message(self, role: str, content: str, reason: str | None = None):
+    def add_message(self, role: str, content: str, reason: str | None = None, tool_name: str | None = None):
         ts = time.strftime("%H:%M:%S")
         msgs = list(self.messages)
-        msgs.append({"role": role, "content": content, "ts": ts, "reason": reason or ""})
+        msgs.append({"role": role, "content": content, "ts": ts, "reason": reason or "", "tool_name": tool_name or ""})
         self.messages = msgs
         self._render_messages()
 
@@ -283,7 +280,7 @@ class AgentPanel(param.Parameterized):
             f'<div class="ap-scroll-body ap-scroll-body-{self.agent_name}" '
             f'style="font-size:12px;position:absolute;inset:0;overflow-y:auto;">'
         )
-        for msg in self.messages[-20:]:
+        for msg in self.messages[-30:]:
             role = msg["role"]
             full_content = str(msg["content"])
             full_escaped = html_mod.escape(full_content)
@@ -300,6 +297,8 @@ class AgentPanel(param.Parameterized):
                 prefix = '<span style="color:#2196F3;font-weight:bold;">⚙️</span>'
             elif role == "tool_result":
                 prefix = '<span style="color:#666;">→</span>'
+            elif role == "thought":
+                prefix = '<span style="color:#6b6478;">🧠</span>'
             else:
                 prefix = f'<span style="font-weight:bold;">{html_mod.escape(role)}:</span>'
             reason = msg.get("reason") or ""
@@ -313,11 +312,20 @@ class AgentPanel(param.Parameterized):
             body_style = ""
             if role == "ai_rejected":
                 body_style = "color:#b3261e;"
+            elif role == "thought":
+                body_style = "color:#555;font-style:italic;"
+            tool_name = msg.get("tool_name") or ""
+            suffix_html = ""
+            if role == "thought" and tool_name:
+                suffix_html = (
+                    f' <span style="color:#999;font-size:10px;">'
+                    f'→ {html_mod.escape(tool_name)}</span>'
+                )
             html_parts.append(
                 f'<div class="agent-msg">'
                 f'<span style="color:#999;font-size:10px;margin-right:4px;">{ts}</span>'
                 f'{prefix} <span class="agent-msg-body" style="{body_style}">{full_escaped}</span>'
-                f'{reason_html}</div>'
+                f'{suffix_html}{reason_html}</div>'
             )
         html_parts.append("</div>")
         html_parts.append(script)

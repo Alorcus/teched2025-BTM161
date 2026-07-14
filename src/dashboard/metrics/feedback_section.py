@@ -1,16 +1,12 @@
 import panel as pn
 import polars as pl
 
+from src.agents import CUSTOMER_SCENARIO_LABELS
 from src.trace_processing.eventlog_conversion import ObjectCentricEventlog
 
-from .styling_helpers import section_header, small_kpi_card, subsection_header
+from .styling_helpers import kpi_row, section_header, subsection_header, subtitled_kpi_card
 
-_SCENARIO_NAMES = {
-    0: "Large latte & croissant",
-    1: "2 espressos (hurry)",
-    2: "Complaint & resolution",
-    3: "Ask for recommendation",
-}
+_SCENARIO_NAMES = {i: label for i, label in enumerate(CUSTOMER_SCENARIO_LABELS)}
 
 
 class FeedbackSection:
@@ -39,7 +35,6 @@ class FeedbackSection:
             if "event_user_feedback" in self._ocel.event_tables:
                 df = self._ocel.event_tables["event_user_feedback"]
                 if df is not None and not df.is_empty():
-                    # Convert feedback_score to float
                     if "feedback_score" in df.columns:
                         df = df.with_columns(pl.col("feedback_score").cast(pl.Float64))
                     return df
@@ -66,17 +61,37 @@ class FeedbackSection:
             avg_emoji = "😞"
 
         cards = [
-            ("Conversations", str(n)),
-            ("Avg Score", f"{avg_score:.2f} {avg_emoji}"),
-            ("Excellent", str(excellent)),
-            ("Normal", str(normal)),
-            ("Not satisfied", str(not_satisfied)),
+            (
+                "Conversations",
+                "Conversations in this window that produced a customer feedback score.",
+                str(n),
+            ),
+            (
+                "Avg Score",
+                "Mean feedback score across all conversations (0 = worst, 1 = best).",
+                f"{avg_score:.2f} {avg_emoji}",
+            ),
+            (
+                "Excellent",
+                "Conversations that scored ≥ 0.75 on the feedback scale.",
+                str(excellent),
+            ),
+            (
+                "Normal",
+                "Conversations that scored between 0.25 and 0.75.",
+                str(normal),
+            ),
+            (
+                "Not satisfied",
+                "Conversations that scored below 0.25 — clearly unhappy customers.",
+                str(not_satisfied),
+            ),
         ]
-        cards_html = "".join(small_kpi_card(label, value) for label, value in cards)
-        return pn.pane.HTML(
-            f'<div style="padding:2px 0;display:flex;flex-wrap:wrap;">{cards_html}</div>',
-            sizing_mode="stretch_width",
+        cards_html = "".join(
+            subtitled_kpi_card(title, subtitle, value)
+            for title, subtitle, value in cards
         )
+        return kpi_row(cards_html, columns=5, top_padding=12)
 
     def _build_scenario_breakdown(self) -> pn.viewable.Viewable:
         df = self._data

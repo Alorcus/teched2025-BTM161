@@ -147,7 +147,6 @@ class TestCalculateTotalWithDiscount(unittest.TestCase):
         reset_inventory()
 
     def test_discount_applied(self):
-        # Create an order first
         result = process_order.invoke({
             "order": [{"name": "latte", "quantity": 2}],
             "customer": "Julia",
@@ -155,7 +154,6 @@ class TestCalculateTotalWithDiscount(unittest.TestCase):
         data = json.loads(result)
         order_id = data["order_id"]
 
-        # Apply 20% discount
         discount_result = calculate_total.invoke({
             "order_id": order_id,
             "discount_percent": 20,

@@ -18,8 +18,9 @@ class TrayPanel:
     def panel(self):
         return self._pane
 
-    def refresh(self, order_id: str | None):
+    def refresh(self, order_id: str | None = None):
         if not order_id:
+            self._render_empty()
             return
         contents = tray_as_list(order_id)
         if contents == self._last_snapshot:

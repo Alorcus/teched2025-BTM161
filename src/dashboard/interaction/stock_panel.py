@@ -1,4 +1,5 @@
 import panel as pn
+from sqlalchemy.exc import OperationalError
 
 from src.agents import get_all_inventory
 
@@ -15,13 +16,18 @@ class StockPanel:
     def __init__(self):
         self._pane = pn.pane.HTML("", sizing_mode="stretch_width")
         self._last_snapshot: dict[str, int] = {}
-        self.refresh()
 
     def panel(self):
         return self._pane
 
     def refresh(self):
-        inventory = get_all_inventory()
+        try:
+            inventory = get_all_inventory()
+        except OperationalError:
+            # DB not initialised yet (open_shop() has not run). Nothing to
+            # render on this pass; the next refresh after initialize_runtime
+            # will succeed.
+            return
         snapshot = {name: item.stock for name, item in inventory.items()}
 
         if snapshot == self._last_snapshot:

@@ -19,7 +19,6 @@ def force_bw(gviz):
     """Rewrite all color attributes to black/white based on actual body format."""
     new_body = []
     for line in gviz.body:
-        # Replace all hex color values for color/fillcolor/fontcolor
         line = re.sub(r'\b(color)="#[0-9a-fA-F]+"', r"\1=black", line)
         line = re.sub(r'\b(fillcolor)="#[0-9a-fA-F]+"', r"\1=white", line)
         line = re.sub(r'\b(fontcolor)="#[0-9a-fA-F]+"', r"\1=black", line)
@@ -67,7 +66,6 @@ def force_translucent_nodes(gviz, alpha_hex="E6"):
 
 @contextmanager
 def _patched_colors(color_map: dict[str, str]):
-    """ Patch color in dfg and pn modules."""
     original_dfg = _dfg_classic.ot_to_color
     original_pn = _pn_classic.ot_to_color
 
@@ -166,7 +164,6 @@ class Visualizer:
         self.config.out_dir.mkdir(parents=True, exist_ok=True)
 
     def run(self) -> dict[str, Path]:
-        """Run all visualizations and return a dictionary of output paths."""
         ocel = self._load_ocel()
 
         outputs = {}
@@ -177,14 +174,12 @@ class Visualizer:
         return outputs
 
     def _load_ocel(self):
-        """Load the OCEL file in json format."""
         return jsonocel_importer.apply(
             str(self.config.ocel_path),
             variant=self.config.ocel_variant,
         )
 
     def _export_object_types(self, ocel) -> Path:
-        """Export an object types visualization."""
         gviz = eto_visualizer.apply(
             ocel, parameters={"format": self.config.export_format}
         )
@@ -193,7 +188,6 @@ class Visualizer:
         return target
 
     def _export_ocdfg(self, ocel) -> Path:
-        """Expot an object centric directly-follows graph visualization."""
         ocdfg = ocdfg_discovery.apply(ocel)
         with _patched_colors(self.config.color_map):
             gviz = force_translucent_nodes(
@@ -207,7 +201,6 @@ class Visualizer:
         return target
 
     def _export_ocpn(self, ocel) -> Path:
-        """Export an object centric Petri net visualization."""
         ocpn = ocpn_discovery.apply(ocel)
         with _patched_colors(self.config.color_map):
             gviz = force_translucent_nodes(
@@ -221,7 +214,6 @@ class Visualizer:
         return target
 
 
-# Example usage:
 if __name__ == "__main__":
     root_dir = Path(__file__).resolve().parents[2]
     config = VisualizationConfig(

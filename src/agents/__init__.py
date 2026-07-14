@@ -11,7 +11,13 @@ from .tray import get_tray, clear_tray, tray_as_list
 from .order_state_machine import (
     InvalidTransitionError, ALLOWED_TRANSITIONS, OrderStateMachine, state_machine,
 )
-from .customer_agent import CustomerAgent, CUSTOMER_SCENARIOS, build_default_prompt
+from .customer_agent import (
+    CustomerAgent,
+    CUSTOMER_SCENARIOS,
+    CUSTOMER_SCENARIO_LABELS,
+    CUSTOMER_SCENARIO_DEFS,
+    build_default_prompt,
+)
 
 __all__ = [
     'MenuItem', 'OrderItem', 'Order', 'MENU',
@@ -21,5 +27,6 @@ __all__ = [
     'transfer_to_agent',
     'get_tray', 'clear_tray', 'tray_as_list',
     'InvalidTransitionError', 'ALLOWED_TRANSITIONS', 'OrderStateMachine', 'state_machine',
-    'CustomerAgent', 'CUSTOMER_SCENARIOS', 'build_default_prompt',
+    'CustomerAgent', 'CUSTOMER_SCENARIOS', 'CUSTOMER_SCENARIO_LABELS',
+    'CUSTOMER_SCENARIO_DEFS', 'build_default_prompt',
 ]
