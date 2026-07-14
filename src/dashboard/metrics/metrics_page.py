@@ -15,6 +15,7 @@ from .time_metrics_section import TimeMetricsSection
 from .guardrail_section import GuardrailSection
 from .trace_cache import CACHE_FILENAME, ensure_trace_cache
 from .visualization_section import VisualizationSection
+from .object_cardinality_section import ObjectCardinalitySection
 
 
 _TIMESTAMP_COL = "time:timestamp"
@@ -581,6 +582,7 @@ def _render_metrics(
         FeedbackSection(ocel).panel(),
         SystemMetricsSection(ocel).panel(),
         TimeMetricsSection(ocel).panel(),
+        ObjectCardinalitySection(ocel).panel(),
         GuardrailSection(ocel).panel(),
         VisualizationSection(ocel).panel(),
         sizing_mode="stretch_width",
