@@ -12,7 +12,6 @@ from src.setups import list_setups, resolve_setup_name, setup_dir
 
 from .interaction import create_observatory_dashboard
 from .metrics import create_metrics_dashboard
-from .trace_app import create_trace_dashboard
 
 
 DASHBOARD_PORT = 5006
@@ -131,7 +130,6 @@ def main():
     routes = {
         "/": lambda: create_observatory_dashboard(setup_name),
         "/metrics": create_metrics_dashboard,
-        "/trace": create_trace_dashboard,
     }
 
     pn.serve(
@@ -145,7 +143,6 @@ def main():
     )
     print(f"  - Interaction: http://localhost:{DASHBOARD_PORT}/")
     print(f"  - Metrics:     http://localhost:{DASHBOARD_PORT}/metrics")
-    print(f"  - Trace:       http://localhost:{DASHBOARD_PORT}/trace")
     return 0
 
 

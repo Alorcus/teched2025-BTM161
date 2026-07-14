@@ -296,12 +296,10 @@ def create_metrics_dashboard():
         styles={"padding": "10px 12px 10px 16px"},
     )
 
-    nav_tabs = header_nav(active="/metrics")
-
     return pn.template.FastListTemplate(
         title="Coffee Shop Agent Observatory",
         sidebar=[sidebar],
-        header=[nav_tabs],
+        header=[header_nav(active="/metrics")],
         main=[metrics_pane],
         accent_base_color="#795548",
         header_background="#4E342E",

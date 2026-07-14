@@ -132,8 +132,6 @@ A two-page observability dashboard built with [Panel](https://panel.holoviz.org/
 - **Interaction Observatory** (`/`) — a real-time view of all agents in a grid layout. Each panel displays the system prompt, available tools, current status, handoff context, context-isolated message history, and tool call log, updating live as a conversation streams through the system.
 - **Metrics Dashboard** (`/metrics`) — analytics over previously-generated event logs (KPIs, per-agent workload, per-order timings, OCEL-based visualizations).
 
-Switch between pages via the tabs in the header.
-
 ### Launch
 
 ```bash
@@ -188,29 +186,6 @@ The command refuses to run while the dashboard is listening on port 5006 — sto
 The dashboard runs the same `CoffeeShop` multi-agent graph used by the CLI. A background thread drives the conversation (using the simulated Customer Agent), while the Panel UI polls for events every 100ms. Stream events from LangGraph are parsed into typed dashboard events (agent messages, tool calls, handoffs, etc.) and dispatched to the corresponding agent panel.
 
 The Metrics Dashboard loads the consolidated `_all_traces.csv` cache into an `ObjectCentricEventlog` and renders sections from it. The cache is rebuilt from MLflow on page entry whenever the trace count has changed; aside from that single write, the page is read-only.
-
-## Trace Table Dashboard
-
-The Trace Table is the third page of the multi-page Agent Observatory dashboard, focused on the global message trace: one row per emitted message, with columns per agent plus a Process Supervisor column. It shares the same `CoffeeShop` graph and event bus as the Interaction Observatory but presents the conversation as a single, globally ordered table next to the live tray, stock, and coffee machine status.
-
-### Launch
-
-```bash
-# The Trace Table is served by the regular dashboard command
-poetry run dashboard
-# Then open: http://localhost:5006/trace
-```
-
-Use the header tabs to switch between the Interaction, Metrics, and Trace pages.
-
-### Features
-
-- **Global trace table**: every agent message, tool call, tool result, and handoff as one row, in emission order
-- **Top status strip**: tray, stock, and coffee machine widgets shared with the Agent Observatory
-- **Sidebar controls**: scenario picker, log level, editable customer prompt, run button
-- **Conversation log**: chat-style log below the sidebar with smart auto-scroll (sticks to bottom only when already at the bottom)
-
----
 
 ## Observing the Database
 

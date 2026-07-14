@@ -1,8 +1,8 @@
 """Shared header navigation for the multi-page dashboard.
 
-Each page (Interaction / Metrics / Trace) renders the same three-tab strip
-in its template ``header`` slot. The currently active tab is shown solid;
-the others are subtle pill links.
+Each page (Interaction / Metrics) renders the same two-tab strip in its
+template ``header`` slot. The currently active tab is shown solid; the
+other is a subtle pill link.
 """
 
 from __future__ import annotations
@@ -12,7 +12,6 @@ import panel as pn
 _TABS: tuple[tuple[str, str], ...] = (
     ("/", "Interaction Observatory"),
     ("/metrics", "Metrics Dashboard"),
-    ("/trace", "Trace Table"),
 )
 
 _ACTIVE_STYLE = (
@@ -27,9 +26,9 @@ _LINK_STYLE = (
 
 
 def header_nav(active: str) -> pn.Row:
-    """Return the three-tab header nav with ``active`` highlighted.
+    """Return the two-tab header nav with ``active`` highlighted.
 
-    ``active`` must be one of ``"/"``, ``"/metrics"``, ``"/trace"``.
+    ``active`` must be one of ``"/"``, ``"/metrics"``.
     """
     items: list[pn.pane.HTML] = []
     for i, (route, label) in enumerate(_TABS):

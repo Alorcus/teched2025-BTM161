@@ -590,13 +590,10 @@ def create_observatory_dashboard(setup_name: str):
         sizing_mode="stretch_height",
     )
 
-    # Navigation tabs for header
-    nav_tabs = header_nav(active="/")
-
     template = pn.template.FastListTemplate(
         title=f"Coffee Shop Agent Observatory — {setup_name}",
         sidebar=[sidebar],
-        header=[nav_tabs],
+        header=[header_nav(active="/")],
         main=[
             pn.Column(
                 pn.Row(
