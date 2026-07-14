@@ -237,10 +237,6 @@ def project_decisions(decisions: list[dict[str, Any]]) -> GuardrailOcelExtension
     keeping them convergent is what guarantees the shared `_all_traces.csv`
     reproduces the same OCEL that a live JSONL would.
     """
-    return _project(decisions)
-
-
-def _project(decisions: list[dict[str, Any]]) -> GuardrailOcelExtension:
     # --- backfill maps -------------------------------------------------
     # `case_setup_map` assumes one setup per thread (true in practice; the
     # JSONL would have to be from multiple experiment runs sharing a
