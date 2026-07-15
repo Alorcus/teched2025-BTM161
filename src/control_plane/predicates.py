@@ -30,8 +30,13 @@ def allowed_handover_targets_predicate(context: GuardrailContext) -> Verdict:
     )
 
 
-def discount_within_limit_predicate(max_pct: int):
-    """Factory: FLAG verdict when calculate_total is called with discount_percent above max_pct."""
+def discount_within_limit_predicate(max_pct: int, effect: str = "flag"):
+    """Factory: verdict when calculate_total is called with discount_percent above max_pct.
+
+    `effect` selects deny vs flag on violation; defaults to flag so existing setups
+    (which pass only `max_pct`) keep their observe-only behavior.
+    """
+    violation_effect = Effect(effect)
 
     def _eval(context: GuardrailContext) -> Verdict:
         pct = int(context.tool_args.get("discount_percent", 0) or 0)
@@ -43,10 +48,13 @@ def discount_within_limit_predicate(max_pct: int):
                 reason_internal=f"discount_percent={pct} within limit {max_pct}",
             )
         return Verdict(
-            effect=Effect.FLAG,
+            effect=violation_effect,
             guardrail_name="",
             guardrail_type="",
-            reason_internal=f"discount_percent={pct} exceeds limit {max_pct} (flagged, not blocked)",
+            reason_internal=f"discount_percent={pct} exceeds limit {max_pct}",
+            reason_for_llm=(
+                f"A discount of {pct}% is not allowed; the maximum permitted discount is {max_pct}%."
+            ),
         )
 
     return _eval
@@ -121,9 +129,125 @@ def require_order_status_predicate(allowed: list[str], effect: str = "deny"):
     return _eval
 
 
+def order_size_within_range_predicate(
+    max_units: int, min_units: int = 1, effect: str = "deny"
+):
+    """Factory: constrain order size at process_order time. Size is counted in *units*
+    (summed quantities) read straight from the proposed `tool_args["order"]` — the order
+    row does not exist yet, so there is no order_id to load. Violation when total units
+    fall outside [min_units, max_units]. Missing/malformed `order` → ALLOW (nothing to
+    evaluate; the tool itself validates the payload).
+    """
+    violation_effect = Effect(effect)
+
+    def _eval(context: GuardrailContext) -> Verdict:
+        order = context.tool_args.get("order")
+        if not isinstance(order, list):
+            return Verdict(
+                effect=Effect.ALLOW,
+                guardrail_name="",
+                guardrail_type="",
+                reason_internal="no order list in tool_args; size not evaluated",
+            )
+        units = sum(
+            int(item.get("quantity", 1) or 1)
+            for item in order
+            if isinstance(item, dict)
+        )
+        if min_units <= units <= max_units:
+            return Verdict(
+                effect=Effect.ALLOW,
+                guardrail_name="",
+                guardrail_type="",
+                reason_internal=f"order size {units} units within [{min_units}, {max_units}]",
+            )
+        return Verdict(
+            effect=violation_effect,
+            guardrail_name="",
+            guardrail_type="",
+            reason_internal=f"order size {units} units outside [{min_units}, {max_units}]",
+            reason_for_llm=(
+                f"This order has {units} item(s), which is outside the permitted range of "
+                f"{min_units}–{max_units}. Adjust the order to fit within the allowed size."
+            ),
+        )
+
+    return _eval
+
+
+def refund_within_limit_predicate(max_pct: int, effect: str = "deny"):
+    """Factory: constrain offer_partial_refund's `refund_percent`. Violation when the
+    requested percentage exceeds `max_pct`. Mirrors the tool default of 50 when absent.
+    """
+    violation_effect = Effect(effect)
+
+    def _eval(context: GuardrailContext) -> Verdict:
+        pct = int(context.tool_args.get("refund_percent", 50) or 0)
+        if pct <= max_pct:
+            return Verdict(
+                effect=Effect.ALLOW,
+                guardrail_name="",
+                guardrail_type="",
+                reason_internal=f"refund_percent={pct} within limit {max_pct}",
+            )
+        return Verdict(
+            effect=violation_effect,
+            guardrail_name="",
+            guardrail_type="",
+            reason_internal=f"refund_percent={pct} exceeds limit {max_pct}",
+            reason_for_llm=(
+                f"A partial refund of {pct}% is not allowed; the maximum permitted refund is {max_pct}%."
+            ),
+        )
+
+    return _eval
+
+
+def order_total_within_limit_predicate(max_total: float, effect: str = "deny"):
+    """Factory: constrain the order's total (in dollars). Resolves the order from
+    `tool_args["order_id"]` and reads `order.total`; violation when it exceeds `max_total`.
+    Unresolvable orders → ALLOW. Enforced at calculate_total, so it reads the pre-discount
+    total set by process_order.
+    """
+    violation_effect = Effect(effect)
+
+    def _eval(context: GuardrailContext) -> Verdict:
+        order_id = str(context.tool_args.get("order_id", ""))
+        order = load_order(order_id) if order_id else None
+        if order is None:
+            return Verdict(
+                effect=Effect.ALLOW,
+                guardrail_name="",
+                guardrail_type="",
+                reason_internal=f"order {order_id!r} not resolvable; total not evaluated",
+            )
+        if order.total <= max_total:
+            return Verdict(
+                effect=Effect.ALLOW,
+                guardrail_name="",
+                guardrail_type="",
+                reason_internal=f"order {order_id} total ${order.total:.2f} within limit ${max_total:.2f}",
+            )
+        return Verdict(
+            effect=violation_effect,
+            guardrail_name="",
+            guardrail_type="",
+            reason_internal=f"order {order_id} total ${order.total:.2f} exceeds limit ${max_total:.2f}",
+            reason_for_llm=(
+                f"Order {order_id} totals ${order.total:.2f}, which exceeds the maximum permitted "
+                f"order total of ${max_total:.2f}."
+            ),
+        )
+
+    return _eval
+
+
 PREDICATE_REGISTRY = {
     "allowed_handover_targets": allowed_handover_targets_predicate,
     "discount_within_limit": discount_within_limit_predicate,
     "transfer_includes_order_id": transfer_includes_order_id_predicate,
     "require_order_status": require_order_status_predicate,
+    "order_size_within_range": order_size_within_range_predicate,
+    "refund_within_limit": refund_within_limit_predicate,
+    "order_total_within_limit": order_total_within_limit_predicate,
 }
