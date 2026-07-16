@@ -24,12 +24,7 @@ logger = logging.getLogger(__name__)
 
 _CASE_DFG_UNAVAILABLE = "Case-centric DFG unavailable."
 
-# Graph switcher: coffee-brown system from the dashboard palette (beige
-# when unselected, dark brown when pressed) so it reads as the section's
-# main navigation.
-# `!important` is required: Panel's own button.css ships rules like
-# `:host(.solid) .bk-btn.bk-btn-default { background-color: ... }` whose
-# specificity beats anything reasonable we can write here.
+# Graph switcher: coffee-brown system from the dashboard palette
 _GRAPH_SWITCH_STYLESHEET = """
 .bk-btn-group .bk-btn-primary {
   background-color: #EBDBCB !important;
@@ -48,22 +43,20 @@ _GRAPH_SWITCH_STYLESHEET = """
 }
 """
 
-# Feedback-class switcher: compact secondary row in the blue system
-# (light blue unselected, dark blue pressed) — subordinate to the brown
-# graph switcher above it. Same `!important` story as above.
+# Feedback-class switcher in the orange system from the dashboard palette 
 _FEEDBACK_SWITCH_STYLESHEET = """
 .bk-btn-group .bk-btn {
-  background-color: #EAF2FA !important;
+  background-color: #F8E4CB !important;
   border: none !important;
   border-radius: 0;
-  color: #33638E !important;
+  color: #A35F0C !important;
   font-size: 13px;
   padding: 3px 10px;
 }
 /* Joined group like the graph switcher: thin divider lines between
    buttons, rounding only on the outer corners. */
 .bk-btn-group .bk-btn + .bk-btn {
-  border-left: 1px solid #B6D0E8 !important;
+  border-left: 1px solid #E8C9A0 !important;
 }
 .bk-btn-group .bk-btn:first-child {
   border-radius: 4px 0 0 4px;
@@ -72,10 +65,10 @@ _FEEDBACK_SWITCH_STYLESHEET = """
   border-radius: 0 4px 4px 0;
 }
 .bk-btn-group .bk-btn:hover {
-  background-color: #D9E8F6 !important;
+  background-color: #F2D7B2 !important;
 }
 .bk-btn-group .bk-btn.bk-active {
-  background-color: #14568F !important;
+  background-color: #D87F12 !important;
   color: #ffffff !important;
   font-weight: 600;
   box-shadow: none !important;

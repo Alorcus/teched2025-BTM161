@@ -13,9 +13,8 @@ from .eventlog_helpers import (
 from .feedback_section import _SCENARIO_NAMES
 from .styling_helpers import COLOR_SCHEME, section_header, subsection_header
 
-# Categorical color palette
-_WITH_COLOR = "#3E7CB1"
-_WITHOUT_COLOR = "#A7AEB5"
+_WITH_COLOR = COLOR_SCHEME["orange"]
+_WITHOUT_COLOR = COLOR_SCHEME["beige"]
 # Assigned to scenarios by index; scenarios beyond the list fall back to gray.
 _SCENARIO_COLORS = [
     "#B3541E",  # 0 Large latte & croissant
@@ -72,11 +71,11 @@ class ComplexitySection:
             sizing_mode="stretch_width",
         )
 
-    # Chart Avg Feedback by Process Marker 
+    # Chart Avg Feedback by Process Event
     def _flag_impact_chart(self) -> pn.viewable.Viewable:
         rows = []
         for flag, label in _FLAG_LABELS.items():
-            for present, group in ((True, "Cases with marker"), (False, "Cases without")):
+            for present, group in ((True, "Cases with event"), (False, "Cases without event")):
                 sub = self._fb.filter(pl.col(flag) == present)
                 if sub.is_empty():
                     continue
@@ -94,8 +93,8 @@ class ComplexitySection:
             x="marker", y="avg", color="group",
             barmode="group", text="text",
             color_discrete_map={
-                "Cases with marker": _WITH_COLOR,
-                "Cases without": _WITHOUT_COLOR,
+                "Cases with event": _WITH_COLOR,
+                "Cases without event": _WITHOUT_COLOR,
             },
             labels={"marker": "", "avg": "Avg feedback score", "group": ""},
         )
@@ -110,12 +109,12 @@ class ComplexitySection:
         )
         return pn.Column(
             subsection_header(
-                f"Avg Feedback by Process Marker (n={self._fb.height} cases)"
+                f"Avg Feedback by Process Event (n={self._fb.height} cases)"
             ),
             pn.pane.HTML(
                 '<div style="font-size:10px;color:#999;margin-bottom:2px;">'
-                "Avg score in cases with vs without the marker — "
-                "a wide gap flags the marker as a sign of unhappy customers.</div>",
+                "Avg score in cases with vs without the event — "
+                "a wide gap flags the event as a sign of unhappy customers.</div>",
                 sizing_mode="stretch_width",
             ),
             pn.pane.Plotly(fig, height=220, sizing_mode="stretch_width"),
