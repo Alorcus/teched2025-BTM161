@@ -94,3 +94,14 @@ guardrails:
     predicate_args:
       allowed: [completed]
       effect: flag
+
+  - id: off_menu_recommendation
+    type: hard
+    version: v1
+    tools:
+      - assistant_message
+    effect: flag
+    description: Flag (do not block) order_agent assistant turns that recommend items outside MENU + ALLOWED_EXTRAS.
+    predicate: off_menu_recommendation
+    predicate_args:
+      effect: flag

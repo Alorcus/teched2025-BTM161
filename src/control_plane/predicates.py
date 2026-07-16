@@ -1,6 +1,7 @@
 import re
 
 from src.agents.order_store import load_order
+from src.agents.shared_components import ALLOWED_EXTRAS, MENU
 
 from .types import Effect, GuardrailContext, Verdict
 
@@ -307,6 +308,231 @@ def order_total_within_limit_predicate(max_total: float, effect: str = "deny"):
     return _eval
 
 
+_ITEM_TERMINALS: frozenset[str] = frozenset(MENU.keys()) | {
+    "coffee", "mocha", "macchiato", "chai", "frappe", "frappé",
+    "brew", "blend", "tea", "cortado", "matcha", "affogato",
+    "pastry", "pastries",
+}
+_MULTIWORD_TERMINALS: tuple[tuple[str, ...], ...] = (
+    ("flat", "white"),
+    ("pumpkin", "spice"),
+    ("hot", "chocolate"),
+    ("cold", "brew"),
+    ("london", "fog"),
+    ("house", "blend"),
+    ("iced", "tea"),
+)
+_REJECTION_TRIGGERS: tuple[str, ...] = (
+    "don't", "do not", "not on", "not have", "not serve", "not offer",
+    "out of", " no ", "cannot", "can't", "isn't", "aren't", "unfortunately",
+)
+_STOP_WORDS: frozenset[str] = frozenset({
+    "a", "an", "the", "some", "any", "one", "two", "three",
+    "that", "this", "these", "those",
+    "small", "medium", "large", "normal", "regular",
+    "your", "my", "his", "her", "their",
+    "please", "just", "only",
+})
+_CONNECTORS: frozenset[str] = frozenset({
+    "and", "or", "but", "to", "for", "in", "on", "at", "of", "from",
+    "have", "has", "had", "like", "want", "try", "add", "serve", "serves",
+    "get", "got", "make", "makes", "do", "does", "did", "put", "puts",
+    "recommend", "recommends", "suggest", "suggests", "offer", "offers",
+    "we", "you", "i", "they", "he", "she", "it", "us", "them",
+    "would", "could", "should", "will", "can", "may", "might",
+    "our", "how", "about", "perhaps", "what", "with",
+})
+_EXTRAS_TOKENS: frozenset[str] = frozenset(
+    tok for extra in ALLOWED_EXTRAS for tok in extra.split()
+)
+
+
+def _sentences(text: str) -> list[str]:
+    """Sentence-level split: only true terminators. Used for rejection-context
+    scoping — `you asked about mocha — we don't serve that` must be treated
+    as a single sentence so the rejection trigger applies to the mocha
+    mention. Phrase extraction runs a finer clause-level split (`_clauses`)
+    inside each sentence."""
+    return [s.strip() for s in re.split(r"[.!?\n]+", text) if s.strip()]
+
+
+def _clauses(sentence: str) -> list[str]:
+    """Clause-level split: also breaks on em/en-dashes, colons, semicolons,
+    and commas. Item phrases usually live in short noun phrases inside a
+    single clause; without this, `Great choice — an americano` gets left-
+    extended into a phony off-menu phrase during candidate extraction."""
+    return [c.strip() for c in re.split(r"[—–:;,]+", sentence) if c.strip()]
+
+
+def _is_rejection_context(sentence: str) -> bool:
+    lower = sentence.lower()
+    return any(trigger in lower for trigger in _REJECTION_TRIGGERS)
+
+
+def _tokens(sentence: str) -> list[str]:
+    """Tokenize and lightly singularize: fold a trailing plural into its
+    singular form when the singular is a known menu item. `muffins`→`muffin`,
+    `sandwiches`→`sandwich`, `pastries`→`pastry`. Leaves unknown words
+    untouched so extras like `oat` are not mangled."""
+    raw = re.findall(r"[a-zA-Zé']+", sentence.lower())
+    normalized: list[str] = []
+    for tok in raw:
+        normalized.append(_singularize(tok))
+    return normalized
+
+
+def _singularize(tok: str) -> str:
+    """Return the singular form iff that singular is a menu item / family
+    word / extras token. Otherwise return `tok` unchanged."""
+    known = _ITEM_TERMINALS | _EXTRAS_TOKENS
+    if tok in known:
+        return tok
+    if tok.endswith("ies") and len(tok) > 3:
+        cand = tok[:-3] + "y"
+        if cand in known:
+            return cand
+    if tok.endswith("es") and len(tok) > 2:
+        cand = tok[:-2]
+        if cand in known:
+            return cand
+    if tok.endswith("s") and len(tok) > 1:
+        cand = tok[:-1]
+        if cand in known:
+            return cand
+    return tok
+
+
+def _find_candidate_phrases(tokens: list[str]) -> list[tuple[list[str], int]]:
+    """Return (phrase_tokens, terminal_index) for each item-shape phrase in tokens.
+
+    A phrase terminates at either a single-token terminal (in `_ITEM_TERMINALS`) or
+    a multi-word terminal (e.g. "flat white"). The phrase extends left through
+    *content* tokens (anything not in `_CONNECTORS`) — this is how off-menu
+    modifiers like "hazelnut" or "honey" end up inside the phrase and cause it to
+    fail on-menu validation. Extension stops when a connector (verb, preposition,
+    pronoun, conjunction) is hit; connectors are not included in the phrase.
+    """
+    phrases: list[tuple[list[str], int]] = []
+    i = 0
+    n = len(tokens)
+
+    def _extend_left(start_left: int) -> list[str]:
+        acc: list[str] = []
+        left = start_left
+        while left >= 0 and tokens[left] not in _CONNECTORS and tokens[left] not in _ITEM_TERMINALS:
+            acc.insert(0, tokens[left])
+            left -= 1
+        return acc
+
+    while i < n:
+        matched_multi = False
+        for mw in _MULTIWORD_TERMINALS:
+            if tuple(tokens[i : i + len(mw)]) == mw:
+                terminal_end = i + len(mw) - 1
+                phrase_tokens = _extend_left(i - 1) + list(tokens[i : i + len(mw)])
+                phrases.append((phrase_tokens, terminal_end))
+                i += len(mw)
+                matched_multi = True
+                break
+        if matched_multi:
+            continue
+        if tokens[i] in _ITEM_TERMINALS:
+            phrase_tokens = _extend_left(i - 1) + [tokens[i]]
+            phrases.append((phrase_tokens, i))
+        i += 1
+    return phrases
+
+
+def _phrase_is_on_menu(phrase: list[str]) -> bool:
+    """A phrase is on-menu iff its terminal is a MENU key AND every preceding token
+    is an ALLOWED_EXTRAS token or a stop word. Anything else — including family-word
+    terminals like 'mocha' or 'flat white' — is off-menu."""
+    if not phrase:
+        return True
+    terminal_tokens: list[str] = []
+    for mw in _MULTIWORD_TERMINALS:
+        if tuple(phrase[-len(mw):]) == mw:
+            terminal_tokens = list(mw)
+            break
+    if terminal_tokens:
+        return False
+    terminal = phrase[-1]
+    if terminal not in MENU:
+        return False
+    for tok in phrase[:-1]:
+        if tok in _STOP_WORDS:
+            continue
+        if tok in _EXTRAS_TOKENS:
+            continue
+        return False
+    return True
+
+
+def off_menu_recommendation_predicate(effect: str = "deny"):
+    """Factory: detect off-menu drink/food recommendations in an assistant message.
+
+    Applies to the synthetic `assistant_message` tool call synthesized in the
+    subgraph's `response_gateway` node — `tool_args["content"]` holds the raw
+    `AIMessage.content`. Violation when the message contains a recommendation-shaped
+    sentence naming a drink/food whose composed tokens are not in MENU + ALLOWED_EXTRAS.
+    Sentences without a recommendation intent verb, or in a rejection context
+    ("we don't serve mocha"), are ignored. Any internal error → ALLOW.
+    """
+    violation_effect = Effect(effect)
+
+    def _eval(context: GuardrailContext) -> Verdict:
+        try:
+            content = context.tool_args.get("content", "")
+            if not isinstance(content, str) or not content.strip():
+                return Verdict(
+                    effect=Effect.ALLOW,
+                    guardrail_name="",
+                    guardrail_type="",
+                    reason_internal="empty or non-string content; nothing to scan",
+                )
+
+            offenders: list[str] = []
+            for sentence in _sentences(content):
+                if _is_rejection_context(sentence):
+                    continue
+                for clause in _clauses(sentence):
+                    for phrase, _terminal_idx in _find_candidate_phrases(_tokens(clause)):
+                        if not _phrase_is_on_menu(phrase):
+                            offenders.append(" ".join(phrase))
+
+            if not offenders:
+                return Verdict(
+                    effect=Effect.ALLOW,
+                    guardrail_name="",
+                    guardrail_type="",
+                    reason_internal="no off-menu recommendation detected",
+                )
+
+            unique = sorted(set(offenders))
+            return Verdict(
+                effect=violation_effect,
+                guardrail_name="",
+                guardrail_type="",
+                reason_internal=f"off-menu recommendations detected: {unique}",
+                reason_for_llm=(
+                    "Your last message recommended items we do not offer: "
+                    f"{', '.join(repr(o) for o in unique)}. "
+                    f"The menu is: {', '.join(sorted(MENU.keys()))}. "
+                    f"Available extras: {', '.join(sorted(ALLOWED_EXTRAS))}. "
+                    "Recommend only from these; do not invent flavors, syrups, or drinks."
+                ),
+            )
+        except Exception as exc:
+            return Verdict(
+                effect=Effect.ALLOW,
+                guardrail_name="",
+                guardrail_type="",
+                reason_internal=f"predicate error, defaulting to ALLOW: {exc!r}",
+            )
+
+    return _eval
+
+
 PREDICATE_REGISTRY = {
     "allowed_handover_targets": allowed_handover_targets_predicate,
     "discount_within_limit": discount_within_limit_predicate,
@@ -315,5 +541,6 @@ PREDICATE_REGISTRY = {
     "order_size_within_range": order_size_within_range_predicate,
     "refund_within_limit": refund_within_limit_predicate,
     "order_total_within_limit": order_total_within_limit_predicate,
+    "off_menu_recommendation": off_menu_recommendation_predicate,
     "max_tool_calls": max_tool_calls_predicate,
 }
