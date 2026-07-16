@@ -63,6 +63,7 @@ Governance dials on top of `baseline`:
 - `overconstrained` — the same range guardrails cranked so far that normal business cannot happen: max one unit per order, total ≤ $3, zero discounts, zero partial refunds. Demonstrates the failure mode of over-tight governance — most orders never get created.
 - `baseline_flag` — mirrors every guardrail in `baseline`, but each one runs in `flag` mode instead of `deny`. Handover targets, order-lifecycle preconditions, and refund gating are all observe-only; agents behave as if unconstrained while every violation is labeled in the guardrail log for comparison against the enforced baseline.
 - `anti_flow` — the lifecycle gates are deliberately **inverted** (each tool is only "allowed" from a status it can never legitimately be in), so every fulfillment step is denied from its real predecessor. Combined with a severed barista handover, orders get trapped mid-flow. Useful as a worst-case for showing how mis-configured guardrails cause deadlocks rather than safety.
+- `strict_flow` — constrains the handover graph to a linear pipeline: `order → {inventory, customer_service}`, `inventory → barista`, `customer_service → order`, `barista → (none)`. Adds a `process_order_once_per_conversation` guardrail (via the new `max_tool_calls` predicate) so the order agent cannot re-process the same conversation. Useful for observing how tight routing and single-shot ordering affect success rates and failure paths.
 
 **Selecting a setup:**
 
