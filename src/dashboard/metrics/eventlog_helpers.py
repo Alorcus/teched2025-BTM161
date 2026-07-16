@@ -8,6 +8,13 @@ _AGENT_OR_USER = ["order_agent", "inventory_agent", "barista_agent",
 _SUFFIX_RE = "_(?:" + "|".join(_AGENT_OR_USER) + ")$"
 # Events that have no meaning for activity-level metrics excluded
 PLUMBING_EVENTS = ["call_llm", "agent_response", "user_prompt", "user_feedback"]
+# Unified customer-feedback classification, used by KPI cards and the
+# case-centric DFG split:
+#   score <  FEEDBACK_LOW   → not satisfied / low
+#   FEEDBACK_LOW <= score < FEEDBACK_HIGH → normal / medium
+#   score >= FEEDBACK_HIGH  → excellent / high
+FEEDBACK_LOW = 0.5
+FEEDBACK_HIGH = 0.8
 _CASE_FEEDBACK_SCHEMA = {
     "case_id": pl.Utf8,
     "feedback_score": pl.Float64,

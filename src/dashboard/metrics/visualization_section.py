@@ -10,7 +10,13 @@ import polars as pl
 
 from src.trace_processing.eventlog_conversion import ObjectCentricEventlog
 from src.visualization.visualizer import Visualizer, VisualizationConfig, export_case_dfg
-from .eventlog_helpers import case_feedback_scores, event_case_map, flat_event_table
+from .eventlog_helpers import (
+    FEEDBACK_HIGH,
+    FEEDBACK_LOW,
+    case_feedback_scores,
+    event_case_map,
+    flat_event_table,
+)
 from .styling_helpers import COLOR_SCHEME, AGENT_COLORS, section_header, subsection_header
 
 
@@ -105,7 +111,8 @@ class VisualizationSection:
                 df_pd["case_feedback_score"] = df_pd["case:concept:name"].map(case_feedback)
                 df_pd["case_feedback_class"] = pd.cut(
                     df_pd["case_feedback_score"],
-                    bins=[-0.01, 0.6, 0.89, 1.0],
+                    bins=[0.0, FEEDBACK_LOW, FEEDBACK_HIGH, 1.01],
+                    right=False,
                     labels=["low", "medium", "high"],
                 )
 
