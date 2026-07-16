@@ -29,3 +29,66 @@ guardrails:
     judge_prompt: Is the proposed handover appropriate given conversation state and guidelines?
     state_dependencies:
       - conversation
+
+  # Order lifecycle — each state-changing tool may only be called from the order
+  # statuses listed in `allowed`. This replaces the former OrderStateMachine; the
+  # transition graph is implicit in these per-tool source preconditions.
+  - id: gate_check_inventory
+    type: hard
+    version: v1
+    tools:
+      - check_inventory
+    effect: deny
+    description: check_inventory may only run while the order is pending.
+    predicate: require_order_status
+    predicate_args:
+      allowed: [pending]
+      effect: deny
+
+  - id: gate_update_stock
+    type: hard
+    version: v1
+    tools:
+      - update_stock
+    effect: deny
+    description: update_stock may only run once inventory is confirmed.
+    predicate: require_order_status
+    predicate_args:
+      allowed: [inventory_confirmed]
+      effect: deny
+
+  - id: gate_start_preparation
+    type: hard
+    version: v1
+    tools:
+      - start_preparation
+    effect: deny
+    description: start_preparation needs a confirmed order (or a prior prep to retry).
+    predicate: require_order_status
+    predicate_args:
+      allowed: [inventory_confirmed, in_preparation, preparation_error]
+      effect: deny
+
+  - id: gate_end_preparation
+    type: hard
+    version: v1
+    tools:
+      - end_preparation
+    effect: deny
+    description: end_preparation may only run while a coffee is in preparation.
+    predicate: require_order_status
+    predicate_args:
+      allowed: [in_preparation]
+      effect: deny
+
+  - id: gate_offer_refund
+    type: hard
+    version: v1
+    tools:
+      - offer_refund
+    effect: deny
+    description: offer_refund may only run on a completed order.
+    predicate: require_order_status
+    predicate_args:
+      allowed: [completed]
+      effect: deny

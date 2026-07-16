@@ -1,0 +1,75 @@
+guardrails:
+  - id: allowed_handover_targets
+    type: hard
+    version: v1
+    tools: [transfer_to_agent]
+    effect: deny
+    description: Handover target must be in the calling agent's allowed_handovers list.
+    predicate: allowed_handover_targets
+
+  - id: handover_appropriateness_soft_stub
+    type: soft
+    version: v1
+    tools: [transfer_to_agent]
+    effect: allow
+    description: Stub soft guardrail asking 'is this handover appropriate?' (always allow for MVP).
+    judge_prompt: Is the proposed handover appropriate given conversation state and guidelines?
+    state_dependencies: [conversation]
+
+  - id: discount_within_30pct
+    type: hard
+    version: v1
+    tools: [calculate_total]
+    effect: flag
+    description: Flag discounts above 30%.
+    predicate: discount_within_limit
+    predicate_args: {max_pct: 30}
+
+  # INVERTED lifecycle gates (deny): each tool's `allowed` set is a status it CANNOT be
+  # in when the tool is legitimately called, so every fulfillment step is denied from its
+  # real predecessor. The guardrails deliberately fight the process. Combined with the
+  # severed barista handover (see agents/barista_agent.yaml), orders get trapped.
+  - id: gate_check_inventory
+    type: hard
+    version: v1
+    tools: [check_inventory]
+    effect: deny
+    description: (inverted) check_inventory only allowed once already inventory_confirmed.
+    predicate: require_order_status
+    predicate_args: {allowed: [inventory_confirmed], effect: deny}
+
+  - id: gate_update_stock
+    type: hard
+    version: v1
+    tools: [update_stock]
+    effect: deny
+    description: (inverted) update_stock only allowed while pending.
+    predicate: require_order_status
+    predicate_args: {allowed: [pending], effect: deny}
+
+  - id: gate_start_preparation
+    type: hard
+    version: v1
+    tools: [start_preparation]
+    effect: deny
+    description: (inverted) start_preparation only allowed once completed.
+    predicate: require_order_status
+    predicate_args: {allowed: [completed], effect: deny}
+
+  - id: gate_end_preparation
+    type: hard
+    version: v1
+    tools: [end_preparation]
+    effect: deny
+    description: (inverted) end_preparation only allowed while pending.
+    predicate: require_order_status
+    predicate_args: {allowed: [pending], effect: deny}
+
+  - id: gate_offer_refund
+    type: hard
+    version: v1
+    tools: [offer_refund]
+    effect: deny
+    description: (inverted) offer_refund only allowed while pending.
+    predicate: require_order_status
+    predicate_args: {allowed: [pending], effect: deny}

@@ -10,9 +10,8 @@ import mlflow
 from src.agents import reset_inventory
 from src.agents.customer_agent import CustomerAgent
 from src.agents.tray import get_tray, clear_tray
-from src.agents.order_store import load_recent_order
+from src.agents.order_store import load_recent_order, set_order_status
 from src.agents.shared_components import OrderStatus
-from src.agents.order_state_machine import state_machine, InvalidTransitionError
 from src.stream import extract_messages
 
 logger = logging.getLogger("coffee_shop.conversation")
@@ -33,7 +32,9 @@ class ConversationEngine:
     def _get_config(self, thread_id):
         return {"configurable": {"thread_id": thread_id}}
 
-    def send_message(self, thread_id: str, message: str, scenario_index: int | None = None) -> str | None:
+    def send_message(
+        self, thread_id: str, message: str, scenario_index: int | None = None
+    ) -> str | None:
         """Send a message through the swarm and return the last customer-facing agent response.
 
         When `mlflow_enabled` and `setup_name` are set, tags the produced MLflow
@@ -45,7 +46,10 @@ class ConversationEngine:
         last_agent_message = None
 
         stream = self.app.stream(
-            {"messages": [{"role": "user", "content": message}], "handoff_context": None},
+            {
+                "messages": [{"role": "user", "content": message}],
+                "handoff_context": None,
+            },
             config,
             subgraphs=True,
         )
@@ -81,7 +85,9 @@ class ConversationEngine:
             on_message("customer", message)
 
         while message:
-            agent_reply = self.send_message(thread_id, message, scenario_index=customer_agent.scenario_index)
+            agent_reply = self.send_message(
+                thread_id, message, scenario_index=customer_agent.scenario_index
+            )
             if on_message and agent_reply:
                 on_message("agent", agent_reply)
 
@@ -104,7 +110,9 @@ class ConversationEngine:
         }
         self._save_feedback_store()
         logger.info(
-            "Customer feedback [%.2f]: %s", feedback["feedback_score"], feedback["feedback_reason"]
+            "Customer feedback [%.2f]: %s",
+            feedback["feedback_score"],
+            feedback["feedback_reason"],
         )
 
         return self.traces_of_latest_conversations[trace_start:]
@@ -135,11 +143,16 @@ class ConversationEngine:
                 "You received your coffee but it tastes slightly off — almost metallic. Something isn't right."
             )
 
-        if order.status != OrderStatus.COMPLETED:
-            try:
-                state_machine.transition(order, OrderStatus.COMPLETED, context="tray pickup by customer")
-            except InvalidTransitionError:
-                pass
+        if order.status == OrderStatus.IN_PREPARATION:
+            set_order_status(
+                order, OrderStatus.COMPLETED, context="tray pickup by customer"
+            )
+        elif order.status != OrderStatus.COMPLETED:
+            logger.warning(
+                "Tray pickup skipped completion for %s: status=%s not IN_PREPARATION",
+                order_id,
+                order.status.value,
+            )
 
         clear_tray(order_id)
 

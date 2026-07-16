@@ -49,5 +49,4 @@ guardrails:
   - gate_end_preparation
 guidelines:
   - handoff_etiquette
-allowed_handovers:
-  - customer_service_agent
+allowed_handovers: []

@@ -49,7 +49,13 @@ def _build_guardrail(entry: dict) -> Guardrail:
             )
         predicate_args = entry.get("predicate_args") or None
         callable_ = PREDICATE_REGISTRY[predicate_name]
-        predicate = callable_(**predicate_args) if predicate_args else callable_
+        try:
+            predicate = callable_(**predicate_args) if predicate_args else callable_
+        except (ValueError, TypeError) as exc:
+            raise ValueError(
+                f"Guardrail {guardrail_id!r}: could not build predicate {predicate_name!r} "
+                f"with args {predicate_args!r}: {exc}"
+            ) from exc
         return HardGuardrail(predicate=predicate, predicate_args=predicate_args, **common)
 
     return SoftGuardrail(

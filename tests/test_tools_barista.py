@@ -3,14 +3,18 @@
 Validates start_preparation (fires brew), end_preparation (polls for result),
 retry paths, precondition guard, and estimate_prep_time.
 """
+
 import json
 import unittest
 from unittest.mock import patch, MagicMock
 
 from src.agents.order_store import init_db, reset_inventory, save_order, load_order
 from src.agents.barista_agent import (
-    start_preparation, end_preparation, estimate_prep_time,
-    ORDER_STATUS_CACHE, ORDER_JOB_MAP,
+    start_preparation,
+    end_preparation,
+    estimate_prep_time,
+    ORDER_STATUS_CACHE,
+    ORDER_JOB_MAP,
 )
 from src.agents.shared_components import Order, OrderItem, OrderStatus
 
@@ -122,31 +126,8 @@ class TestEndPreparationFailure(unittest.TestCase):
         self.assertEqual(order.status, OrderStatus.PREPARATION_ERROR)
 
 
-class TestStartPreparationRejectsWrongStatus(unittest.TestCase):
-    """Test 22: Cannot prepare order not in INVENTORY_CONFIRMED state."""
-
-    def setUp(self):
-        init_db()
-        reset_inventory()
-        ORDER_STATUS_CACHE.clear()
-        ORDER_JOB_MAP.clear()
-
-    @patch("src.agents.barista_agent.is_machine_running", return_value=True)
-    def test_pending_rejected(self, mock_running):
-        order = Order(
-            customer="Test",
-            status=OrderStatus.PENDING,
-            total=4.0,
-            items=[OrderItem(name="latte", quantity=1, price=4.0, size=None, extras=[])],
-        )
-        save_order(order)
-        result = start_preparation.invoke({"order_id": order.order_id_str})
-        data = json.loads(result)
-        self.assertEqual(data["status"], "error")
-        self.assertIn("Cannot prepare", data["message"])
-
-        loaded = load_order(order.order_id_str)
-        self.assertEqual(loaded.status, OrderStatus.PENDING)
+# Test 22 (start_preparation status precondition) moved to the gateway — the tool no
+# longer self-gates on order status. See tests/test_require_order_status.py.
 
 
 class TestStartPreparationRetryAfterFailure(unittest.TestCase):
@@ -167,7 +148,9 @@ class TestStartPreparationRetryAfterFailure(unittest.TestCase):
             customer="Test",
             status=OrderStatus.PREPARATION_ERROR,
             total=4.0,
-            items=[OrderItem(name="latte", quantity=1, price=4.0, size=None, extras=[])],
+            items=[
+                OrderItem(name="latte", quantity=1, price=4.0, size=None, extras=[])
+            ],
         )
         save_order(order)
 

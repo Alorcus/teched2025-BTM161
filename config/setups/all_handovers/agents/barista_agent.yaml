@@ -42,6 +42,8 @@ tools:
 guardrails:
   - allowed_handover_targets
   - order_id_in_handoff
+  - gate_start_preparation
+  - gate_end_preparation
 guidelines:
   - handoff_etiquette
   - handoff_order_id
