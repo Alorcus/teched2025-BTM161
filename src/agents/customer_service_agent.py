@@ -27,9 +27,8 @@ def offer_refund(order_id: str) -> str:
         return f"Error: Order '{order_id}' not found."
 
     refund_amount = order.total
-    set_order_status(order, OrderStatus.REFUNDED, context="offer_refund: full refund")
     order.total = 0.0
-    save_order(order)
+    set_order_status(order, OrderStatus.REFUNDED, context="offer_refund: full refund")
 
     return json.dumps(
         {

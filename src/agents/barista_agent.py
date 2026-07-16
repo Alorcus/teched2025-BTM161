@@ -268,7 +268,7 @@ def start_preparation(order_id: str, config: RunnableConfig = None) -> str:
     if not job_id:
         return tool_response("error", "No job_id returned", order_id)
 
-    order = set_order_status(
+    set_order_status(
         order, OrderStatus.IN_PREPARATION, context="prepare_order: starting"
     )
 
@@ -359,7 +359,7 @@ def end_preparation(order_id: str) -> str:
                     )
 
                 elif status == "failed":
-                    order = set_order_status(
+                    set_order_status(
                         order,
                         OrderStatus.PREPARATION_ERROR,
                         context=f"brewing failed on attempt #{attempt_count}",

@@ -35,7 +35,7 @@ def check_inventory(order_id: str) -> str:
         if report["all_available"]
         else OrderStatus.INVENTORY_ISSUES
     )
-    order = set_order_status(order, new_status, context="check_inventory")
+    set_order_status(order, new_status, context="check_inventory")
     if report["all_available"]:
         logger.debug("Inventory check passed for %s", order_id)
     else:

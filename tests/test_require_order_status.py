@@ -67,11 +67,11 @@ class TestRequireOrderStatusPredicate(unittest.TestCase):
         predicate = require_order_status_predicate(["completed"], effect="flag")
         self.assertEqual(predicate(_ctx(order_id)).effect, Effect.FLAG)
 
-    def test_unresolvable_order_allows(self):
+    def test_unresolvable_order_denies(self):
         predicate = require_order_status_predicate(["completed"])
-        self.assertEqual(predicate(_ctx("ORD999999")).effect, Effect.ALLOW)
+        self.assertEqual(predicate(_ctx("ORD999999")).effect, Effect.DENY)
 
-    def test_missing_order_id_allows(self):
+    def test_missing_order_id_denies(self):
         predicate = require_order_status_predicate(["completed"])
         ctx = GuardrailContext(
             agent_id="x",
@@ -80,7 +80,11 @@ class TestRequireOrderStatusPredicate(unittest.TestCase):
             state={},
             allowed_handovers=[],
         )
-        self.assertEqual(predicate(ctx).effect, Effect.ALLOW)
+        self.assertEqual(predicate(ctx).effect, Effect.DENY)
+
+    def test_unresolvable_respects_flag_effect(self):
+        predicate = require_order_status_predicate(["completed"], effect="flag")
+        self.assertEqual(predicate(_ctx("ORD999999")).effect, Effect.FLAG)
 
     def test_update_stock_precondition(self):
         """Formerly the inline gate in update_stock: only inventory_confirmed."""

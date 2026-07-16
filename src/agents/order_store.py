@@ -126,10 +126,12 @@ def save_order(order: Order) -> None:
 
 def set_order_status(
     order: Order, new_status: OrderStatus, *, context: str = ""
-) -> Order:
+) -> None:
     """Persist a status change and log it. Non-validating on purpose: transition
     legality is enforced by gateway guardrails (see control_plane), not here. This
-    is only a persistence + observability helper — it makes no policy decision."""
+    is only a persistence + observability helper — it makes no policy decision.
+
+    Mutates `order` in place; does not return the object (do not reassign at call sites)."""
     old_status = order.status
     order.status = new_status
     save_order(order)
@@ -138,7 +140,6 @@ def set_order_status(
         f"from={old_status.value} to={new_status.value}"
         f"{f' context={context}' if context else ''}"
     )
-    return order
 
 
 def load_order(order_id: str) -> Optional[Order]:

@@ -90,8 +90,9 @@ def require_order_status_predicate(allowed: list[str], effect: str = "deny"):
 
     The order is resolved from the tool's `order_id` argument. The transition target the
     tool computes at runtime is always legal from an allowed source, so a source-status
-    precondition is equivalent to validating the transition. Unresolvable orders return
-    ALLOW so the tool itself can report 'not found'. `effect` selects deny vs flag.
+    precondition is equivalent to validating the transition. A missing or unresolvable
+    `order_id` yields the same violation effect as an out-of-set status: hallucinated
+    IDs must not silently bypass the gate. `effect` selects deny vs flag.
     """
     allowed_set = {str(s) for s in allowed}
     violation_effect = Effect(effect)
@@ -101,10 +102,14 @@ def require_order_status_predicate(allowed: list[str], effect: str = "deny"):
         order = load_order(order_id) if order_id else None
         if order is None:
             return Verdict(
-                effect=Effect.ALLOW,
+                effect=violation_effect,
                 guardrail_name="",
                 guardrail_type="",
-                reason_internal=f"order {order_id!r} not resolvable; precondition not evaluated",
+                reason_internal=f"order {order_id!r} not resolvable; treated as violation",
+                reason_for_llm=(
+                    f"Cannot call {context.tool_name!r} for order {order_id!r}: "
+                    f"the order does not exist. Verify the order id before retrying."
+                ),
             )
         current = order.status.value
         if current in allowed_set:

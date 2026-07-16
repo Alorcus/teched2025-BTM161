@@ -143,9 +143,15 @@ class ConversationEngine:
                 "You received your coffee but it tastes slightly off — almost metallic. Something isn't right."
             )
 
-        if order.status != OrderStatus.COMPLETED:
+        if order.status == OrderStatus.IN_PREPARATION:
             set_order_status(
                 order, OrderStatus.COMPLETED, context="tray pickup by customer"
+            )
+        elif order.status != OrderStatus.COMPLETED:
+            logger.warning(
+                "Tray pickup skipped completion for %s: status=%s not IN_PREPARATION",
+                order_id,
+                order.status.value,
             )
 
         clear_tray(order_id)

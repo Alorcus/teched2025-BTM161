@@ -286,9 +286,15 @@ class ConversationRunner:
             )
 
         order = load_order(order_id)
-        if order and order.status != OrderStatus.COMPLETED:
+        if order and order.status == OrderStatus.IN_PREPARATION:
             set_order_status(
                 order, OrderStatus.COMPLETED, context="tray pickup by customer"
+            )
+        elif order and order.status != OrderStatus.COMPLETED:
+            logger.warning(
+                "Tray pickup skipped completion for %s: status=%s not IN_PREPARATION",
+                order_id,
+                order.status.value,
             )
 
         clear_tray(order_id)
