@@ -4,9 +4,11 @@ guardrails:
     version: v1
     tools:
       - transfer_to_agent
-    effect: deny
-    description: Handover target must be in the calling agent's allowed_handovers list.
+    effect: flag
+    description: Handover target must be in the calling agent's allowed_handovers list (FLAG only — mirrors baseline in observe mode).
     predicate: allowed_handover_targets
+    predicate_args:
+      effect: flag
 
   - id: discount_within_30pct
     type: hard
@@ -30,9 +32,9 @@ guardrails:
     state_dependencies:
       - conversation
 
-  # Order lifecycle in OBSERVE mode: same source preconditions as baseline, but FLAG
-  # (allow + label) instead of DENY — agents behave as if unconstrained while every
-  # illegal transition is recorded in the guardrail log for comparison.
+  # baseline_flag: every guardrail baseline denies, this setup FLAGs. Agents behave as
+  # if unconstrained; violations are labeled in the guardrail log so you can compare
+  # emergent behavior against the enforced baseline.
   - id: gate_check_inventory
     type: hard
     version: v1
