@@ -251,6 +251,7 @@ def order_total_within_limit_predicate(max_total: float, effect: str = "deny"):
 _ITEM_TERMINALS: frozenset[str] = frozenset(MENU.keys()) | {
     "coffee", "mocha", "macchiato", "chai", "frappe", "frappé",
     "brew", "blend", "tea", "cortado", "matcha", "affogato",
+    "pastry", "pastries",
 }
 _MULTIWORD_TERMINALS: tuple[tuple[str, ...], ...] = (
     ("flat", "white"),
@@ -267,6 +268,7 @@ _REJECTION_TRIGGERS: tuple[str, ...] = (
 )
 _STOP_WORDS: frozenset[str] = frozenset({
     "a", "an", "the", "some", "any", "one", "two", "three",
+    "that", "this", "these", "those",
     "small", "medium", "large", "normal", "regular",
     "your", "my", "his", "her", "their",
     "please", "just", "only",
@@ -286,7 +288,20 @@ _EXTRAS_TOKENS: frozenset[str] = frozenset(
 
 
 def _sentences(text: str) -> list[str]:
+    """Sentence-level split: only true terminators. Used for rejection-context
+    scoping — `you asked about mocha — we don't serve that` must be treated
+    as a single sentence so the rejection trigger applies to the mocha
+    mention. Phrase extraction runs a finer clause-level split (`_clauses`)
+    inside each sentence."""
     return [s.strip() for s in re.split(r"[.!?\n]+", text) if s.strip()]
+
+
+def _clauses(sentence: str) -> list[str]:
+    """Clause-level split: also breaks on em/en-dashes, colons, semicolons,
+    and commas. Item phrases usually live in short noun phrases inside a
+    single clause; without this, `Great choice — an americano` gets left-
+    extended into a phony off-menu phrase during candidate extraction."""
+    return [c.strip() for c in re.split(r"[—–:;,]+", sentence) if c.strip()]
 
 
 def _is_rejection_context(sentence: str) -> bool:
@@ -295,7 +310,36 @@ def _is_rejection_context(sentence: str) -> bool:
 
 
 def _tokens(sentence: str) -> list[str]:
-    return re.findall(r"[a-zA-Zé']+", sentence.lower())
+    """Tokenize and lightly singularize: fold a trailing plural into its
+    singular form when the singular is a known menu item. `muffins`→`muffin`,
+    `sandwiches`→`sandwich`, `pastries`→`pastry`. Leaves unknown words
+    untouched so extras like `oat` are not mangled."""
+    raw = re.findall(r"[a-zA-Zé']+", sentence.lower())
+    normalized: list[str] = []
+    for tok in raw:
+        normalized.append(_singularize(tok))
+    return normalized
+
+
+def _singularize(tok: str) -> str:
+    """Return the singular form iff that singular is a menu item / family
+    word / extras token. Otherwise return `tok` unchanged."""
+    known = _ITEM_TERMINALS | _EXTRAS_TOKENS
+    if tok in known:
+        return tok
+    if tok.endswith("ies") and len(tok) > 3:
+        cand = tok[:-3] + "y"
+        if cand in known:
+            return cand
+    if tok.endswith("es") and len(tok) > 2:
+        cand = tok[:-2]
+        if cand in known:
+            return cand
+    if tok.endswith("s") and len(tok) > 1:
+        cand = tok[:-1]
+        if cand in known:
+            return cand
+    return tok
 
 
 def _find_candidate_phrases(tokens: list[str]) -> list[tuple[list[str], int]]:
@@ -391,9 +435,10 @@ def off_menu_recommendation_predicate(effect: str = "deny"):
             for sentence in _sentences(content):
                 if _is_rejection_context(sentence):
                     continue
-                for phrase, _terminal_idx in _find_candidate_phrases(_tokens(sentence)):
-                    if not _phrase_is_on_menu(phrase):
-                        offenders.append(" ".join(phrase))
+                for clause in _clauses(sentence):
+                    for phrase, _terminal_idx in _find_candidate_phrases(_tokens(clause)):
+                        if not _phrase_is_on_menu(phrase):
+                            offenders.append(" ".join(phrase))
 
             if not offenders:
                 return Verdict(

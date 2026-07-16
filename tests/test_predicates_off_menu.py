@@ -129,5 +129,21 @@ class TestOffMenuRecommendation(unittest.TestCase):
         self.assertIn("honey cinnamon latte", verdict.reason_internal)
 
 
+    def test_tuned_01_false_positive_allow(self):
+        response = """Hi there! 😊 Great choice — an americano and a croissant coming right up!
+
+Quick question on the americano — would you like that as a large or normal?"""
+        self._assert_allow(response)
+
+    def test_tuned_02_false_negative_deny(self):
+        response = """A large latte coming right up! ☕ Would you like anything to eat with that? We've got fresh pastries, muffins, and sandwiches if you're feeling peckish!"""
+        self._assert_deny(response)
+
+    def test_tuned_03_false_positive_allow(self):
+        response = """Hi there! ☕ Great choice — an americano and a croissant, coming right up!
+
+Quick question — would you like that americano as a large or normal?"""
+        self._assert_allow(response)
+
 if __name__ == "__main__":
     unittest.main()

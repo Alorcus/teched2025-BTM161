@@ -595,7 +595,14 @@ class ConversationRunner:
                     )
                 )
         if patch_msgs:
-            self.shop.app.update_state(config, {"messages": patch_msgs})
+            try:
+                self.shop.app.update_state(config, {"messages": patch_msgs})
+            except Exception:
+                logger.exception(
+                    "update_state failed while removing rejected AIMessage; "
+                    "continuing with pushback (the rejected message remains in "
+                    "state but the critique still drives re-invocation)"
+                )
         # The critique is delivered as a fresh user-style turn so the graph
         # has something to react to (stream(None, ...) is a no-op once the
         # prior step completed). Pass the HumanMessage as a list so the
