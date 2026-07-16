@@ -3,7 +3,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 import pm4py
-import pandas as pd
+import polars as pl
 from pm4py.objects.ocel.importer.jsonocel import importer as jsonocel_importer
 from pm4py.algo.discovery.ocel.ocdfg import algorithm as ocdfg_discovery
 from pm4py.visualization.ocel.ocdfg import visualizer as ocdfg_visualizer
@@ -82,18 +82,19 @@ def _patched_colors(color_map: dict[str, str]):
         _pn_classic.ot_to_color = original_pn
 
 
-def export_case_dfg(flat_df: pd.DataFrame, out_path: Path, export_format: str = "svg") -> Path:
-    """Discover and export a case-centric frequency DFG from a flat pandas event log.
+def export_case_dfg(flat_df: pl.DataFrame, out_path: Path, export_format: str = "svg") -> Path:
+    """Discover and export a case-centric frequency DFG from a flat polars event log.
 
     flat_df must have columns: case:concept:name, concept:name, time:timestamp.
     """
+    
     dfg, start_activities, end_activities = pm4py.discover_dfg(
-        flat_df,
+        flat_df.lazy(),
         activity_key="concept:name",
         timestamp_key="time:timestamp",
         case_id_key="case:concept:name",
     )
-    activity_counts = flat_df["concept:name"].value_counts().to_dict()
+    activity_counts = dict(flat_df["concept:name"].value_counts().iter_rows())
     gviz = dfg_viz.apply(
         dfg,
         activities_count=activity_counts,

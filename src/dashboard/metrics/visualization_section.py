@@ -4,7 +4,6 @@ import logging
 import uuid
 from pathlib import Path
 
-import pandas as pd
 import panel as pn
 import polars as pl
 
@@ -136,12 +135,12 @@ class VisualizationSection:
         column.append(self._visualization_tabs())
         return column
 
-    def _build_case_dfg_df(self) -> pd.DataFrame | None:
+    def _build_case_dfg_df(self) -> pl.DataFrame | None:
         """Build enriched flat event log for case-centric DFG.
 
         Filter out call_llm, agent_response and user_prompt activities, to make the DFG clearer.
 
-        Returns a pandas event log with pm4py columns (case:concept:name,
+        Returns a polars event log with pm4py columns (case:concept:name,
         concept:name, time:timestamp) plus optional case_feedback_score /
         case_feedback_class columns, or None on failure.
         """
@@ -169,36 +168,44 @@ class VisualizationSection:
             if flat_log.is_empty():
                 return None
 
-            df_pd = flat_log.select(
+            df = flat_log.select(
                 pl.col("case_id").alias("case:concept:name"),
                 pl.col("activity").alias("concept:name"),
                 pl.col("ocel_time").alias("time:timestamp"),
-            ).to_pandas()
+            )
 
-            # Case-level feedback enrichment
+            # Case-level feedback enrichment.
             feedback = case_feedback_scores(self._ocel)
             if not feedback.is_empty():
-                case_feedback = (
-                    feedback.to_pandas().set_index("case_id")["feedback_score"]
-                )
-                df_pd["case_feedback_score"] = df_pd["case:concept:name"].map(case_feedback)
-                df_pd["case_feedback_class"] = pd.cut(
-                    df_pd["case_feedback_score"],
-                    bins=[0.0, FEEDBACK_LOW, FEEDBACK_HIGH, 1.01],
-                    right=False,
-                    labels=["low", "medium", "high"],
+                df = df.join(
+                    feedback.select(
+                        "case_id",
+                        pl.col("feedback_score").alias("case_feedback_score"),
+                    ),
+                    left_on="case:concept:name",
+                    right_on="case_id",
+                    how="left",
+                ).with_columns(
+                    case_feedback_class=pl.when(
+                        pl.col("case_feedback_score") < FEEDBACK_LOW
+                    )
+                    .then(pl.lit("low"))
+                    .when(pl.col("case_feedback_score") < FEEDBACK_HIGH)
+                    .then(pl.lit("medium"))
+                    .when(pl.col("case_feedback_score").is_not_null())
+                    .then(pl.lit("high"))
                 )
 
-            return df_pd
+            return df
         except Exception:
             logger.exception("Case-centric DFG build failed")
             return None
 
-    def _svg_from_df(self, df_pd: pd.DataFrame, out_path: Path) -> str | None:
-        """Export DFG SVG from a pandas event log DataFrame, return SVG text or None."""
+    def _svg_from_df(self, df: pl.DataFrame, out_path: Path) -> str | None:
+        """Export DFG SVG from a polars event log DataFrame, return SVG text or None."""
         try:
             cols = ["case:concept:name", "concept:name", "time:timestamp"]
-            export_case_dfg(df_pd[cols].copy(), out_path, export_format="svg")
+            export_case_dfg(df.select(cols), out_path, export_format="svg")
             return out_path.read_text()
         except Exception:
             logger.exception("DFG export to %s failed", out_path.name)
@@ -218,8 +225,8 @@ class VisualizationSection:
 
         panels: dict[str, pn.viewable.Viewable] = {}
         for cls in ["low", "medium", "high"]:
-            subset = df[df["case_feedback_class"] == cls]
-            if subset.empty:
+            subset = df.filter(pl.col("case_feedback_class") == cls)
+            if subset.is_empty():
                 panels[f"{cls.title()} feedback"] = pn.pane.Alert(f"No cases with {cls} feedback.", alert_type="info")
                 continue
             svg = self._svg_from_df(subset, out_dir / f"{export_name}-case-dfg-{cls}.svg")
