@@ -48,9 +48,21 @@ A **setup** is a self-contained configuration of agents, guardrails, and guideli
 
 **Available setups:**
 
-- `baseline` — the standard coffee shop: each agent can only hand off to the next role in the workflow, and every agent prompt declares that a runtime process supervisor is watching.
-- `all_handovers` — every business agent can transfer to every other agent, and an `order_id_in_handoff` flag guardrail (plus matching `handoff_order_id` guideline) requires handoffs to carry an `ORDXXXX` once an order exists.
+The catalogue is designed as a spectrum from *no rules* to *hostile rules*, so you can compare how the same swarm behaves under different control-plane pressure. The first three are the reference points; the remaining five dial specific knobs (range caps, lifecycle gates, effect mode) around them.
+
+Reference points:
+
 - `unconstrained` — every business agent can transfer to every other agent, with no guardrails, no guidelines, and no supervisor preamble — maximum agent freedom for observing emergent behavior.
+- `baseline` — the standard coffee shop: each agent can only hand off to the next role in the workflow, `deny` lifecycle gates enforce the order state machine (`pending → inventory_confirmed → in_preparation → completed/preparation_error → refunded`), and every agent prompt declares that a runtime process supervisor is watching.
+- `all_handovers` — every business agent can transfer to every other agent, and an `order_id_in_handoff` flag guardrail (plus matching `handoff_order_id` guideline) requires handoffs to carry an `ORDXXXX` once an order exists.
+
+Governance dials on top of `baseline`:
+
+- `sensible_ranges` — adds `deny` range caps that let normal orders through but block outliers: order size 1–6 units, total ≤ $20, discount ≤ 30 %, partial refund ≤ 50 %. Shows the "happy path still works, only outliers get stopped" regime.
+- `sensible_ranges_flag` — identical caps to `sensible_ranges`, but every range guardrail is `flag` (observe-only). Agents behave as if unconstrained on magnitudes while the guardrail log records every trip — useful for measuring how often a proposed cap *would* bite before you enforce it.
+- `overconstrained` — the same range guardrails cranked so far that normal business cannot happen: max one unit per order, total ≤ $3, zero discounts, zero partial refunds. Demonstrates the failure mode of over-tight governance — most orders never get created.
+- `lifecycle_flag` — same lifecycle preconditions as `baseline`, but the order-state gates run in `flag` mode instead of `deny`. Agents behave as if the state machine were unenforced; every illegal transition is labeled in the log so you can compare emergent order flow against the enforced one.
+- `anti_flow` — the lifecycle gates are deliberately **inverted** (each tool is only "allowed" from a status it can never legitimately be in), so every fulfillment step is denied from its real predecessor. Combined with a severed barista handover, orders get trapped mid-flow. Useful as a worst-case for showing how mis-configured guardrails cause deadlocks rather than safety.
 
 **Selecting a setup:**
 
