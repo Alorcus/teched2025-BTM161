@@ -6,26 +6,36 @@ from pathlib import Path
 from typing import Callable
 
 import mlflow
+from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage
 
 from src.agents import reset_inventory
 from src.agents.customer_agent import CustomerAgent
 from src.agents.tray import get_tray, clear_tray
 from src.agents.order_store import load_recent_order, set_order_status
 from src.agents.shared_components import OrderStatus
-from src.stream import extract_messages
+from src.control_plane.types import Effect
+from src.stream import SWARM_AGENTS, extract_messages
 
 logger = logging.getLogger("coffee_shop.conversation")
 
 FEEDBACK_STORE_PATH = Path("./feedback_store.json")
+MAX_RESPONSE_GUARDRAIL_RETRIES = 3
 
 
 class ConversationEngine:
     """Headless conversation runner for the coffee shop multi-agent system."""
 
-    def __init__(self, app, mlflow_enabled=True, setup_name: str | None = None):
+    def __init__(
+        self,
+        app,
+        mlflow_enabled=True,
+        setup_name: str | None = None,
+        gateways: dict | None = None,
+    ):
         self.app = app
         self.mlflow_enabled = mlflow_enabled
         self.setup_name = setup_name
+        self.gateways = gateways or {}
         self.traces_of_latest_conversations: list[str] = []
         self.feedback_log: dict[str, dict] = {}
 
@@ -41,21 +51,43 @@ class ConversationEngine:
         trace with `setup` and `scenario_index` so downstream analytics can filter
         by them. `scenario_index` is per-conversation state; the caller passes it
         in so the tag reflects the conversation's chosen scenario.
+
+        Response-scoped guardrails are evaluated on each streamed agent
+        AIMessage. On DENY the offending message is removed from graph state
+        and a corrective HumanMessage carrying `deny_reason_for_llm` is fed in
+        as a fresh turn — up to `MAX_RESPONSE_GUARDRAIL_RETRIES` retries per
+        user turn.
         """
         config = self._get_config(thread_id)
+        stream_input: dict | None = {
+            "messages": [{"role": "user", "content": message}],
+            "handoff_context": None,
+        }
         last_agent_message = None
+        retries = 0
 
-        stream = self.app.stream(
-            {
-                "messages": [{"role": "user", "content": message}],
+        while True:
+            stream = self.app.stream(stream_input, config, subgraphs=True)
+            denial: dict | None = None
+
+            for sm in extract_messages(stream):
+                if denial is None and self._is_denied_agent_message(sm):
+                    denial = self._response_guardrail_denial(sm)
+                    if denial is not None:
+                        break
+                if sm.is_agent_reply:
+                    last_agent_message = sm.content
+
+            if denial is None or retries >= MAX_RESPONSE_GUARDRAIL_RETRIES:
+                break
+
+            self._apply_response_guardrail_patch(config, denial)
+            stream_input = {
+                "messages": [HumanMessage(content=denial["deny_reason"], name="system")],
                 "handoff_context": None,
-            },
-            config,
-            subgraphs=True,
-        )
-        for sm in extract_messages(stream):
-            if sm.is_agent_reply:
-                last_agent_message = sm.content
+            }
+            retries += 1
+            last_agent_message = None
 
         if self.mlflow_enabled:
             trace_id = mlflow.get_last_active_trace_id()
@@ -64,6 +96,76 @@ class ConversationEngine:
                 _tag_trace(trace_id, self.setup_name, scenario_index)
 
         return last_agent_message
+
+    def _is_denied_agent_message(self, sm) -> bool:
+        """Only text-bearing AIMessages from swarm agents are candidates for
+        response-guardrail evaluation. Skip tool-call-only turns and non-swarm
+        messages (customer, system, tool results)."""
+        if sm.agent_name not in SWARM_AGENTS:
+            return False
+        if not isinstance(sm.message, AIMessage):
+            return False
+        return bool(sm.content) and not getattr(sm.message, "tool_calls", None)
+
+    def _response_guardrail_denial(self, sm) -> dict | None:
+        """Return {msg, deny_reason} when a response guardrail denies this
+        AIMessage, else None. A broken predicate collapses to None so a
+        malfunctioning guardrail cannot wedge the headless flow."""
+        gateway = self.gateways.get(sm.agent_name)
+        if gateway is None:
+            return None
+        try:
+            decision = gateway.evaluate_assistant_message(
+                content=sm.content,
+                message_id=getattr(sm.message, "id", "") or "",
+                state={},
+                thread_id=None,
+            )
+        except Exception:
+            logger.exception("response guardrail evaluation failed; allowing message")
+            return None
+        if decision.final_decision != Effect.DENY:
+            return None
+        return {
+            "msg": sm.message,
+            "deny_reason": decision.deny_reason_for_llm or (
+                "Your last message violated a response guardrail. Try again."
+            ),
+        }
+
+    def _apply_response_guardrail_patch(self, config: dict, denial: dict) -> None:
+        """Remove the offending AIMessage from the checkpointed parent-graph
+        state so the retry doesn't re-yield it to consumers. The stream
+        already produced it; state removal prevents it from being replayed on
+        get_state and keeps the transcript clean."""
+        target = denial["msg"]
+        msg_id = self._find_state_message_id(config, target)
+        if msg_id is None:
+            return
+        try:
+            self.app.update_state(config, {"messages": [RemoveMessage(id=msg_id)]})
+        except Exception:
+            logger.exception("failed to remove denied AIMessage from graph state")
+
+    def _find_state_message_id(self, config: dict, target: AIMessage) -> str | None:
+        """Locate the offending AIMessage in the parent graph's checkpointed
+        state by content match (subgraph stream ids differ from parent
+        checkpoint ids — see the equivalent lookup in ConversationRunner)."""
+        try:
+            snapshot = self.app.get_state(config)
+        except Exception:
+            logger.exception("get_state failed")
+            return None
+        values = getattr(snapshot, "values", None) or {}
+        msgs = values.get("messages", []) if isinstance(values, dict) else []
+        target_content = target.content if isinstance(target.content, str) else ""
+        for cand in reversed(msgs):
+            if not isinstance(cand, AIMessage):
+                continue
+            cand_content = cand.content if isinstance(cand.content, str) else ""
+            if target_content and cand_content == target_content:
+                return getattr(cand, "id", None)
+        return None
 
     def run_automated(
         self,

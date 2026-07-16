@@ -80,6 +80,7 @@ class CoffeeShop:
         self.catalog: Catalog | None = None
         self.log_sink: JsonlLogSink | None = None
         self.process_supervisor: ProcessSupervisor | None = None
+        self.gateways: dict = {}
 
     def open_shop(self, reset_inventory_first=True):
         engine = create_order_store_engine(self.config.db_url)
@@ -114,7 +115,9 @@ class CoffeeShop:
             f"control plane: setup={self.config.setup_name} | agents={self.agent_repo.ids()} | log={self.config.guardrail_log_path}"
         )
 
-        self.app = build_coffee_shop_graph(llm, self.agent_repo, self.catalog, self.log_sink)
+        self.app, self.gateways = build_coffee_shop_graph(
+            llm, self.agent_repo, self.catalog, self.log_sink
+        )
 
         if self.config.process_supervisor_enabled:
             self.process_supervisor = ProcessSupervisor(
@@ -137,6 +140,7 @@ class CoffeeShop:
             self.app,
             mlflow_enabled=self.config.mlflow_enabled,
             setup_name=self.config.setup_name,
+            gateways=self.gateways,
         )
 
     def _get_config(self, thread_id):
