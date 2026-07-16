@@ -7,8 +7,9 @@ from .types import Effect, GuardrailContext, Verdict
 _ORDER_ID_RE = re.compile(r"\bORD\d{3,}\b")
 
 
-def allowed_handover_targets_predicate(context: GuardrailContext) -> Verdict:
-    """Hard guardrail: target_agent of transfer_to_agent must be in allowed_handovers."""
+def _allowed_handover_targets_eval(
+    context: GuardrailContext, effect: str = "deny"
+) -> Verdict:
     target = context.tool_args.get("target_agent", "")
     allowed = context.allowed_handovers
     if target in allowed:
@@ -19,7 +20,7 @@ def allowed_handover_targets_predicate(context: GuardrailContext) -> Verdict:
             reason_internal=f"{target!r} is in allowed_handovers={allowed}",
         )
     return Verdict(
-        effect=Effect.DENY,
+        effect=Effect(effect),
         guardrail_name="",
         guardrail_type="",
         reason_internal=f"{target!r} not in allowed_handovers={allowed} for agent {context.agent_id!r}",
@@ -28,6 +29,25 @@ def allowed_handover_targets_predicate(context: GuardrailContext) -> Verdict:
             f"You may only transfer to: {', '.join(allowed) or '(none)'}."
         ),
     )
+
+
+def allowed_handover_targets_predicate(*args, **kwargs):
+    """Dual-use: called directly by the gateway with a GuardrailContext, OR called
+    as a factory with keyword `effect` to bind a non-default violation effect.
+
+    Setups without `predicate_args` (baseline, most others) get direct-call
+    semantics equivalent to the historical hard-DENY behavior. Setups that supply
+    `predicate_args: {effect: flag}` (e.g. baseline_flag) get a configured
+    evaluator that flags instead of denies.
+    """
+    if args and isinstance(args[0], GuardrailContext):
+        return _allowed_handover_targets_eval(args[0])
+    effect = kwargs.get("effect", "deny")
+
+    def _bound(context: GuardrailContext) -> Verdict:
+        return _allowed_handover_targets_eval(context, effect=effect)
+
+    return _bound
 
 
 def discount_within_limit_predicate(max_pct: int, effect: str = "flag"):
@@ -208,6 +228,46 @@ def refund_within_limit_predicate(max_pct: int, effect: str = "deny"):
     return _eval
 
 
+def max_tool_calls_predicate(tool_name: str, max_calls: int, effect: str = "deny"):
+    """Factory: cap the number of successful invocations of `tool_name` in one
+    conversation. Counts prior ToolMessages in `state["messages"]` whose `name`
+    matches and whose `status` is not "error" (i.e. previously allowed by the
+    gateway and executed by the tool). Violation when the count is already at or
+    above `max_calls` at the moment of evaluation — remember the gateway runs
+    *before* the current call, so `>= max_calls` blocks the (max+1)-th attempt.
+    """
+    violation_effect = Effect(effect)
+
+    def _eval(context: GuardrailContext) -> Verdict:
+        messages = context.state.get("messages", []) or []
+        prior = sum(
+            1
+            for m in messages
+            if getattr(m, "name", None) == tool_name
+            and getattr(m, "status", None) != "error"
+        )
+        if prior < max_calls:
+            return Verdict(
+                effect=Effect.ALLOW,
+                guardrail_name="",
+                guardrail_type="",
+                reason_internal=f"prior {tool_name!r} calls={prior} < max={max_calls}",
+            )
+        return Verdict(
+            effect=violation_effect,
+            guardrail_name="",
+            guardrail_type="",
+            reason_internal=f"prior {tool_name!r} calls={prior} >= max={max_calls}",
+            reason_for_llm=(
+                f"You have already called {tool_name!r} {prior} time(s) in this "
+                f"conversation; the limit is {max_calls}. Continue with this order "
+                f", you cannot use this tool again."
+            ),
+        )
+
+    return _eval
+
+
 def order_total_within_limit_predicate(max_total: float, effect: str = "deny"):
     """Factory: constrain the order's total (in dollars). Resolves the order from
     `tool_args["order_id"]` and reads `order.total`; violation when it exceeds `max_total`.
@@ -255,4 +315,5 @@ PREDICATE_REGISTRY = {
     "order_size_within_range": order_size_within_range_predicate,
     "refund_within_limit": refund_within_limit_predicate,
     "order_total_within_limit": order_total_within_limit_predicate,
+    "max_tool_calls": max_tool_calls_predicate,
 }
