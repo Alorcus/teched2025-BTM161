@@ -7,7 +7,9 @@ from .types import Effect, GuardrailContext, Verdict
 _ORDER_ID_RE = re.compile(r"\bORD\d{3,}\b")
 
 
-def _allowed_handover_targets_eval(context: GuardrailContext, effect: str = "deny") -> Verdict:
+def _allowed_handover_targets_eval(
+    context: GuardrailContext, effect: str = "deny"
+) -> Verdict:
     target = context.tool_args.get("target_agent", "")
     allowed = context.allowed_handovers
     if target in allowed:
@@ -258,8 +260,8 @@ def max_tool_calls_predicate(tool_name: str, max_calls: int, effect: str = "deny
             reason_internal=f"prior {tool_name!r} calls={prior} >= max={max_calls}",
             reason_for_llm=(
                 f"You have already called {tool_name!r} {prior} time(s) in this "
-                f"conversation; the limit is {max_calls}. Continue with the order "
-                f"you already processed rather than starting a new one."
+                f"conversation; the limit is {max_calls}. Continue with this order "
+                f", you cannot use this tool again."
             ),
         )
 
