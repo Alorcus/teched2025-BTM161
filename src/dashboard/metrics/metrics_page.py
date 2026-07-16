@@ -669,7 +669,7 @@ def _lazy_visualization_panel(ocel) -> pn.viewable.Viewable:
     slot = pn.Column(
         pn.pane.HTML(
             '<div style="font-size:12px;color:#666;padding:4px 0;">'
-            "Process visualization (OC-DFG, OC-PN, Event → Object Types) is "
+            "Process visualization (Case DFG, OC-DFG, OC-PN) is "
             "generated on demand — it takes a few seconds.</div>",
             sizing_mode="stretch_width",
         ),

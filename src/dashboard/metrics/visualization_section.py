@@ -24,6 +24,64 @@ logger = logging.getLogger(__name__)
 
 _CASE_DFG_UNAVAILABLE = "Case-centric DFG unavailable."
 
+# Graph switcher: coffee-brown system from the dashboard palette (beige
+# when unselected, dark brown when pressed) so it reads as the section's
+# main navigation.
+# `!important` is required: Panel's own button.css ships rules like
+# `:host(.solid) .bk-btn.bk-btn-default { background-color: ... }` whose
+# specificity beats anything reasonable we can write here.
+_GRAPH_SWITCH_STYLESHEET = """
+.bk-btn-group .bk-btn-primary {
+  background-color: #EBDBCB !important;
+  border-color: #D9C4AD !important;
+  color: #563210 !important;
+}
+.bk-btn-group .bk-btn-primary:hover {
+  background-color: #E0CCB6 !important;
+}
+.bk-btn-group .bk-btn-primary.bk-active {
+  background-color: #563210 !important;
+  border-color: #563210 !important;
+  color: #ffffff !important;
+  font-weight: 600;
+  box-shadow: none !important;
+}
+"""
+
+# Feedback-class switcher: compact secondary row in the blue system
+# (light blue unselected, dark blue pressed) — subordinate to the brown
+# graph switcher above it. Same `!important` story as above.
+_FEEDBACK_SWITCH_STYLESHEET = """
+.bk-btn-group .bk-btn {
+  background-color: #EAF2FA !important;
+  border: none !important;
+  border-radius: 0;
+  color: #33638E !important;
+  font-size: 13px;
+  padding: 3px 10px;
+}
+/* Joined group like the graph switcher: thin divider lines between
+   buttons, rounding only on the outer corners. */
+.bk-btn-group .bk-btn + .bk-btn {
+  border-left: 1px solid #B6D0E8 !important;
+}
+.bk-btn-group .bk-btn:first-child {
+  border-radius: 4px 0 0 4px;
+}
+.bk-btn-group .bk-btn:last-child {
+  border-radius: 0 4px 4px 0;
+}
+.bk-btn-group .bk-btn:hover {
+  background-color: #D9E8F6 !important;
+}
+.bk-btn-group .bk-btn.bk-active {
+  background-color: #14568F !important;
+  color: #ffffff !important;
+  font-weight: 600;
+  box-shadow: none !important;
+}
+"""
+
 _COLOR_MAP = {
     "order_agent": AGENT_COLORS["order_agent"],
     "barista_agent": AGENT_COLORS["order_agent"],
@@ -33,6 +91,28 @@ _COLOR_MAP = {
     "prompt": "#000000",
     "response": COLOR_SCHEME["beige"],
 }
+
+
+def _button_switcher(
+    panels: dict[str, pn.viewable.Viewable],
+    **selector_kwargs,
+) -> pn.Column:
+    """Row of buttons + content slot: a click swaps the displayed panel.
+
+    The first key in `panels` is shown initially.
+    """
+    selector = pn.widgets.RadioButtonGroup(
+        options=list(panels),
+        value=next(iter(panels)),
+        **selector_kwargs,
+    )
+    slot = pn.Column(panels[selector.value], sizing_mode="stretch_width")
+
+    def _switch(event) -> None:
+        slot[:] = [panels[event.new]]
+
+    selector.param.watch(_switch, "value")
+    return pn.Column(selector, slot, sizing_mode="stretch_width")
 
 
 def _wrap_svg(svg_text: str) -> pn.viewable.Viewable:
@@ -143,17 +223,23 @@ class VisualizationSection:
             svg = self._svg_from_df(df, out_dir / f"{export_name}-case-dfg.svg")
             return _wrap_svg(svg) if svg else pn.pane.Alert(_CASE_DFG_UNAVAILABLE, alert_type="info")
 
-        tabs = []
+        panels: dict[str, pn.viewable.Viewable] = {}
         for cls in ["low", "medium", "high"]:
             subset = df[df["case_feedback_class"] == cls]
             if subset.empty:
-                tabs.append((f"{cls.title()} feedback", pn.pane.Alert(f"No cases with {cls} feedback.", alert_type="info")))
+                panels[f"{cls.title()} feedback"] = pn.pane.Alert(f"No cases with {cls} feedback.", alert_type="info")
                 continue
             svg = self._svg_from_df(subset, out_dir / f"{export_name}-case-dfg-{cls}.svg")
             content = _wrap_svg(svg) if svg else pn.pane.Alert(f"DFG for {cls} feedback unavailable.", alert_type="info")
-            tabs.append((f"{cls.title()} feedback", content))
+            panels[f"{cls.title()} feedback"] = content
 
-        return pn.Tabs(*tabs, sizing_mode="stretch_width")
+        return _button_switcher(
+            panels,
+            button_type="default",
+            stylesheets=[_FEEDBACK_SWITCH_STYLESHEET],
+            width=440,
+            margin=(0, 0, 6, 0),
+        )
 
     def _visualization_tabs(self) -> pn.viewable.Viewable:
         try:
@@ -186,18 +272,23 @@ class VisualizationSection:
 
                 ocdfg_svg = outputs["oc_dfg"].read_text()
                 ocpn_svg = outputs["oc_pn"].read_text()
-                eto_svg = outputs["object_types"].read_text()
 
-                # Create tabs with scrollable SVG visualizations
-                tabs = pn.Tabs(
-                    ("Case-Centric DFG", self._case_dfg_panel(export_name)),
-                    ("Object-Centric DFG", _wrap_svg(ocdfg_svg)),
-                    ("Object-Centric PN", _wrap_svg(ocpn_svg)),
-                    ("Event → Object Types", _wrap_svg(eto_svg)),
-                    active=0,
+                # Graph panels switched via primary buttons (Apply-filters
+                # style) instead of tabs; Event → Object Types is hidden.
+                panels = {
+                    "Case-Centric DFG": self._case_dfg_panel(export_name),
+                    "Object-Centric DFG": _wrap_svg(ocdfg_svg),
+                    "Object-Centric PN": _wrap_svg(ocpn_svg),
+                }
+                return _button_switcher(
+                    panels,
+                    button_type="primary",
+                    stylesheets=[_GRAPH_SWITCH_STYLESHEET],
                     sizing_mode="stretch_width",
+                    # Top margin keeps the switcher clear of the section
+                    # divider, matching the spacing of other sections.
+                    margin=(14, 0, 10, 0),
                 )
-                return tabs
 
             except Exception as e:
                 import traceback
