@@ -12,8 +12,6 @@ from .eventlog_helpers import (
 )
 from .styling_helpers import COLOR_SCHEME, kpi_row, section_header, subsection_header, subtitled_kpi_card
 
-_TOP_N_HANDOVER_CASES = 10
-
 
 class ObjectCardinalitySection:
     """Object-centric complexity metrics: how many objects, of which types,
@@ -38,8 +36,6 @@ class ObjectCardinalitySection:
         column.append(self._agents_per_case_chart())
         column.append(subsection_header("Most-Repeated Activities", top_margin=10))
         column.append(self._activity_divergence_chart())
-        column.append(subsection_header("Highest-Handover Cases", top_margin=10))
-        column.append(self._top_handover_cases_chart())
         return column
 
     # ---- KPI row ------------------------------------------------------
@@ -113,32 +109,6 @@ class ObjectCardinalitySection:
             yaxis={"categoryorder": "total ascending"},
             coloraxis_showscale=False,
             margin=dict(l=150, r=10, t=5, b=25),
-            height=210,
-            font=dict(size=10),
-            plot_bgcolor=COLOR_SCHEME["off-white"],
-        )
-        return pn.pane.Plotly(fig, height=210, sizing_mode="stretch_width")
-
-    # ---- Top handover cases --------------------------------------------
-
-    def _top_handover_cases_chart(self) -> pn.viewable.Viewable:
-        handovers = handover_counts_per_case(self._ocel)
-        if not handovers.height:
-            return pn.pane.Alert("No agent handovers found in this log.", alert_type="info")
-
-        top = handovers.head(_TOP_N_HANDOVER_CASES).with_columns(
-            pl.col("case_id").str.slice(-12).alias("case_label")
-        )
-        fig = px.bar(
-            top.to_pandas(),
-            x="handover_count", y="case_label", orientation="h",
-            color_discrete_sequence=[COLOR_SCHEME["dark_red"]],
-            labels={"case_label": "Case", "handover_count": "Handovers"},
-            hover_data={"case_id": True},
-        )
-        fig.update_layout(
-            yaxis={"categoryorder": "total ascending"},
-            margin=dict(l=110, r=10, t=5, b=25),
             height=210,
             font=dict(size=10),
             plot_bgcolor=COLOR_SCHEME["off-white"],

@@ -15,8 +15,8 @@ from ..nav import header_nav
 from .complexity_section import ComplexitySection
 from .feedback_section import FeedbackSection
 from .overview_section import OverviewSection
-from .system_metrics_section import SystemMetricsSection
-from .time_metrics_section import TimeMetricsSection
+from .system_section import SystemMetricsSection
+from .time_section import TimeMetricsSection
 from .guardrail_section import GuardrailSection
 from .trace_cache import CACHE_FILENAME, ensure_trace_cache
 from .visualization_section import VisualizationSection

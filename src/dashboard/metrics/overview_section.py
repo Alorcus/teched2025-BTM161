@@ -51,8 +51,13 @@ class OverviewSection:
             else None
         )
 
+        conversation_count = self._ocel.objects.filter(
+            pl.col("ocel_type") == "user"
+        ).height
+
         cards = [
             ("Total Events", f"{self._ocel.events.height:,}"),
+            ("Number of Conversations", f"{conversation_count:,}"),
             ("Unique Event Types", f"{non_handover['ocel_type'].n_unique()}"),
             ("Agent Handovers", f"{handover.height:,}"),
             ("Avg Messages / Conversation",
@@ -61,7 +66,7 @@ class OverviewSection:
             ("Response Tokens", f"{response_tokens:,}" if response_tokens > 0 else "—"),
         ]
         cards_html = "".join(kpi_card(title, value) for title, value in cards)
-        return kpi_row(cards_html, columns=6)
+        return kpi_row(cards_html, columns=7)
 
     def _compute_messages_per_conversation(self) -> pl.Series:
         """Message count per conversation (one row per user object).
