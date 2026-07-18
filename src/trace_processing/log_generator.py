@@ -1,9 +1,9 @@
 import json
 import uuid
-import pandas as pd
+import polars as pl
 
 
-def _is_langgraph_root(span_name: str) -> bool:
+def is_langgraph_root(span_name: str) -> bool:
     """MLflow autolog appends '_<n>' to the root span when the same LangGraph
     instance is invoked multiple times in one process (e.g. 'LangGraph_1').
     Accept the bare name and any numeric suffix."""
@@ -17,7 +17,7 @@ def _is_langgraph_root(span_name: str) -> bool:
 
 
 class LogGenerator:
-    def generate_event_log_df(self, trace_source) -> pd.DataFrame:
+    def generate_event_log_df(self, trace_source) -> pl.DataFrame:
         self.process_events = []
         self.case_id = None
         self.spans = None
@@ -43,12 +43,11 @@ class LogGenerator:
         else:
             raise Exception("Cannot locate spans in trace data!")
 
-        # This is the root node of the LangGraph trace
         langgraph_roots = [
-            span for span in self.spans if _is_langgraph_root(span["name"])
+            span for span in self.spans if is_langgraph_root(span["name"])
         ]
         if not langgraph_roots:
-            return pd.DataFrame()
+            return pl.DataFrame()
         self.langgraph_root_span = langgraph_roots[0]
         self.case_id = json.loads(self.langgraph_root_span["attributes"]["metadata"])[
             "thread_id"
@@ -68,17 +67,22 @@ class LogGenerator:
             for agent_span in agent_spans:
                 self._process_agent_span(agent_span)
 
-        dataframe = pd.DataFrame(self.process_events).sort_values(
-            ["time:timestamp"], ascending=True
-        )
-        # if the trace was canceled before LLM answers
+        dataframe = pl.DataFrame(self.process_events).sort("time:timestamp")
+        # Trace may have been canceled before any LLM answer was recorded.
         if "duration" not in dataframe.columns:
-            dataframe["duration"] = None
-        dataframe["time_finished"] = (
-            dataframe["time:timestamp"] + dataframe["duration"].fillna(0)
-        ).apply(lambda t: pd.to_datetime(t).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3])
-        dataframe["time:timestamp"] = dataframe["time:timestamp"].apply(
-            lambda t: pd.to_datetime(t).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
+            dataframe = dataframe.with_columns(
+                pl.lit(None, dtype=pl.Int64).alias("duration")
+            )
+        # `time:timestamp` is nanosecond epoch (Int64) at this point; format
+        # both it and `time_finished` as ms-precision naive ISO strings — the
+        # shape trace_processor and the dashboard read downstream. Polars'
+        # `%.3f` yields milliseconds directly, matching pandas' `%f[:-3]`.
+        ts_dt = pl.from_epoch(pl.col("time:timestamp"), time_unit="ns")
+        dataframe = dataframe.with_columns(
+            (ts_dt + pl.duration(nanoseconds=pl.col("duration").fill_null(0)))
+                .dt.strftime("%Y-%m-%dT%H:%M:%S%.3f")
+                .alias("time_finished"),
+            ts_dt.dt.strftime("%Y-%m-%dT%H:%M:%S%.3f").alias("time:timestamp"),
         )
 
         return dataframe
@@ -185,16 +189,13 @@ class LogGenerator:
         if tool_input.get("type", None) == "tool_call":
             tool_name = tool_input.get("name", "unknown_tool")
 
-        # Handovers were previously dropped here, which erased every
-        # order_agent → customer_service_agent transfer from the CSV. If a
-        # conversation's only tool call was a transfer, the trace collapsed
-        # to user_prompt + user_feedback and looked empty. Emitting them as
-        # execute_tool rows also matters for the guardrail-log join: the
-        # gateway can flag a transfer_to_* call, and its tool_call object
-        # (keyed by tool_call_id) would dangle if the event row didn't exist.
-        # The event_type/ocel_type is the tool name itself (e.g.
-        # `transfer_to_customer_service_agent`), distinct from the
-        # synthesised `<from>_handover_<to>` type used elsewhere.
+        # Emit transfer_to_* calls as execute_tool rows. If the only tool
+        # call in a conversation was a transfer, dropping it would collapse
+        # the trace to user_prompt + user_feedback. The gateway can also
+        # flag transfers, and its tool_call object (keyed by tool_call_id)
+        # would dangle if the event row didn't exist. The event_type here
+        # is the tool name itself (e.g. `transfer_to_customer_service_agent`),
+        # distinct from the synthesised `<from>_handover_<to>` type.
 
         self.process_events.append(
             {
@@ -217,7 +218,7 @@ class LogGenerator:
 
         agent_name = None
 
-        if _is_langgraph_root(agent_span["name"]):
+        if is_langgraph_root(agent_span["name"]):
             agent_name = "root_agent"
         else:
             agent_name = agent_metadata["langgraph_node"]

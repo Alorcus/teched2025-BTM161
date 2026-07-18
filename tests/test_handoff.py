@@ -182,7 +182,6 @@ class TestContextIsolationHook(unittest.TestCase):
         }
         result = hook(state)
         msgs = result["llm_input_messages"]
-        # Should be: briefing + 1 own message (AIMessage after transfer)
         self.assertEqual(len(msgs), 2)
         self.assertIn("[Handoff from order_agent]", msgs[0].content)
         self.assertEqual(msgs[1].content, "Checking stock...")

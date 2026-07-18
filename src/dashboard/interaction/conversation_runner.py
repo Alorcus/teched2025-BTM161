@@ -9,7 +9,7 @@ from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage, Tool
 from src.coffee_shop import CoffeeShop
 from src.agents import CUSTOMER_SCENARIOS
 from src.agents.tray import get_tray, clear_tray
-from src.agents.order_store import load_order, save_order
+from src.agents.order_store import load_order, set_order_status
 from src.agents.shared_components import OrderStatus
 from src.conversation import _tag_trace
 from src.stream import SWARM_AGENTS
@@ -286,9 +286,16 @@ class ConversationRunner:
             )
 
         order = load_order(order_id)
-        if order and order.status != OrderStatus.COMPLETED:
-            order.status = OrderStatus.COMPLETED
-            save_order(order)
+        if order and order.status == OrderStatus.IN_PREPARATION:
+            set_order_status(
+                order, OrderStatus.COMPLETED, context="tray pickup by customer"
+            )
+        elif order and order.status != OrderStatus.COMPLETED:
+            logger.warning(
+                "Tray pickup skipped completion for %s: status=%s not IN_PREPARATION",
+                order_id,
+                order.status.value,
+            )
 
         clear_tray(order_id)
 
@@ -467,7 +474,7 @@ class ConversationRunner:
                                     rejection = outcome
                                     rejection["msg"] = msg
                                     rejection["agent"] = msg_agent
-                                    break  # leave inner update loop
+                                    break
                                 if outcome.get("status") == "exhausted_suppressed":
                                     # Hard stop: the agent has hit the retry
                                     # cap. Don't re-stream; let the outer
@@ -485,7 +492,7 @@ class ConversationRunner:
                                     last_agent_message = msg.content
 
                     if rejection is not None:
-                        break  # leave outer for ns, update loop
+                        break
                     if exhausted:
                         break
             except Exception as e:
@@ -517,7 +524,7 @@ class ConversationRunner:
                         )
                     )
                 self._tag_last_trace()
-                break  # normal completion (or exhaustion)
+                break
 
             # We got a rejection: patch the graph state and resume.
             try:
@@ -588,7 +595,14 @@ class ConversationRunner:
                     )
                 )
         if patch_msgs:
-            self.shop.app.update_state(config, {"messages": patch_msgs})
+            try:
+                self.shop.app.update_state(config, {"messages": patch_msgs})
+            except Exception:
+                logger.exception(
+                    "update_state failed while removing rejected AIMessage; "
+                    "continuing with pushback (the rejected message remains in "
+                    "state but the critique still drives re-invocation)"
+                )
         # The critique is delivered as a fresh user-style turn so the graph
         # has something to react to (stream(None, ...) is a no-op once the
         # prior step completed). Pass the HumanMessage as a list so the
@@ -624,7 +638,6 @@ class ConversationRunner:
             if target_content and cand_content == target_content:
                 return getattr(cand, "id", None)
             if target_tcs and cand_tcs:
-                # Match on first tool call name + args.
                 if cand_tcs[0].get("name") == target_tcs[0].get("name") and cand_tcs[
                     0
                 ].get("args") == target_tcs[0].get("args"):
@@ -657,6 +670,12 @@ class ConversationRunner:
         if is_violation_on_agent_aimessage:
             return self._handle_violation(msg, agent_name, supervisor_line, supervisor)
 
+        response_guardrail_denial = self._evaluate_response_guardrails(msg, agent_name)
+        if response_guardrail_denial is not None:
+            return self._handle_response_guardrail_violation(
+                msg, agent_name, response_guardrail_denial, supervisor_line
+            )
+
         # Reset the retry counter for this agent on a successful (non-violation)
         # message so the next violation starts from zero.
         if isinstance(msg, AIMessage) and agent_name in SWARM_AGENTS:
@@ -665,6 +684,98 @@ class ConversationRunner:
 
         self._publish_message_normally(msg, agent_name, supervisor_line)
         return {"status": "published"}
+
+    def _evaluate_response_guardrails(self, msg, agent_name: str) -> str | None:
+        """Return the guardrail's `deny_reason_for_llm` when a response-scoped
+        guardrail denies the assistant message, else None. AIMessages from
+        non-swarm agents (customer, system) are skipped. Any error in the
+        gateway or predicate collapses to ALLOW so a broken guardrail can
+        never wedge the conversation."""
+        if not isinstance(msg, AIMessage) or agent_name not in SWARM_AGENTS:
+            return None
+        gateways = getattr(self.shop, "gateways", None) or {}
+        gateway = gateways.get(agent_name)
+        if gateway is None:
+            return None
+        content = _extract_text(msg.content)
+        if not content.strip():
+            return None
+        try:
+            decision = gateway.evaluate_assistant_message(
+                content=content,
+                message_id=getattr(msg, "id", "") or "",
+                state={},
+                thread_id=None,
+            )
+        except Exception:
+            logger.exception("response guardrail evaluation failed; allowing message")
+            return None
+        from src.control_plane.types import Effect
+        if decision.final_decision != Effect.DENY:
+            return None
+        return decision.deny_reason_for_llm or (
+            "Your last message was rejected by a response guardrail."
+        )
+
+    def _handle_response_guardrail_violation(
+        self,
+        msg: AIMessage,
+        agent_name: str,
+        deny_reason: str,
+        supervisor_line: str | None,
+    ) -> dict:
+        """Response-guardrail counterpart to `_handle_violation`.
+
+        Suppresses the offending message from the UI and, under the same
+        per-agent retry cap used for process-model violations, injects a
+        corrective critique so the agent can retry. The critique is authored
+        directly from the guardrail's `deny_reason_for_llm` — no process
+        supervisor is consulted, so this path works with the supervisor off."""
+        retries_so_far = self._retry_counts.get(agent_name, 0)
+        violation_reason = "response_guardrail_denied"
+        rejected_text = _rejected_content(msg)
+        rejection_line = supervisor_line or "Violation: response_guardrail_denied"
+
+        if retries_so_far >= self._max_retries:
+            self.event_bus.publish(
+                DashboardEvent(
+                    event_type=EventType.AGENT_MESSAGE_REJECTED,
+                    agent_name=agent_name,
+                    content=rejected_text,
+                    supervisor_line=rejection_line,
+                    rejection_reason=(
+                        f"response guardrail retry cap reached ({self._max_retries}); "
+                        "this attempt is suppressed."
+                    ),
+                )
+            )
+            self._publish_rejected_tool_calls(msg, agent_name)
+            return {"status": "exhausted_suppressed"}
+
+        self.event_bus.publish(
+            DashboardEvent(
+                event_type=EventType.AGENT_MESSAGE_REJECTED,
+                agent_name=agent_name,
+                content=rejected_text,
+                supervisor_line=rejection_line,
+                rejection_reason=deny_reason,
+            )
+        )
+        self._publish_rejected_tool_calls(msg, agent_name)
+
+        critique_msg = self._compose_or_extend_critique(
+            agent_name,
+            rejected_text,
+            violation_reason,
+            deny_reason,
+        )
+        self._retry_counts[agent_name] = retries_so_far + 1
+        return {
+            "status": "rejected",
+            "supervisor_line": rejection_line,
+            "critique_text": deny_reason,
+            "critique_msg": critique_msg,
+        }
 
     def _handle_violation(
         self,
@@ -835,12 +946,14 @@ class ConversationRunner:
             if msg.tool_calls:
                 thought_text = _extract_text(msg.content).strip()
                 if thought_text:
-                    self.event_bus.publish(DashboardEvent(
-                        event_type=EventType.AGENT_THOUGHT,
-                        agent_name=agent_name,
-                        content=thought_text,
-                        tool_name=msg.tool_calls[0].get("name"),
-                    ))
+                    self.event_bus.publish(
+                        DashboardEvent(
+                            event_type=EventType.AGENT_THOUGHT,
+                            agent_name=agent_name,
+                            content=thought_text,
+                            tool_name=msg.tool_calls[0].get("name"),
+                        )
+                    )
                 for tc in msg.tool_calls:
                     self.event_bus.publish(
                         DashboardEvent(
@@ -964,7 +1077,7 @@ class ConversationRunner:
             if self.is_running:
                 return
             self.is_running = True
-        thread_id = self._manual_thread_id  # persistente thread_id für den Chat-Verlauf
+        thread_id = self._manual_thread_id
         threading.Thread(
             target=self._run_manual_turn, args=(thread_id, message), daemon=True
         ).start()

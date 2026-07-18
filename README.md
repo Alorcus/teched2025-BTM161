@@ -12,33 +12,25 @@ Five agents work together in a LangGraph Swarm:
 - **Customer Service Agent** — handles complaints and refunds
 - **Customer Agent** — drives the conversation from outside the swarm, simulating a customer
 
-The repository contains three Jupyter notebooks for stepping through the system, a CLI for headless trace generation, and a Panel-based observatory dashboard for live exploration and metrics.
+The repository contains a CLI for headless trace generation and a Panel-based observatory dashboard for live exploration and metrics.
 
 ## Requirements
 
 - [Python](https://www.python.org/downloads/) >= 3.13
 - (Recommended) [Poetry](https://python-poetry.org/) for dependency and virtualenv management.
   - Alternative: pip with the provided `requirements.txt`.
-- (Recommended) [poetry-jupyter-plugin](https://pypi.org/project/poetry-jupyter-plugin/) to register the Poetry venv as a Jupyter kernel:
-
-  ```
-  $ poetry self add poetry-jupyter-plugin
-  ```
-
 - An API key for an [LLM provider supported by LangChain](https://python.langchain.com/docs/integrations/chat/#featured-providers), or a local Ollama runtime.
 
 ## Installation
 
 1. Install dependencies: `poetry install`
-2. Install the Jupyter kernel: `poetry jupyter install`
-3. Activate the venv: run `poetry env activate` and use the printed command (or prefix commands with `poetry run`).
-4. Install the LangChain integration for your LLM provider, for example:
+2. Activate the venv: run `poetry env activate` and use the printed command (or prefix commands with `poetry run`).
+3. Install the LangChain integration for your LLM provider, for example:
    ```
    pip install "langchain[openai]<1.0.0"
    pip install "langchain[anthropic]<1.0.0"
    ```
-5. Configure your LLM provider via a `.env` file (see `.env.example`). Set `LLM_PROVIDER=ollama` (default) or `LLM_PROVIDER=anthropic`.
-6. Start Jupyter: `jupyter notebook`
+4. Configure your LLM provider via a `.env` file (see `.env.example`). Set `LLM_PROVIDER=ollama` (default) or `LLM_PROVIDER=anthropic`.
 
 ## Pre-commit Hook
 
@@ -50,23 +42,28 @@ pip install pre-commit           # Linux (or: poetry install)
 pre-commit install
 ```
 
-## Notebooks
-
-Three self-contained exercises:
-
-1. [`1_Standard_agentic_coffee_shop`](1_Standard_agentic_coffee_shop.ipynb) — get familiar with the setup and generate a first trace.
-2. [`2_Exceptions_agentic_coffee_shop`](2_Exceptions_agentic_coffee_shop.ipynb) — explore agent behavior under errors and edge cases, producing process variants.
-3. [`3_Extending_agentic_coffee_shop`](3_Extending_agentic_coffee_shop.ipynb) — experiment with agent definitions (instructions, tools) and observe how changes affect the multi-agent system.
-
 ## Setups
 
 A **setup** is a self-contained configuration of agents, guardrails, and guidelines under `config/setups/<name>/` (subdirs: `agents/`, `guardrails/`, `guidelines/`). Both `simulate` and `dashboard` require a setup to be selected. Guardrail predicate *logic* lives in Python ([src/control_plane/predicates.py](src/control_plane/predicates.py)) and is referenced by name from the guardrail YAML — varying `predicate_args` (e.g. `max_pct: 10`) is a YAML-only change.
 
 **Available setups:**
 
-- `baseline` — the standard coffee shop: each agent can only hand off to the next role in the workflow, and every agent prompt declares that a runtime process supervisor is watching.
-- `all_handovers` — every business agent can transfer to every other agent, and an `order_id_in_handoff` flag guardrail (plus matching `handoff_order_id` guideline) requires handoffs to carry an `ORDXXXX` once an order exists.
+The catalogue is designed as a spectrum from *no rules* to *hostile rules*, so you can compare how the same swarm behaves under different control-plane pressure. The first three are the reference points; the remaining five dial specific knobs (range caps, lifecycle gates, effect mode) around them.
+
+Reference points:
+
 - `unconstrained` — every business agent can transfer to every other agent, with no guardrails, no guidelines, and no supervisor preamble — maximum agent freedom for observing emergent behavior.
+- `baseline` — the standard coffee shop: each agent can only hand off to the next role in the workflow, `deny` lifecycle gates enforce the order state machine (`pending → inventory_confirmed → in_preparation → completed/preparation_error → refunded`), and every agent prompt declares that a runtime process supervisor is watching.
+- `all_handovers` — every business agent can transfer to every other agent, and an `order_id_in_handoff` flag guardrail (plus matching `handoff_order_id` guideline) requires handoffs to carry an `ORDXXXX` once an order exists.
+
+Governance dials on top of `baseline`:
+
+- `sensible_ranges` — adds `deny` range caps that let normal orders through but block outliers: order size 1–6 units, total ≤ $20, discount ≤ 30 %, partial refund ≤ 50 %. Shows the "happy path still works, only outliers get stopped" regime.
+- `sensible_ranges_flag` — identical caps to `sensible_ranges`, but every range guardrail is `flag` (observe-only). Agents behave as if unconstrained on magnitudes while the guardrail log records every trip — useful for measuring how often a proposed cap *would* bite before you enforce it.
+- `overconstrained` — the same range guardrails cranked so far that normal business cannot happen: max one unit per order, total ≤ $3, zero discounts, zero partial refunds. Demonstrates the failure mode of over-tight governance — most orders never get created.
+- `baseline_flag` — mirrors every guardrail in `baseline`, but each one runs in `flag` mode instead of `deny`. Handover targets, order-lifecycle preconditions, and refund gating are all observe-only; agents behave as if unconstrained while every violation is labeled in the guardrail log for comparison against the enforced baseline.
+- `anti_flow` — the lifecycle gates are deliberately **inverted** (each tool is only "allowed" from a status it can never legitimately be in), so every fulfillment step is denied from its real predecessor. Combined with a severed barista handover, orders get trapped mid-flow. Useful as a worst-case for showing how mis-configured guardrails cause deadlocks rather than safety.
+- `strict_flow` — constrains the handover graph to a linear pipeline: `order → {inventory, customer_service}`, `inventory → barista`, `customer_service → order`, `barista → (none)`. Adds a `process_order_once_per_conversation` guardrail (via the new `max_tool_calls` predicate) so the order agent cannot re-process the same conversation. Useful for observing how tight routing and single-shot ordering affect success rates and failure paths.
 
 **Selecting a setup:**
 
@@ -89,7 +86,7 @@ poetry run simulate --setup my_setup --traces 1
 
 ## Headless Simulation
 
-You can generate traces in bulk without the jupyter UI using the `simulate` CLI command. This runs the Customer Agent against the coffee shop swarm and captures MLflow traces for each conversation.
+You can generate traces in bulk without the dashboard UI using the `simulate` CLI command. This runs the Customer Agent against the coffee shop swarm and captures MLflow traces for each conversation.
 
 ### Usage
 
@@ -141,14 +138,31 @@ Defined in `src/agents/customer_agent.py` (`CUSTOMER_SCENARIO_DEFS`) — single 
 | 5     | Order a tea and stubbornly refuse anything else                   |
 | 6     | Rich customer buys everything until the store is empty            |
 
+### Batch Script
+
+For mixing setups and scenarios in a single run (e.g. 10 traces of scenario 0 under `baseline`, then 10 of scenario 2 under `unconstrained`), use `scripts/run_batches.py`. Three ways to drive it — no-flag runs use the module-level defaults, or pass explicit batches via CLI or JSON:
+
+```bash
+# 1. Run the built-in default batch set (edit the module-level BATCHES to change it)
+poetry run python -m scripts.run_batches
+
+# 2. Pass batches on the command line as `setup:scenario:count` triples
+poetry run python -m scripts.run_batches --batches baseline:0:10 unconstrained:2:10
+
+# 3. Load batches (and toggles) from a JSON config file
+poetry run python -m scripts.run_batches --config batches.json
+```
+
+Boolean toggles: `--reset-inventory` / `--no-reset-inventory`, `--process-supervisor` / `--no-process-supervisor`, `--export-logs` / `--no-export-logs`. The JSON config schema is `{"batches": [["baseline", 0, 50], ...], "reset_inventory": true, "process_supervisor": false, "export_logs": false}`.
+
+Make sure the Poetry virtual environment is active (`poetry env activate`) or prefix with `poetry run` as shown; the script imports from `src/` and needs the project's dependencies. Batches sharing a setup reuse the same `CoffeeShop` instance, so keep same-setup entries consecutive in the list.
+
 ## Agent Observatory Dashboard
 
 A two-page observability dashboard built with [Panel](https://panel.holoviz.org/):
 
 - **Interaction Observatory** (`/`) — a real-time view of all agents in a grid layout. Each panel displays the system prompt, available tools, current status, handoff context, context-isolated message history, and tool call log, updating live as a conversation streams through the system.
 - **Metrics Dashboard** (`/metrics`) — analytics over previously-generated event logs (KPIs, per-agent workload, per-order timings, OCEL-based visualizations).
-
-Switch between pages via the tabs in the header.
 
 ### Launch
 
@@ -201,32 +215,13 @@ The command refuses to run while the dashboard is listening on port 5006 — sto
 
 ### How It Works
 
-The dashboard runs the same `CoffeeShop` multi-agent graph used by the notebooks and CLI. A background thread drives the conversation (using the simulated Customer Agent), while the Panel UI polls for events every 100ms. Stream events from LangGraph are parsed into typed dashboard events (agent messages, tool calls, handoffs, etc.) and dispatched to the corresponding agent panel.
+The dashboard runs the same `CoffeeShop` multi-agent graph used by the CLI. A background thread drives the conversation (using the simulated Customer Agent), while the Panel UI polls for events every 100ms. Stream events from LangGraph are parsed into typed dashboard events (agent messages, tool calls, handoffs, etc.) and dispatched to the corresponding agent panel.
 
 The Metrics Dashboard loads the consolidated `_all_traces.csv` cache into an `ObjectCentricEventlog` and renders sections from it. The cache is rebuilt from MLflow on page entry whenever the trace count has changed; aside from that single write, the page is read-only.
 
-## Trace Table Dashboard
+### Sharing the event log CSV
 
-The Trace Table is the third page of the multi-page Agent Observatory dashboard, focused on the global message trace: one row per emitted message, with columns per agent plus a Process Supervisor column. It shares the same `CoffeeShop` graph and event bus as the Interaction Observatory but presents the conversation as a single, globally ordered table next to the live tray, stock, and coffee machine status.
-
-### Launch
-
-```bash
-# The Trace Table is served by the regular dashboard command
-poetry run dashboard
-# Then open: http://localhost:5006/trace
-```
-
-Use the header tabs to switch between the Interaction, Metrics, and Trace pages.
-
-### Features
-
-- **Global trace table**: every agent message, tool call, tool result, and handoff as one row, in emission order
-- **Top status strip**: tray, stock, and coffee machine widgets shared with the Agent Observatory
-- **Sidebar controls**: scenario picker, log level, editable customer prompt, run button
-- **Conversation log**: chat-style log below the sidebar with smart auto-scroll (sticks to bottom only when already at the bottom)
-
----
+`generated_event_log/_all_traces.csv` is designed to be handed to colleagues who don't have your MLflow store — but it embeds free-text content: verbatim customer utterances (in `message` on `user_prompt` rows), LLM assistant responses, and LLM reasoning from the guardrail gateway (in `gateway_tool_args_json`, `gateway_verdicts_json`, and `feedback_reason`). In this TechEd repository the "customer" is an LLM-simulated persona, so those cells are synthetic. **In any real deployment, the same columns would carry PII and unredacted model reasoning — review the file before sharing.** The complete column list, per-column sensitivity classification, and timezone/versioning contract live in [`EVENTLOG_SCHEMA.md`](EVENTLOG_SCHEMA.md); consult it before forwarding the CSV or attaching it to a ticket.
 
 ## Observing the Database
 

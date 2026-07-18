@@ -3,6 +3,7 @@ from datetime import datetime
 from pathlib import Path
 
 import json
+import logging
 import os
 
 import polars as pl
@@ -12,7 +13,72 @@ from .guardrail_log_loader import (
     GATEWAY_OBJECT_TYPES,
     GuardrailOcelExtension,
     load_guardrail_events,
+    load_guardrail_events_from_eventlog,
 )
+
+
+logger = logging.getLogger("coffee_shop.trace_processing.eventlog_conversion")
+
+
+def _resolve_guardrail_extension(
+    eventlog: pl.DataFrame,
+    guardrail_log_path: str | Path | None,
+) -> GuardrailOcelExtension:
+    """Prefer gateway_decision rows embedded in the eventlog; fall back to
+    the on-disk JSONL for callers that don't hand over a shareable CSV.
+
+    Never merges the two — embedded rows were written from the same JSONL,
+    so combining would just duplicate everything.
+
+    Timezone contract: `load_guardrail_events_from_eventlog` interprets any
+    naive `time:timestamp` value as UTC. `_load_gateway_rows` writes the
+    column as a naive-UTC string, so a freshly-loaded CSV is fine. The
+    dashboard, however, parses the column into a Datetime and shifts it to
+    naive-LOCAL before this runs — tagging that value as UTC would
+    double-shift each gateway event.
+
+    Resolution order (fall through on each miss):
+    1. `time:timestamp_utc_naive` — sibling column preserved by the
+       dashboard, holding the pre-conversion naive-UTC Datetime.
+    2. `time:timestamp` as raw string (plain CSV case) — pass directly.
+    3. On-disk JSONL, if `guardrail_log_path` points at an existing file.
+    4. Last-resort: run the loader against potentially-shifted embedded
+       rows, with a warning.
+    """
+    if "concept:name" in eventlog.columns:
+        has_embedded = (
+            eventlog.filter(pl.col("concept:name") == "gateway_decision")
+            .height
+            > 0
+        )
+        if has_embedded:
+            if "time:timestamp_utc_naive" in eventlog.columns:
+                rewired = eventlog.with_columns(
+                    pl.col("time:timestamp_utc_naive").alias("time:timestamp"),
+                )
+                return load_guardrail_events_from_eventlog(rewired)
+            ts_dtype = eventlog.schema.get("time:timestamp")
+            timestamp_is_string = ts_dtype in (pl.Utf8, pl.String)
+            if timestamp_is_string:
+                return load_guardrail_events_from_eventlog(eventlog)
+            if (
+                guardrail_log_path is not None
+                and Path(guardrail_log_path).exists()
+            ):
+                return load_guardrail_events(guardrail_log_path)
+            logger.warning(
+                "Guardrail rows are embedded in the eventlog but "
+                "time:timestamp is not a string column and no "
+                "time:timestamp_utc_naive sibling column is available — "
+                "gateway event timestamps may be shifted by the local UTC "
+                "offset. Provide guardrail_log_path for the authoritative "
+                "source, or preserve time:timestamp_utc_naive alongside the "
+                "converted column."
+            )
+            return load_guardrail_events_from_eventlog(eventlog)
+    if guardrail_log_path is not None:
+        return load_guardrail_events(guardrail_log_path)
+    return GuardrailOcelExtension()
 EVENT_ATTRIBUTES = {
     "agent_response": ["ocel_time", "duration", "input_tokens", "response_tokens"],
     "call_llm": ["ocel_time", "model", "duration", "input_tokens", "response_tokens"],
@@ -163,6 +229,11 @@ EVENT_ATTRIBUTES = {
         "n_verdicts",
         "reason_for_llm",
     ],
+    # historical data support
+    "transfer_to_order_agent": ["ocel_time", "duration"],
+    "transfer_to_inventory_agent": ["ocel_time", "duration"],
+    "transfer_to_barista_agent": ["ocel_time", "duration"],
+    "transfer_to_customer_service_agent": ["ocel_time", "duration"],
 }
 
 OBJECT_ATTRIBUTES = {
@@ -220,12 +291,16 @@ class ObjectCentricEventlog:
         if isinstance(eventlog, str):
             eventlog = pl.read_csv(eventlog)
 
+        # Resolve the guardrail extension BEFORE filtering out gateway_decision
+        # rows, then strip those rows from the eventlog that feeds the OCEL
+        # converter — they've been re-emitted as gateway_flag/gateway_deny by
+        # the extension, and leaving the raw rows in would produce a duplicate
+        # native `event_gateway_decision` table with no OCEL edges.
+        ext = _resolve_guardrail_extension(eventlog, guardrail_log_path)
+        if "concept:name" in eventlog.columns:
+            eventlog = eventlog.filter(pl.col("concept:name") != "gateway_decision")
+
         el_enriched = _preprocess_eventlog(eventlog)
-        ext = (
-            load_guardrail_events(guardrail_log_path)
-            if guardrail_log_path is not None
-            else GuardrailOcelExtension()
-        )
 
         objects = (
             el_enriched.select(
@@ -378,7 +453,9 @@ class ObjectCentricEventlog:
         for evt_type in event_map_type["ocel_type"].to_list():
             if evt_type in GATEWAY_EVENT_TYPES:
                 continue
-            attrs = EVENT_ATTRIBUTES.get(evt_type, [])
+            # Unknown event types (e.g. new tools not yet registered above)
+            # must still carry ocel_time — export_to_json requires it.
+            attrs = EVENT_ATTRIBUTES.get(evt_type, ["ocel_time"])
             evt_type_tbl = (
                 events.filter(pl.col("ocel_type") == evt_type)
                 .join(
@@ -450,7 +527,6 @@ class ObjectCentricEventlog:
 
         NOW = datetime.utcnow().isoformat() + "Z"
 
-        # ---- eventTypes ----
         event_types = []
         for name, df in self.event_tables.items():
             attrs = [
@@ -460,7 +536,6 @@ class ObjectCentricEventlog:
             ]
             event_types.append({"name": name, "attributes": attrs})
 
-        # ---- objectTypes ----
         object_types = []
         for name, df in self.object_tables.items():
             attrs = [
@@ -470,13 +545,11 @@ class ObjectCentricEventlog:
             ]
             object_types.append({"name": name, "attributes": attrs})
 
-        # ---- event relationships (grouped) ----
         event_rels = self.event_object.group_by("ocel_event_id").agg(
             pl.struct(["ocel_object_id", "ocel_qualifier"]).alias("rels")
         )
         event_rels_dict = {r["ocel_event_id"]: r["rels"] for r in event_rels.to_dicts()}
 
-        # ---- object relationships (grouped) ----
         object_rels = self.object_object.group_by("ocel_source_id").agg(
             pl.struct(["ocel_target_id", "ocel_qualifier"]).alias("rels")
         )
@@ -484,7 +557,6 @@ class ObjectCentricEventlog:
             r["ocel_source_id"]: r["rels"] for r in object_rels.to_dicts()
         }
 
-        # ---- events ----
         events = []
         for event_type, df in self.event_tables.items():
             for row in df.to_dicts():
@@ -510,7 +582,6 @@ class ObjectCentricEventlog:
                     }
                 )
 
-        # ---- objects ----
         objects = []
         for obj_type, df in self.object_tables.items():
             for row in df.to_dicts():
@@ -539,7 +610,6 @@ class ObjectCentricEventlog:
                     }
                 )
 
-        # ---- final JSON ----
         ocel_json = {
             "eventTypes": event_types,
             "objectTypes": object_types,
@@ -547,12 +617,19 @@ class ObjectCentricEventlog:
             "objects": objects,
         }
 
-        # ---- write file ----
         os.makedirs("./generated_ocel/", exist_ok=True)
         if not export_name:
             export_name = f"ocel_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
         with open(f"./generated_ocel/{export_name}.json", "w") as f:
             json.dump(ocel_json, f, indent=2)
+
+
+_HANDOVER_AGENTS = [
+    "order_agent",
+    "barista_agent",
+    "inventory_agent",
+    "customer_service_agent",
+]
 
 
 def _preprocess_eventlog(eventlog: pl.DataFrame) -> pl.DataFrame:
@@ -615,6 +692,8 @@ def _preprocess_eventlog(eventlog: pl.DataFrame) -> pl.DataFrame:
             handover_flag=(
                 (pl.col("event_type") == "transfer_to_agent")
                 & (pl.col("object_type_agent") != pl.col("next_agent"))
+                & pl.col("next_agent").is_in(_HANDOVER_AGENTS)
+                & pl.col("object_type_agent").is_in(_HANDOVER_AGENTS)
             ),
             previous_event_type=pl.col("event_type").shift(1),
             previous_object_id_message=pl.col("object_id_message").shift(1),
@@ -653,7 +732,6 @@ def _preprocess_eventlog(eventlog: pl.DataFrame) -> pl.DataFrame:
         event_type=pl.col("object_type_agent") + "_handover_" + pl.col("next_agent"),
     )
 
-    # handover for each agent
     null_columns = [col for col in handover_rows.columns if col not in cols_to_keep]
     handover_one_direction = handover_rows.with_columns(
         object_type_agent=pl.col("object_type_agent"),

@@ -25,6 +25,7 @@ tools:
 guardrails:
   - allowed_handover_targets
   - order_id_in_handoff
+  - gate_offer_refund
 guidelines:
   - handoff_etiquette
   - handoff_order_id

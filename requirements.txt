@@ -2,11 +2,6 @@
 langgraph>=0.6.8,<0.7.0
 langgraph-swarm>=0.0.14,<0.0.15
 mlflow>=3.4.0,<4.0.0
-ipywidgets>=8.0.0,<9.0.0
-notebook>=7.4.7,<8.0.0
-
-# Development dependencies
-ipykernel>=6.30.1
 
 # LLM provider switching
 python-dotenv>=1.0.0,<2.0.0

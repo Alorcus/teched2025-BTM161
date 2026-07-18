@@ -41,6 +41,30 @@ class Gateway:
         self.snapshot_id = snapshot_id
         self.log_sink = log_sink
 
+    RESPONSE_TOOL_NAME = "assistant_message"
+
+    def evaluate_assistant_message(
+        self,
+        content: str,
+        message_id: str,
+        state: dict[str, Any],
+        thread_id: str | None = None,
+    ) -> CallDecision:
+        """Evaluate an outgoing assistant message against response-scoped guardrails.
+
+        Guardrails register against the synthetic `assistant_message` tool name
+        (see `off_menu_recommendation`). This wraps the content in the same
+        synthetic-call shape those predicates already expect and reuses
+        `evaluate_call` so verdicts, JSONL logging and OCEL projection stay
+        identical to any other guardrail decision.
+        """
+        synthetic_call = {
+            "name": self.RESPONSE_TOOL_NAME,
+            "args": {"content": content if isinstance(content, str) else ""},
+            "id": f"resp-{message_id or 'unknown'}",
+        }
+        return self.evaluate_call(synthetic_call, state, thread_id=thread_id)
+
     def evaluate_call(
         self,
         tool_call: dict[str, Any],

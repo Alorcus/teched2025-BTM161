@@ -20,8 +20,7 @@ from .shared_components import (
     OrderIdSchema,
     OrderStatus,
 )
-from .order_store import load_order
-from .order_state_machine import state_machine, InvalidTransitionError
+from .order_store import load_order, set_order_status
 
 
 def _thread_id(config: RunnableConfig | None) -> str | None:
@@ -43,7 +42,6 @@ COFFEE_MACHINE_PORT = 8001
 COFFEE_MACHINE_PROCESS = None
 _MACHINE_LOCK = threading.Lock()
 
-# Persistent state for machine jobs
 ORDER_JOB_MAP: Dict[str, str] = {}
 ORDER_STATUS_CACHE: Dict[str, dict] = {}
 
@@ -51,7 +49,7 @@ ORDER_STATUS_CACHE: Dict[str, dict] = {}
 def is_machine_running() -> bool:
     """Check if coffee machine is responsive."""
     try:
-        response = safe_get(f"{COFFEE_MACHINE_URL}/docs")  # FastAPI docs endpoint
+        response = safe_get(f"{COFFEE_MACHINE_URL}/docs")
         return response is not None and response.status_code < 500
     except:
         return False
@@ -73,11 +71,9 @@ def start_coffee_machine() -> bool:
     global COFFEE_MACHINE_PROCESS
 
     with _MACHINE_LOCK:
-        # Check if already running
         if is_machine_running():
             return True
 
-        # Check if port is in use but machine not responding (stuck process)
         if check_port_in_use(COFFEE_MACHINE_PORT):
             logger.warning(
                 f"Port {COFFEE_MACHINE_PORT} is in use but machine not responding"
@@ -180,15 +176,15 @@ def stop_coffee_machine():
             _kill_process_on_port(COFFEE_MACHINE_PORT)
 
 
-# ----------------------------
-# SAFE HTTP HELPERS
-# ----------------------------
 def safe_post(url, payload):
     try:
         response = requests.post(url, json=payload, timeout=REQUEST_TIMEOUT)
         return response
+    except requests.exceptions.ConnectionError as e:
+        logger.debug(f"[CoffeeMachine] POST failed (connection): {e}")
+        return None
     except requests.exceptions.RequestException as e:
-        logger.error(f"[CoffeeMachine] POST failed: {e}")
+        logger.warning(f"[CoffeeMachine] POST failed: {e}")
         return None
 
 
@@ -196,14 +192,14 @@ def safe_get(url):
     try:
         response = requests.get(url, timeout=REQUEST_TIMEOUT)
         return response
+    except requests.exceptions.ConnectionError as e:
+        logger.debug(f"[CoffeeMachine] GET failed (connection): {e}")
+        return None
     except requests.exceptions.RequestException as e:
-        logger.error(f"[CoffeeMachine] GET failed: {e}")
+        logger.warning(f"[CoffeeMachine] GET failed: {e}")
         return None
 
 
-# ----------------------------
-# HELPER FUNCTIONS
-# ----------------------------
 def tool_response(status, message, order_id: str, extra=None):
     payload = {
         "status": status,
@@ -215,16 +211,12 @@ def tool_response(status, message, order_id: str, extra=None):
     return json.dumps(payload)
 
 
-# ----------------------------
-# MACHINE TOOLS
-# ----------------------------
 @tool(args_schema=OrderIdSchema)
 def start_preparation(order_id: str, config: RunnableConfig = None) -> str:
     """Start coffee preparation and automatically wait for completion."""
     logger.debug("start_preparation called for %s", order_id)
 
     if not is_machine_running():
-        # Try to start the coffee machine
         if not start_coffee_machine():
             return tool_response(
                 "error",
@@ -239,22 +231,9 @@ def start_preparation(order_id: str, config: RunnableConfig = None) -> str:
     if not order:
         return tool_response("error", f"Order {order_id} not found", order_id)
 
-    # Allow preparation if inventory is confirmed OR if we're retrying after a failure
-    is_retry = ORDER_STATUS_CACHE.get(order_id, {}).get("attempt_count", 0) > 0
-    is_inventory_confirmed = order.status == OrderStatus.INVENTORY_CONFIRMED
-    is_retryable = order.status in (
-        OrderStatus.IN_PREPARATION,
-        OrderStatus.PREPARATION_ERROR,
-    )
+    # Status eligibility (inventory_confirmed, or in_preparation/preparation_error for a
+    # retry) is enforced by the gateway guardrail, not here.
 
-    if not is_inventory_confirmed and not (is_retryable and is_retry):
-        return tool_response(
-            "error",
-            f"Cannot prepare order {order_id}. Current status: {order.status}",
-            order_id,
-        )
-
-    # Start brewing — use the first item's name as the drink type
     drink_name = order.items[0].name if order.items else "coffee"
     # The coffee machine writes events to its CSV keyed by `correlation_id` —
     # which the trace processor merges into the export only if it matches a
@@ -270,7 +249,8 @@ def start_preparation(order_id: str, config: RunnableConfig = None) -> str:
     else:
         correlation_id = thread_id
     response = safe_post(
-        f"{COFFEE_MACHINE_URL}/brew", {"drink": drink_name, "correlation_id": correlation_id}
+        f"{COFFEE_MACHINE_URL}/brew",
+        {"drink": drink_name, "correlation_id": correlation_id},
     )
 
     if response is None:
@@ -288,12 +268,10 @@ def start_preparation(order_id: str, config: RunnableConfig = None) -> str:
     if not job_id:
         return tool_response("error", "No job_id returned", order_id)
 
-    try:
-        order = state_machine.transition(order, OrderStatus.IN_PREPARATION, context="prepare_order: starting")
-    except InvalidTransitionError as e:
-        return json.dumps({"order_id": order_id, "error": f"Cannot start preparation: {e}"})
+    set_order_status(
+        order, OrderStatus.IN_PREPARATION, context="prepare_order: starting"
+    )
 
-    # Increment attempt count
     attempt_count = ORDER_STATUS_CACHE.get(order_id, {}).get("attempt_count", 0) + 1
 
     ORDER_JOB_MAP[order_id] = job_id
@@ -381,10 +359,11 @@ def end_preparation(order_id: str) -> str:
                     )
 
                 elif status == "failed":
-                    try:
-                        order = state_machine.transition(order, OrderStatus.PREPARATION_ERROR, context=f"brewing failed on attempt #{attempt_count}")
-                    except InvalidTransitionError as e:
-                        logger.warning(f"Cannot transition to PREPARATION_ERROR: {e}")
+                    set_order_status(
+                        order,
+                        OrderStatus.PREPARATION_ERROR,
+                        context=f"brewing failed on attempt #{attempt_count}",
+                    )
                     if order_id in ORDER_JOB_MAP:
                         del ORDER_JOB_MAP[order_id]
 
@@ -398,10 +377,7 @@ def end_preparation(order_id: str) -> str:
             except Exception as e:
                 logger.error(f"Status check error: {e}")
 
-    try:
-        state_machine.transition(order, OrderStatus.PREPARATION_ERROR, context="brewing timed out")
-    except InvalidTransitionError as e:
-        logger.warning(f"Cannot transition to PREPARATION_ERROR: {e}")
+    set_order_status(order, OrderStatus.PREPARATION_ERROR, context="brewing timed out")
     return tool_response("error", "Brewing timed out. Please try again.", order_id)
 
 
@@ -445,7 +421,9 @@ def clean_machine(config: RunnableConfig = None) -> str:
     logger.debug("clean_machine called")
 
     if not is_machine_running():
-        return json.dumps({"status": "error", "message": "Coffee machine is not available."})
+        return json.dumps(
+            {"status": "error", "message": "Coffee machine is not available."}
+        )
 
     thread_id = _thread_id(config)
     if thread_id is None:
@@ -456,7 +434,9 @@ def clean_machine(config: RunnableConfig = None) -> str:
         correlation_id = "unknown"
     else:
         correlation_id = thread_id
-    response = safe_post(f"{COFFEE_MACHINE_URL}/clean", {"correlation_id": correlation_id})
+    response = safe_post(
+        f"{COFFEE_MACHINE_URL}/clean", {"correlation_id": correlation_id}
+    )
     if response is None:
         return json.dumps({"status": "error", "message": "Coffee machine unreachable."})
 
@@ -464,6 +444,6 @@ def clean_machine(config: RunnableConfig = None) -> str:
         data = response.json()
         return json.dumps(data)
     except Exception:
-        return json.dumps({"status": "error", "message": "Invalid response from machine."})
-
-
+        return json.dumps(
+            {"status": "error", "message": "Invalid response from machine."}
+        )

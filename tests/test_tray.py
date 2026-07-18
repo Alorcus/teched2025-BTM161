@@ -67,7 +67,7 @@ class TestTrayDataModel(unittest.TestCase):
         self.assertEqual(get_tray("ORD0001"), [])
 
     def test_clear_nonexistent(self):
-        clear_tray("ORD9999")  # should not raise
+        clear_tray("ORD9999")
 
     def test_get_empty(self):
         self.assertEqual(get_tray("ORD9999"), [])
@@ -236,7 +236,7 @@ class TestTrayConsumption(unittest.TestCase):
         runner._current_order_id = None
         runner.shop = MagicMock()
         runner.event_bus = MagicMock()
-        runner._consume_tray()  # should not raise
+        runner._consume_tray()
 
     def test_consume_empty_tray(self):
         """No state changes when tray is empty."""

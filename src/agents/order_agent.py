@@ -27,7 +27,6 @@ class CalculateTotalInputSchema(BaseModel):
     discount_percent: int = Field(default=0, description="Discount percentage to apply")
 
 
-# ORDER AGENT TOOLS
 @tool(args_schema=ProcessOrderInputSchema)
 def process_order(order: list[CustomerOrderItemSchema], customer) -> str:
     """Process a customer order.
@@ -46,7 +45,6 @@ def process_order(order: list[CustomerOrderItemSchema], customer) -> str:
                 unknown_items.append(item.name)
                 continue
 
-            # Validate extras
             invalid_extras = [e for e in item.extras if e.lower() not in ALLOWED_EXTRAS]
             if invalid_extras:
                 return (
@@ -56,11 +54,9 @@ def process_order(order: list[CustomerOrderItemSchema], customer) -> str:
 
             price = MENU[item.name].price * item.quantity
 
-            # Charge $0.50 for each paid extra
             num_paid_extras = len([extra for extra in item.extras if extra.lower() not in {"hot", "cold", "iced"}])
             price += num_paid_extras * 0.50 * item.quantity
 
-            # Charge $0.50 less for small size, $0.75 more for large
             if item.size:
                 if item.size == Size.SMALL:
                     price -= 0.50 * item.quantity

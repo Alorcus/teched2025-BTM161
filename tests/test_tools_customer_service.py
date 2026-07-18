@@ -93,13 +93,11 @@ class TestGetAlternativesReturnsSameCategory(unittest.TestCase):
         data = json.loads(result)
 
         self.assertEqual(data["category"], "coffee")
-        # Should include other coffee items with stock > 0
         alt_names = [a.lower() for a in data["alternatives"]]
         alt_text = " ".join(alt_names)
         self.assertIn("espresso", alt_text)
         self.assertIn("cappuccino", alt_text)
         self.assertIn("americano", alt_text)
-        # Should NOT include pastries or food
         self.assertNotIn("croissant", alt_text)
         self.assertNotIn("muffin", alt_text)
 

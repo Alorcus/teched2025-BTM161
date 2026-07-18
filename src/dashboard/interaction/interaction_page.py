@@ -8,7 +8,7 @@ import threading
 
 from src.coffee_shop import CoffeeShop
 from src.config import CoffeeShopConfig
-from src.agents import CUSTOMER_SCENARIOS, CUSTOMER_SCENARIO_LABELS, build_default_prompt
+from src.agents import CUSTOMER_SCENARIOS, CUSTOMER_SCENARIO_LABELS, build_default_prompt, init_db
 from src.agents.barista_agent import start_coffee_machine, stop_coffee_machine
 from ..nav import header_nav
 from .event_bus import EventBus, EventType, DashboardEvent
@@ -76,6 +76,10 @@ def create_observatory_dashboard(setup_name: str):
     """Create the Agent Observatory dashboard page."""
     pn.extension(sizing_mode="stretch_both")
 
+    # Only page that touches the SQLite order store, so init the schema here
+    # rather than at app boot. init_db() is idempotent.
+    init_db()
+
     available_setups = list_setups()
     setup_options = _resolve_setup_options(setup_name, available_setups)
     initial_setup_value = (
@@ -121,7 +125,7 @@ def create_observatory_dashboard(setup_name: str):
     _conversation_has_run: list[bool] = [
         False
     ]  # mutable container so closure can write to it
-    _export_in_progress = threading.Event()  # set while a daemon export is running
+    _export_in_progress = threading.Event()
 
     status_indicator = pn.indicators.LoadingSpinner(value=False, size=25)
     conversation_log = pn.pane.HTML(
@@ -213,7 +217,6 @@ def create_observatory_dashboard(setup_name: str):
         margin=(0, 0, 5, 0),
     )
     prompt_textarea = pn.widgets.TextAreaInput(
-        # name="Customer Prompt",
         value=build_default_prompt(0),
         height=200,
         sizing_mode="stretch_width",
@@ -378,7 +381,6 @@ def create_observatory_dashboard(setup_name: str):
 
     setup_select.param.watch(on_setup_change, "value")
 
-    # ── Mode Toggle (als nativer HTML-Switch, wie der Theme-Toggle in der Navbar) ──
     mode_toggle = pn.widgets.RadioButtonGroup(
         name="Customer mode",
         options={"🤖  AI agent": "ai", "👤  Manuell": "manual"},
@@ -388,7 +390,6 @@ def create_observatory_dashboard(setup_name: str):
         margin=(0, 4, 10, 0),
     )
 
-    # ── AI-Panel ─────────────────────────────────────
     ai_panel = pn.Column(
         pn.Row(
             pn.Column(
@@ -438,7 +439,6 @@ def create_observatory_dashboard(setup_name: str):
         sizing_mode="stretch_width",
     )
 
-    # ── Manual-Panel ─────────────────────────────────
     chat_input = pn.widgets.TextAreaInput(
         placeholder="Nachricht eingeben…",
         height=120,
@@ -557,7 +557,6 @@ def create_observatory_dashboard(setup_name: str):
         sizing_mode="stretch_width",
     )
 
-    # ── Reaktiver Wechsel: visible statt pn.bind ──────────────────────────────
     def on_mode_change(event):
         ai_panel.visible = event.new == "ai"
         manual_panel.visible = event.new == "manual"
@@ -590,13 +589,10 @@ def create_observatory_dashboard(setup_name: str):
         sizing_mode="stretch_height",
     )
 
-    # Navigation tabs for header
-    nav_tabs = header_nav(active="/")
-
     template = pn.template.FastListTemplate(
         title=f"Coffee Shop Agent Observatory — {setup_name}",
         sidebar=[sidebar],
-        header=[nav_tabs],
+        header=[header_nav(active="/")],
         main=[
             pn.Column(
                 pn.Row(
