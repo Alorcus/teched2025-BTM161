@@ -12,6 +12,7 @@ from src.config import CoffeeShopConfig
 from src.trace_processing.eventlog_conversion import ObjectCentricEventlog
 
 from ..nav import header_nav
+from .complexity_section import ComplexitySection
 from .feedback_section import FeedbackSection
 from .overview_section import OverviewSection
 from .system_metrics_section import SystemMetricsSection
@@ -734,6 +735,7 @@ def _render_metrics_from_ocel(
         range_label.panel(),
         OverviewSection(ocel, range_label.fake_path()).panel(),
         FeedbackSection(ocel).panel(),
+        ComplexitySection(ocel).panel(),
         SystemMetricsSection(ocel).panel(),
         TimeMetricsSection(ocel).panel(),
         GuardrailSection(ocel).panel(),
@@ -752,7 +754,7 @@ def _lazy_visualization_panel(ocel) -> pn.viewable.Viewable:
     slot = pn.Column(
         pn.pane.HTML(
             '<div style="font-size:12px;color:#666;padding:4px 0;">'
-            "Process visualization (OC-DFG, OC-PN, Event → Object Types) is "
+            "Process visualization (Case DFG, OC-DFG, OC-PN) is "
             "generated on demand — it takes a few seconds.</div>",
             sizing_mode="stretch_width",
         ),

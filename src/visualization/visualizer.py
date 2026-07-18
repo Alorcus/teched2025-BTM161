@@ -2,6 +2,8 @@ import re
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
+import pm4py
+import polars as pl
 from pm4py.objects.ocel.importer.jsonocel import importer as jsonocel_importer
 from pm4py.algo.discovery.ocel.ocdfg import algorithm as ocdfg_discovery
 from pm4py.visualization.ocel.ocdfg import visualizer as ocdfg_visualizer
@@ -10,6 +12,7 @@ import pm4py.visualization.ocel.ocpn.variants.wo_decoration as _pn_classic
 from pm4py.algo.discovery.ocel.ocpn import algorithm as ocpn_discovery
 from pm4py.visualization.ocel.ocpn import visualizer as ocpn_visualizer
 from pm4py.visualization.ocel.eve_to_obj_types import visualizer as eto_visualizer
+from pm4py.visualization.dfg import visualizer as dfg_viz
 
 
 def force_bw(gviz):
@@ -77,6 +80,33 @@ def _patched_colors(color_map: dict[str, str]):
     finally:
         _dfg_classic.ot_to_color = original_dfg
         _pn_classic.ot_to_color = original_pn
+
+
+def export_case_dfg(flat_df: pl.DataFrame, out_path: Path, export_format: str = "svg") -> Path:
+    """Discover and export a case-centric frequency DFG from a flat polars event log.
+
+    flat_df must have columns: case:concept:name, concept:name, time:timestamp.
+    """
+    
+    dfg, start_activities, end_activities = pm4py.discover_dfg(
+        flat_df.lazy(),
+        activity_key="concept:name",
+        timestamp_key="time:timestamp",
+        case_id_key="case:concept:name",
+    )
+    activity_counts = dict(flat_df["concept:name"].value_counts().iter_rows())
+    gviz = dfg_viz.apply(
+        dfg,
+        activities_count=activity_counts,
+        parameters={
+            "format": export_format,
+            "start_activities": start_activities,
+            "end_activities": end_activities,
+        },
+    )
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    dfg_viz.save(gviz, str(out_path))
+    return out_path
 
 
 @dataclass
