@@ -194,6 +194,7 @@ class VisualizationSection:
                     .then(pl.lit("medium"))
                     .when(pl.col("case_feedback_score").is_not_null())
                     .then(pl.lit("high"))
+                    .otherwise(pl.lit("unrated"))
                 )
 
             return df
@@ -224,14 +225,15 @@ class VisualizationSection:
             return _wrap_svg(svg) if svg else pn.pane.Alert(_CASE_DFG_UNAVAILABLE, alert_type="info")
 
         panels: dict[str, pn.viewable.Viewable] = {}
-        for cls in ["low", "medium", "high"]:
+        for cls in ["low", "medium", "high", "unrated"]:
             subset = df.filter(pl.col("case_feedback_class") == cls)
+            label = f"{cls.title()} feedback" if cls != "unrated" else "Unrated"
             if subset.is_empty():
-                panels[f"{cls.title()} feedback"] = pn.pane.Alert(f"No cases with {cls} feedback.", alert_type="info")
+                panels[label] = pn.pane.Alert(f"No {cls} cases.", alert_type="info")
                 continue
             svg = self._svg_from_df(subset, out_dir / f"{export_name}-case-dfg-{cls}.svg")
-            content = _wrap_svg(svg) if svg else pn.pane.Alert(f"DFG for {cls} feedback unavailable.", alert_type="info")
-            panels[f"{cls.title()} feedback"] = content
+            content = _wrap_svg(svg) if svg else pn.pane.Alert(f"DFG for {cls} cases unavailable.", alert_type="info")
+            panels[label] = content
 
         return _button_switcher(
             panels,
