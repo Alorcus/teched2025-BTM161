@@ -10,25 +10,10 @@ from .eventlog_helpers import (
     event_case_map,
     flat_event_table,
 )
-from .feedback_section import _SCENARIO_NAMES
 from .styling_helpers import COLOR_SCHEME, section_header, subsection_header
 
 _WITH_COLOR = COLOR_SCHEME["orange"]
 _WITHOUT_COLOR = COLOR_SCHEME["beige"]
-# Assigned to scenarios by index; scenarios beyond the list fall back to gray.
-_SCENARIO_COLORS = [
-    "#B3541E",  # 0 Large latte & croissant
-    "#3E7CB1",  # 1 2 espressos (hurry)
-    "#8E3A6E",  # 2 Complaint & resolution
-    "#4E9A43",  # 3 Ask for recommendation
-    "#B08300",  # 4 Tea only (stubborn)
-    "#5A67D8",  # 5 Buy everything (rich)
-]
-_SCENARIO_COLOR_MAP = {
-    name: _SCENARIO_COLORS[i]
-    for i, name in _SCENARIO_NAMES.items()
-    if i < len(_SCENARIO_COLORS)
-} | {"Unknown scenario": "#8A8A8A"}
 
 _FLAG_LABELS = {
     "has_brew_failure": "Brew failure",
@@ -39,10 +24,12 @@ _FLAG_LABELS = {
 _MIN_CASES = 5
 # Rank correlation needs more points than an average to be meaningful.
 _MIN_CASES_FOR_CORR = 10
-# ≤1 includes tool-free cases (max_repeats 0); upper bucket is open-ended so
-# high-repeat retry loops are never silently dropped from the chart.
+# Buckets 0 (tool-free cases) and 1 (each activity ran exactly once) are shown
+# separately because they represent very different conversation shapes. The
+# upper bucket is open-ended so high-repeat retry loops are never silently
+# dropped from the chart.
 # 2-3 are collapsed together since they have very similar score in test samples, and makes the chart cleaner
-_REPEAT_BUCKETS = [(0, 1, "≤1"), (2, 3, "2–3"), (4, 4, "4"), (5, 999, "5+")]
+_REPEAT_BUCKETS = [(0, 0, "0"), (1, 1, "1"), (2, 3, "2–3"), (4, 4, "4"), (5, 999, "5+")]
 
 
 class ComplexitySection:
@@ -67,7 +54,6 @@ class ComplexitySection:
                 sizing_mode="stretch_width",
             ),
             self._activity_impact_table(),
-            self._trace_length_scatter(),
             sizing_mode="stretch_width",
         )
 
@@ -273,64 +259,5 @@ class ComplexitySection:
                 f'<div style="overflow-x:auto;">{table_html}</div>',
                 sizing_mode="stretch_width",
             ),
-            sizing_mode="stretch_width",
-        )
-
-    # Chart Feedback vs Trace Length
-    def _trace_length_scatter(self) -> pn.viewable.Viewable:
-        df = self._fb.with_columns(
-            scenario=pl.col("scenario_index")
-            .cast(pl.Int64, strict=False)
-            .map_elements(
-                lambda i: _SCENARIO_NAMES.get(i, f"Scenario {i}"),
-                return_dtype=pl.Utf8,
-            )
-            .fill_null("Unknown scenario")
-        ).to_pandas()
-
-        # Fall back to gray for scenario labels outside the fixed map
-        color_map = {
-            s: _SCENARIO_COLOR_MAP.get(s, "#8A8A8A")
-            for s in df["scenario"].unique()
-        }
-        fig = px.scatter(
-            df,
-            x="trace_length", y="feedback_score",
-            color="scenario",
-            color_discrete_map=color_map,
-            hover_data={
-                "case_id": True,
-                "max_activity_repeats": True,
-                "scenario": False,
-            },
-            labels={
-                "trace_length": "Events per conversation",
-                "feedback_score": "Feedback score",
-                "scenario": "",
-            },
-        )
-        # opacity makes exact-overlap stacks read darker than single points
-        fig.update_traces(
-            marker=dict(size=9, opacity=0.55, line=dict(width=1.5, color="white"))
-        )
-        fig.update_layout(
-            margin=dict(l=30, r=10, t=15, b=30),
-            height=260,
-            font=dict(size=10),
-            plot_bgcolor=COLOR_SCHEME["off-white"],
-            yaxis=dict(range=[-0.05, 1.05]),
-            legend=dict(orientation="h", yanchor="bottom", y=1.0, x=0),
-        )
-        return pn.Column(
-            subsection_header(
-                f"Feedback vs Trace Length (n={self._fb.height} conversations)"
-            ),
-            pn.pane.HTML(
-                '<div style="font-size:10px;color:#999;margin-bottom:2px;">'
-                "Trace length largely reflects the scenario — compare points "
-                "within one color, not across colors.</div>",
-                sizing_mode="stretch_width",
-            ),
-            pn.pane.Plotly(fig, height=260, sizing_mode="stretch_width"),
             sizing_mode="stretch_width",
         )

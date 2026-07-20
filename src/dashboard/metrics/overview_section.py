@@ -84,9 +84,6 @@ class OverviewSection:
         conversation_count = self._ocel.objects.filter(
             pl.col("ocel_type") == "user"
         ).height
-        agent_count = self._ocel.objects.filter(
-            pl.col("ocel_type") == "agent"
-        ).height
 
         # Avg messages per conversation: same computation the distribution
         # chart in ConversationCompositionSection uses — we only need the
@@ -101,10 +98,9 @@ class OverviewSection:
             ("Agent Handovers", f"{handover.height:,}"),
             ("Avg Messages / Conversation",
              f"{avg_messages:.1f}" if avg_messages is not None else "—"),
-            ("Total Agents", f"{agent_count:,}"),
         ]
         cards_html = "".join(kpi_card(title, value) for title, value in cards)
-        return kpi_row(cards_html, columns=6)
+        return kpi_row(cards_html, columns=5)
 
     def _avg_messages_per_conversation(self, conversation_count: int) -> float | None:
         if conversation_count == 0:
