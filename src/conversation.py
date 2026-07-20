@@ -72,7 +72,7 @@ class ConversationEngine:
 
             for sm in extract_messages(stream):
                 if denial is None and self._is_denied_agent_message(sm):
-                    denial = self._response_guardrail_denial(sm)
+                    denial = self._response_guardrail_denial(sm, thread_id)
                     if denial is not None:
                         break
                 if sm.is_agent_reply:
@@ -107,10 +107,13 @@ class ConversationEngine:
             return False
         return bool(sm.content) and not getattr(sm.message, "tool_calls", None)
 
-    def _response_guardrail_denial(self, sm) -> dict | None:
+    def _response_guardrail_denial(self, sm, thread_id: str | None) -> dict | None:
         """Return {msg, deny_reason} when a response guardrail denies this
         AIMessage, else None. A broken predicate collapses to None so a
-        malfunctioning guardrail cannot wedge the headless flow."""
+        malfunctioning guardrail cannot wedge the headless flow.
+
+        `thread_id` is forwarded so the emitted gateway_decision row survives
+        TraceProcessor's mandatory-fields filter and reaches the dashboard."""
         gateway = self.gateways.get(sm.agent_name)
         if gateway is None:
             return None
@@ -119,7 +122,7 @@ class ConversationEngine:
                 content=sm.content,
                 message_id=getattr(sm.message, "id", "") or "",
                 state={},
-                thread_id=None,
+                thread_id=thread_id,
             )
         except Exception:
             logger.exception("response guardrail evaluation failed; allowing message")
