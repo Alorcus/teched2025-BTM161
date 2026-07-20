@@ -77,7 +77,7 @@ class GuardrailSection:
         gw = _gateway_events(self._ocel)
         if gw.is_empty():
             return pn.Column(
-                section_header("Guardrails"),
+                section_header("Guardrail Metrics"),
                 pn.pane.HTML(
                     '<div style="font-size:11px;color:#999;padding:4px 0;">'
                     "No guardrail activity recorded for this log.</div>",
@@ -88,7 +88,7 @@ class GuardrailSection:
 
         triggers = _long_triggers(gw)
 
-        column = section_header("Guardrails")
+        column = section_header("Guardrail Metrics")
         column.append(self._kpi_row(gw, triggers))
         column.append(subsection_header("Trigger Frequency per Guardrail"))
         column.append(self._trigger_frequency_chart(triggers))

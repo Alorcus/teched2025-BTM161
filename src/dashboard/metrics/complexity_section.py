@@ -56,11 +56,11 @@ class ComplexitySection:
             return pn.pane.HTML(
                 '<div style="font-size:11px;color:#999;padding:4px 0;">'
                 "No feedback scores available — complexity correlation needs "
-                "cases with customer feedback.</div>",
+                "conversations with customer feedback.</div>",
                 sizing_mode="stretch_width",
             )
         return pn.Column(
-            section_header("Feedback × Process Complexity"),
+            section_header("Complexity Metrics"),
             pn.Row(
                 self._flag_impact_chart(),
                 self._repeats_impact_chart(),
@@ -75,7 +75,7 @@ class ComplexitySection:
     def _flag_impact_chart(self) -> pn.viewable.Viewable:
         rows = []
         for flag, label in _FLAG_LABELS.items():
-            for present, group in ((True, "Cases with event"), (False, "Cases without event")):
+            for present, group in ((True, "Conversations with event"), (False, "Conversations without event")):
                 sub = self._fb.filter(pl.col(flag) == present)
                 if sub.is_empty():
                     continue
@@ -93,8 +93,8 @@ class ComplexitySection:
             x="marker", y="avg", color="group",
             barmode="group", text="text",
             color_discrete_map={
-                "Cases with event": _WITH_COLOR,
-                "Cases without event": _WITHOUT_COLOR,
+                "Conversations with event": _WITH_COLOR,
+                "Conversations without event": _WITHOUT_COLOR,
             },
             labels={"marker": "", "avg": "Avg feedback score", "group": ""},
         )
@@ -109,11 +109,11 @@ class ComplexitySection:
         )
         return pn.Column(
             subsection_header(
-                f"Avg Feedback by Process Event (n={self._fb.height} cases)"
+                f"Avg Feedback by Process Event (n={self._fb.height} conversations)"
             ),
             pn.pane.HTML(
                 '<div style="font-size:10px;color:#999;margin-bottom:2px;">'
-                "Avg score in cases with vs without the event — "
+                "Avg score in conversations with vs without the event — "
                 "a wide gap flags the event as a sign of unhappy customers.</div>",
                 sizing_mode="stretch_width",
             ),
@@ -142,7 +142,7 @@ class ComplexitySection:
             x="bucket", y="avg", text="text",
             color_discrete_sequence=['#B3541E'],
             labels={
-                "bucket": "Max repeats of one activity in a case",
+                "bucket": "Max repeats of one activity in a conversation",
                 "avg": "Avg feedback score",
             },
         )
@@ -161,7 +161,7 @@ class ComplexitySection:
             pn.pane.HTML(
                 '<div style="font-size:10px;color:#999;margin-bottom:2px;">'
                 "How often the most-repeated single activity occurred within a "
-                "case — repeats &ge;3 usually mean agent retry loops.</div>",
+                "conversation — repeats &ge;3 usually mean agent retry loops.</div>",
                 sizing_mode="stretch_width",
             ),
             pn.pane.Plotly(fig, height=220, sizing_mode="stretch_width"),
@@ -220,7 +220,7 @@ class ComplexitySection:
         if stats.is_empty():
             return pn.pane.HTML(
                 '<div style="font-size:11px;color:#999;padding:4px 0;">'
-                f"No activity occurs in at least {_MIN_CASES} cases on both "
+                f"No activity occurs in at least {_MIN_CASES} conversations on both "
                 "sides — not enough data for activity impact.</div>",
                 sizing_mode="stretch_width",
             )
@@ -252,7 +252,7 @@ class ComplexitySection:
             '<table style="font-size:11px;border-collapse:collapse;color:#333;">'
             "<thead><tr style='color:#999;text-align:left;'>"
             '<th style="padding:3px 10px 3px 0;font-weight:600;">Activity</th>'
-            '<th style="padding:3px 10px;text-align:right;font-weight:600;">Cases</th>'
+            '<th style="padding:3px 10px;text-align:right;font-weight:600;">Conversations</th>'
             '<th style="padding:3px 10px;text-align:right;font-weight:600;">Avg with</th>'
             '<th style="padding:3px 10px;text-align:right;font-weight:600;">Avg without</th>'
             '<th style="padding:3px 10px;text-align:right;font-weight:600;">&Delta;</th>'
@@ -263,12 +263,12 @@ class ComplexitySection:
             subsection_header("Activity Impact on Feedback"),
             pn.pane.HTML(
                 '<div style="font-size:10px;color:#999;margin-bottom:4px;">'
-                "Avg feedback in cases where the activity occurs vs cases where it "
-                f"does not (activities present in &ge;{_MIN_CASES} cases on both sides). "
+                "Avg feedback in conversations where the activity occurs vs conversations where it "
+                f"does not (activities present in &ge;{_MIN_CASES} conversations on both sides). "
                 "Negative &Delta; marks activities associated with unhappy customers — "
                 "association, not causation. Repeat corr: rank correlation between "
-                "how often the activity repeats within a case and the feedback score "
-                f"(shown for &ge;{_MIN_CASES_FOR_CORR} cases with varying counts); "
+                "how often the activity repeats within a conversation and the feedback score "
+                f"(shown for &ge;{_MIN_CASES_FOR_CORR} conversations with varying counts); "
                 "negative means repeats hurt.</div>"
                 f'<div style="overflow-x:auto;">{table_html}</div>',
                 sizing_mode="stretch_width",
@@ -304,7 +304,7 @@ class ComplexitySection:
                 "scenario": False,
             },
             labels={
-                "trace_length": "Events per case",
+                "trace_length": "Events per conversation",
                 "feedback_score": "Feedback score",
                 "scenario": "",
             },
@@ -323,7 +323,7 @@ class ComplexitySection:
         )
         return pn.Column(
             subsection_header(
-                f"Feedback vs Trace Length (n={self._fb.height} cases)"
+                f"Feedback vs Trace Length (n={self._fb.height} conversations)"
             ),
             pn.pane.HTML(
                 '<div style="font-size:10px;color:#999;margin-bottom:2px;">'

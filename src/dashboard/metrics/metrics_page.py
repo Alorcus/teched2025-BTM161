@@ -20,6 +20,7 @@ from .time_section import TimeMetricsSection
 from .guardrail_section import GuardrailSection
 from .trace_cache import CACHE_FILENAME, ensure_trace_cache
 from .visualization_section import VisualizationSection
+from .styling_helpers import section_header
 from .object_cardinality_section import ObjectCardinalitySection
 
 
@@ -674,13 +675,13 @@ def _format_span_hint(
     if filtered.is_empty():
         return (
             '<div style="font-size:11px;color:#999;padding-top:2px;">'
-            "Selected cases: none.</div>"
+            "Selected conversations: none.</div>"
         )
     span_start = filtered["first_t"].min()
     span_end = filtered["last_t"].max()
     return (
         f'<div style="font-size:11px;color:#666;padding-top:2px;">'
-        f"Selected cases span "
+        f"Selected conversations span "
         f"<b>{span_start:%Y-%m-%d %H:%M:%S}</b> → "
         f"<b>{span_end:%Y-%m-%d %H:%M:%S}</b></div>"
     )
@@ -756,7 +757,7 @@ def _lazy_visualization_panel(ocel) -> pn.viewable.Viewable:
     slot = pn.Column(
         pn.pane.HTML(
             '<div style="font-size:12px;color:#666;padding:4px 0;">'
-            "Process visualization (Case DFG, OC-DFG, OC-PN) is "
+            "Process visualization (Conversation DFG, OC-DFG, OC-PN) is "
             "generated on demand — it takes a few seconds.</div>",
             sizing_mode="stretch_width",
         ),
@@ -786,7 +787,11 @@ def _lazy_visualization_panel(ocel) -> pn.viewable.Viewable:
 
     button.on_click(_on_click)
     slot.append(button)
-    return slot
+    return pn.Column(
+        section_header("Visualization Metrics"),
+        slot,
+        sizing_mode="stretch_width",
+    )
 
 
 class _RangeLabel:

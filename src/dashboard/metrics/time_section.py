@@ -16,7 +16,7 @@ _PER_ORDER_CARDS: list[tuple[str, str, str, str]] = [
     ),
     (
         "Fulfillment Time",
-        "From order placement until the last activity in the case.",
+        "From order placement until the last activity in the order.",
         "pipeline_duration_s",
         "orders",
     ),

@@ -30,9 +30,9 @@ class ObjectCardinalitySection:
         return self._pane
 
     def _build(self) -> pn.Column:
-        column = section_header("Object Cardinality & Divergence")
+        column = section_header("Conversation Composition")
         column.append(self._summary_cards())
-        column.append(subsection_header("Agents per Case", top_margin=10))
+        column.append(subsection_header("Agents per Conversation", top_margin=10))
         column.append(self._agents_per_case_chart())
         column.append(subsection_header("Most-Repeated Activities", top_margin=10))
         column.append(self._activity_divergence_chart())
@@ -51,13 +51,13 @@ class ObjectCardinalitySection:
 
         cards_html = "".join([
             subtitled_kpi_card(
-                "Agents per Case", "Distinct agent objects touching a single case.", agents_avg,
+                "Agents per Conversation", "Distinct agent objects touching a single conversation.", agents_avg,
             ),
             subtitled_kpi_card(
-                "Handovers per Case", "Agent-to-agent transitions within a case.", handovers_avg,
+                "Handovers per Conversation", "Agent-to-agent transitions within a conversation.", handovers_avg,
             ),
             subtitled_kpi_card(
-                "Tool Calls per Case", "Distinct tool_call objects executed per case.", tool_calls_avg,
+                "Tool Calls per Conversation", "Distinct tool_call objects executed per conversation.", tool_calls_avg,
             ),
         ])
         return kpi_row(cards_html, columns=4, top_padding=12)
@@ -67,7 +67,7 @@ class ObjectCardinalitySection:
     def _agents_per_case_chart(self) -> pn.viewable.Viewable:
         agents = agents_per_case(self._ocel)
         if not agents.height:
-            return pn.pane.Alert("No agent–case relationships found in this log.", alert_type="info")
+            return pn.pane.Alert("No agent–conversation relationships found in this log.", alert_type="info")
 
         dist = (
             agents.group_by("agent_count")
@@ -78,7 +78,7 @@ class ObjectCardinalitySection:
         fig = px.bar(
             dist.to_pandas(),
             x="agent_count", y="case_count",
-            labels={"agent_count": "Distinct Agents in Case", "case_count": "Cases"},
+            labels={"agent_count": "Distinct Agents in Conversation", "case_count": "Conversations"},
             color_discrete_sequence=[COLOR_SCHEME["orange"]],
         )
         fig.update_layout(
@@ -95,22 +95,29 @@ class ObjectCardinalitySection:
         divergence = activity_divergence(self._ocel)
         if not divergence.height:
             return pn.pane.Alert(
-                "No activity repeats more than once per case on average.", alert_type="info",
+                "No activity repeats more than once per conversation on average.", alert_type="info",
             )
 
+        top = divergence.head(15)
+        n = top.height
+        # Anchor the axis at 1 — activity_divergence filters to avg_per_case > 1,
+        # so bar length reads as "excess repeats beyond the first occurrence".
+        max_val = float(top["avg_per_case"].max())
+        height = max(140, 22 * n + 40)
+
         fig = px.bar(
-            divergence.to_pandas().head(15),
+            top.to_pandas(),
             x="avg_per_case", y="ocel_type", orientation="h",
-            color="avg_per_case", color_continuous_scale="Reds",
-            labels={"ocel_type": "Activity", "avg_per_case": "Avg Occurrences per Case"},
+            labels={"ocel_type": "Activity", "avg_per_case": "Avg Occurrences per Conversation"},
             hover_data={"max_per_case": True},
+            color_discrete_sequence=[COLOR_SCHEME["red"]],
         )
         fig.update_layout(
             yaxis={"categoryorder": "total ascending"},
-            coloraxis_showscale=False,
+            xaxis=dict(range=[1, max_val * 1.05]),
             margin=dict(l=150, r=10, t=5, b=25),
-            height=210,
+            height=height,
             font=dict(size=10),
             plot_bgcolor=COLOR_SCHEME["off-white"],
         )
-        return pn.pane.Plotly(fig, height=210, sizing_mode="stretch_width")
+        return pn.pane.Plotly(fig, height=height, sizing_mode="stretch_width")

@@ -24,7 +24,7 @@ class FeedbackSection:
             )
 
         return pn.Column(
-            section_header("Customer Feedback"),
+            section_header("Feedback Metrics"),
             self._build_kpi_row(),
             self._build_scenario_breakdown(),
             sizing_mode="stretch_width",
