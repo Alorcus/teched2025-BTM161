@@ -1,6 +1,6 @@
 import re
 
-from src.agents.order_store import load_order
+from src.agents.order_store import is_item_in_order, load_order
 from src.agents.shared_components import ALLOWED_EXTRAS, MENU
 
 from .types import Effect, GuardrailContext, Verdict
@@ -308,10 +308,55 @@ def order_total_within_limit_predicate(max_total: float, effect: str = "deny"):
     return _eval
 
 
+def item_in_order_predicate(context: GuardrailContext) -> Verdict:
+
+    order_id = str(context.tool_args.get("order_id", ""))
+    item_name = str(context.tool_args.get("item_name", ""))
+
+    if not order_id or not item_name:
+        return Verdict(
+            effect=Effect.DENY,
+            guardrail_name="",
+            guardrail_type="",
+            reason_internal="missing order_id or item_name; cannot evaluate",
+            reason_for_llm=(
+                "The context is missing either the order_id or the item_name. Both are required to check if the item is part of the order."
+            ),
+        )
+
+    if is_item_in_order(order_id, item_name):
+        return Verdict(
+            effect=Effect.ALLOW,
+            guardrail_name="",
+            guardrail_type="",
+            reason_internal=f"item {item_name} is in order {order_id}",
+        )
+    return Verdict(
+        effect=Effect.DENY,
+        guardrail_name="",
+        guardrail_type="",
+        reason_internal=f"item {item_name} is not in order {order_id}",
+        reason_for_llm=(
+            f"Item '{item_name}' could not be matched with any item in order {order_id}. Only include the item name, dont include size or extras. You cannot place items on the tray that were not part of the order."
+        ),
+    )
+
+
 _ITEM_TERMINALS: frozenset[str] = frozenset(MENU.keys()) | {
-    "coffee", "mocha", "macchiato", "chai", "frappe", "frappé",
-    "brew", "blend", "tea", "cortado", "matcha", "affogato",
-    "pastry", "pastries",
+    "coffee",
+    "mocha",
+    "macchiato",
+    "chai",
+    "frappe",
+    "frappé",
+    "brew",
+    "blend",
+    "tea",
+    "cortado",
+    "matcha",
+    "affogato",
+    "pastry",
+    "pastries",
 }
 _MULTIWORD_TERMINALS: tuple[tuple[str, ...], ...] = (
     ("flat", "white"),
@@ -323,25 +368,109 @@ _MULTIWORD_TERMINALS: tuple[tuple[str, ...], ...] = (
     ("iced", "tea"),
 )
 _REJECTION_TRIGGERS: tuple[str, ...] = (
-    "don't", "do not", "not on", "not have", "not serve", "not offer",
-    "out of", " no ", "cannot", "can't", "isn't", "aren't", "unfortunately",
+    "don't",
+    "do not",
+    "not on",
+    "not have",
+    "not serve",
+    "not offer",
+    "out of",
+    " no ",
+    "cannot",
+    "can't",
+    "isn't",
+    "aren't",
+    "unfortunately",
 )
-_STOP_WORDS: frozenset[str] = frozenset({
-    "a", "an", "the", "some", "any", "one", "two", "three",
-    "that", "this", "these", "those",
-    "small", "medium", "large", "normal", "regular",
-    "your", "my", "his", "her", "their",
-    "please", "just", "only",
-})
-_CONNECTORS: frozenset[str] = frozenset({
-    "and", "or", "but", "to", "for", "in", "on", "at", "of", "from",
-    "have", "has", "had", "like", "want", "try", "add", "serve", "serves",
-    "get", "got", "make", "makes", "do", "does", "did", "put", "puts",
-    "recommend", "recommends", "suggest", "suggests", "offer", "offers",
-    "we", "you", "i", "they", "he", "she", "it", "us", "them",
-    "would", "could", "should", "will", "can", "may", "might",
-    "our", "how", "about", "perhaps", "what", "with",
-})
+_STOP_WORDS: frozenset[str] = frozenset(
+    {
+        "a",
+        "an",
+        "the",
+        "some",
+        "any",
+        "one",
+        "two",
+        "three",
+        "that",
+        "this",
+        "these",
+        "those",
+        "small",
+        "medium",
+        "large",
+        "normal",
+        "regular",
+        "your",
+        "my",
+        "his",
+        "her",
+        "their",
+        "please",
+        "just",
+        "only",
+    }
+)
+_CONNECTORS: frozenset[str] = frozenset(
+    {
+        "and",
+        "or",
+        "but",
+        "to",
+        "for",
+        "in",
+        "on",
+        "at",
+        "of",
+        "from",
+        "have",
+        "has",
+        "had",
+        "like",
+        "want",
+        "try",
+        "add",
+        "serve",
+        "serves",
+        "get",
+        "got",
+        "make",
+        "makes",
+        "do",
+        "does",
+        "did",
+        "put",
+        "puts",
+        "recommend",
+        "recommends",
+        "suggest",
+        "suggests",
+        "offer",
+        "offers",
+        "we",
+        "you",
+        "i",
+        "they",
+        "he",
+        "she",
+        "it",
+        "us",
+        "them",
+        "would",
+        "could",
+        "should",
+        "will",
+        "can",
+        "may",
+        "might",
+        "our",
+        "how",
+        "about",
+        "perhaps",
+        "what",
+        "with",
+    }
+)
 _EXTRAS_TOKENS: frozenset[str] = frozenset(
     tok for extra in ALLOWED_EXTRAS for tok in extra.split()
 )
@@ -419,7 +548,11 @@ def _find_candidate_phrases(tokens: list[str]) -> list[tuple[list[str], int]]:
     def _extend_left(start_left: int) -> list[str]:
         acc: list[str] = []
         left = start_left
-        while left >= 0 and tokens[left] not in _CONNECTORS and tokens[left] not in _ITEM_TERMINALS:
+        while (
+            left >= 0
+            and tokens[left] not in _CONNECTORS
+            and tokens[left] not in _ITEM_TERMINALS
+        ):
             acc.insert(0, tokens[left])
             left -= 1
         return acc
@@ -451,7 +584,7 @@ def _phrase_is_on_menu(phrase: list[str]) -> bool:
         return True
     terminal_tokens: list[str] = []
     for mw in _MULTIWORD_TERMINALS:
-        if tuple(phrase[-len(mw):]) == mw:
+        if tuple(phrase[-len(mw) :]) == mw:
             terminal_tokens = list(mw)
             break
     if terminal_tokens:
@@ -496,7 +629,9 @@ def off_menu_recommendation_predicate(effect: str = "deny"):
                 if _is_rejection_context(sentence):
                     continue
                 for clause in _clauses(sentence):
-                    for phrase, _terminal_idx in _find_candidate_phrases(_tokens(clause)):
+                    for phrase, _terminal_idx in _find_candidate_phrases(
+                        _tokens(clause)
+                    ):
                         if not _phrase_is_on_menu(phrase):
                             offenders.append(" ".join(phrase))
 
@@ -543,4 +678,5 @@ PREDICATE_REGISTRY = {
     "order_total_within_limit": order_total_within_limit_predicate,
     "off_menu_recommendation": off_menu_recommendation_predicate,
     "max_tool_calls": max_tool_calls_predicate,
+    "item_in_order": item_in_order_predicate,
 }

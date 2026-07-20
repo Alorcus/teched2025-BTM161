@@ -31,16 +31,21 @@ class ConversationEngine:
         mlflow_enabled=True,
         setup_name: str | None = None,
         gateways: dict | None = None,
+        recursion_limit: int = 100,
     ):
         self.app = app
         self.mlflow_enabled = mlflow_enabled
         self.setup_name = setup_name
         self.gateways = gateways or {}
+        self.recursion_limit = recursion_limit
         self.traces_of_latest_conversations: list[str] = []
         self.feedback_log: dict[str, dict] = {}
 
     def _get_config(self, thread_id):
-        return {"configurable": {"thread_id": thread_id}}
+        return {
+            "configurable": {"thread_id": thread_id},
+            "recursion_limit": self.recursion_limit,
+        }
 
     def send_message(
         self, thread_id: str, message: str, scenario_index: int | None = None
@@ -83,7 +88,9 @@ class ConversationEngine:
 
             self._apply_response_guardrail_patch(config, denial)
             stream_input = {
-                "messages": [HumanMessage(content=denial["deny_reason"], name="system")],
+                "messages": [
+                    HumanMessage(content=denial["deny_reason"], name="system")
+                ],
                 "handoff_context": None,
             }
             retries += 1
@@ -131,9 +138,8 @@ class ConversationEngine:
             return None
         return {
             "msg": sm.message,
-            "deny_reason": decision.deny_reason_for_llm or (
-                "Your last message violated a response guardrail. Try again."
-            ),
+            "deny_reason": decision.deny_reason_for_llm
+            or ("Your last message violated a response guardrail. Try again."),
         }
 
     def _apply_response_guardrail_patch(self, config: dict, denial: dict) -> None:

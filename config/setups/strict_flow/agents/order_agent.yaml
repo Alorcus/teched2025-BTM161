@@ -41,7 +41,6 @@ guardrails:
   - discount_within_30pct
   - handover_appropriateness_soft_stub
   - process_order_once_per_conversation
-  - off_menu_recommendation
 guidelines:
   - handoff_etiquette
 allowed_handovers:

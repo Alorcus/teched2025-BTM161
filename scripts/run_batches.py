@@ -3,6 +3,12 @@
 Consecutive batches sharing a setup reuse the same CoffeeShop instance, so
 keep same-setup entries next to each other in the list to pay the init cost
 once per contiguous block.
+
+Each batch triple is (setup, scenario, count) where `count` is the target
+number of *successful* conversations. A conversation that crashes (e.g. a
+LangGraph ``GraphRecursionError``) is caught, does not count toward the target,
+and is retried — the batch keeps running until `count` conversations have
+finished without raising. There is no retry cap; interrupt with Ctrl-C.
 """
 
 import argparse
@@ -11,6 +17,8 @@ import logging
 import sys
 from itertools import groupby
 from pathlib import Path
+
+from langgraph.errors import GraphRecursionError
 
 from src.agents.customer_agent import CUSTOMER_SCENARIOS
 from src.coffee_shop import CoffeeShop
@@ -31,7 +39,8 @@ RESET_INVENTORY = True
 PROCESS_SUPERVISOR = False
 EXPORT_LOGS = False
 
-logger = logging.getLogger("coffee_shop")
+logger = logging.getLogger("coffee_shop.batches")
+logger.setLevel(level=logging.DEBUG)
 
 
 def _parse_triple(raw: str) -> tuple[str, int, int]:
@@ -78,7 +87,9 @@ def _parse_batches_arg(values: list[str]) -> list[tuple[str, int, int]]:
     return triples
 
 
-def _load_config(path: Path) -> tuple[
+def _load_config(
+    path: Path,
+) -> tuple[
     list[tuple[str, int, int]] | None,
     bool | None,
     bool | None,
@@ -93,7 +104,9 @@ def _load_config(path: Path) -> tuple[
     batches: list[tuple[str, int, int]] | None = None
     if batches_raw is not None:
         if not isinstance(batches_raw, list):
-            raise ValueError("config 'batches' must be a list of [setup, scenario, count]")
+            raise ValueError(
+                "config 'batches' must be a list of [setup, scenario, count]"
+            )
         batches = []
         for entry in batches_raw:
             if (
@@ -109,7 +122,9 @@ def _load_config(path: Path) -> tuple[
                 )
             setup, scenario, count = entry
             if count <= 0:
-                raise ValueError(f"config 'batches' count must be positive, got {count}")
+                raise ValueError(
+                    f"config 'batches' count must be positive, got {count}"
+                )
             batches.append((setup, scenario, count))
 
     reset = data.get("reset_inventory")
@@ -141,7 +156,8 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="SETUP:SCENARIO:COUNT",
         help=(
             "One or more setup:scenario:count triples "
-            "(e.g. --batches baseline:0:50 baseline:2:50). "
+            "(e.g. --batches baseline:0:50 baseline:2:50), where count is the "
+            "target number of successful conversations (crashes are retried). "
             "May also be a single comma-separated string."
         ),
     )
@@ -209,11 +225,11 @@ def _resolve_settings(
 
 
 def main(argv: list[str] | None = None) -> int:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
-    logging.getLogger("httpx").setLevel(logging.WARNING)
+    # logging.basicConfig(
+    #     level=logging.DEBUG,
+    #     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    # )
+    # logging.getLogger("httpx").setLevel(logging.WARNING)
 
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -229,11 +245,11 @@ def main(argv: list[str] | None = None) -> int:
             return 1
 
     all_trace_ids: list[str] = []
-    per_batch_counts: list[tuple[str, int, int, int]] = []
+    per_batch_counts: list[tuple[str, int, int, int, int]] = []
     total_batches = len(batches_list)
-    total_traces = sum(count for _, _, count in batches_list)
+    total_conversations = sum(count for _, _, count in batches_list)
     batch_number = 0
-    trace_number = 0
+    conversation_number = 0
 
     for setup_name, batches in groupby(batches_list, key=lambda b: b[0]):
         batches = list(batches)
@@ -254,31 +270,52 @@ def main(argv: list[str] | None = None) -> int:
                 f"| scenario {scenario}: {label[:60]} | {count} trace(s) ==="
             )
             batch_trace_ids: list[str] = []
-            for i in range(count):
-                trace_number += 1
+            successes = 0
+            attempts = 0
+            failures = 0
+            while successes < count:
+                attempts += 1
                 logger.info(
                     f"--- Batch {batch_number}/{total_batches} "
-                    f"| conversation {i + 1}/{count} "
-                    f"| trace {trace_number}/{total_traces} ---"
+                    f"| conversation {conversation_number + successes + 1}"
+                    f"/{total_conversations} "
+                    f"| batch progress {successes + 1}/{count} "
+                    f"| attempt {attempts} (failures so far: {failures}) ---"
                 )
-                trace_ids = shop.run_conversation(
-                    scenario_index=scenario,
-                    on_message=None,
-                    reset_inventory_first=reset_inventory,
-                )
+                try:
+                    trace_ids = shop.run_conversation(
+                        scenario_index=scenario,
+                        on_message=None,
+                        reset_inventory_first=reset_inventory,
+                    )
+                except GraphRecursionError as exc:
+                    failures += 1
+                    logger.warning(
+                        f"conversation crashed (GraphRecursionError) on attempt "
+                        f"{attempts} for setup '{setup_name}' scenario {scenario}: "
+                        f"{exc}; retrying"
+                    )
+                    continue
+                except Exception as exc:
+                    failures += 1
+                    logger.warning(
+                        f"conversation crashed on attempt {attempts} for setup "
+                        f"'{setup_name}' scenario {scenario}: {exc!r}; retrying"
+                    )
+                    continue
+                successes += 1
                 batch_trace_ids.extend(trace_ids)
+            conversation_number += successes
             all_trace_ids.extend(batch_trace_ids)
-            per_batch_counts.append(
-                (setup_name, scenario, count, len(batch_trace_ids))
-            )
+            per_batch_counts.append((setup_name, scenario, count, attempts, failures))
 
     logger.info(
         f"=== Complete: {len(batches_list)} batch(es), {len(all_trace_ids)} trace(s) ==="
     )
-    for setup_name, scenario, requested, actual in per_batch_counts:
+    for setup_name, scenario, requested, attempts, failures in per_batch_counts:
         logger.info(
-            f"  - {setup_name} / scenario {scenario}: {actual} trace(s) "
-            f"(requested {requested})"
+            f"  - {setup_name} / scenario {scenario}: {requested}/{requested} "
+            f"successful in {attempts} attempt(s) ({failures} crash(es) retried)"
         )
 
     if export_logs:

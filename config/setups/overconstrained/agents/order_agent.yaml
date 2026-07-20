@@ -38,6 +38,7 @@ guardrails:
   - order_total_max3
 guidelines:
   - handoff_etiquette
+  - include_order_id_in_handoff
 allowed_handovers:
   - inventory_agent
   - customer_service_agent
