@@ -183,5 +183,124 @@ class TestConversationRunnerResponseGuardrail(unittest.TestCase):
         self.assertIsNone(runner._evaluate_response_guardrails(msg, "customer"))
 
 
+class _CapturingLogSink:
+    """Records every event appended to it so tests can assert on the raw
+    JSONL payload (specifically `thread_id`, which the dashboard's guardrail
+    metric extracts from these rows)."""
+
+    def __init__(self):
+        self.events: list[dict] = []
+
+    def append(self, event: dict) -> None:
+        self.events.append(event)
+
+
+def _build_gateway_with_sink(sink) -> Gateway:
+    gr = HardGuardrail(
+        name="off_menu_recommendation",
+        version="v1",
+        tools=[Gateway.RESPONSE_TOOL_NAME],
+        effect=Effect.DENY,
+        predicate=off_menu_recommendation_predicate("deny"),
+        predicate_args={},
+    )
+    return Gateway(
+        agent_id="order_agent",
+        guardrails=[gr],
+        allowed_handovers=[],
+        snapshot_id="snap-test",
+        log_sink=sink,
+    )
+
+
+class TestResponseGuardrailThreadIdPropagation(unittest.TestCase):
+    """Regression: response-scoped guardrail decisions must be logged with the
+    caller's real `thread_id`, not `None`.
+
+    A null `thread_id` makes `TraceProcessor._load_gateway_rows` silently drop
+    the record (`src/trace_processing/trace_processor.py:156` gates on truthy
+    thread_id + agent_id + setup + snapshot + tool_call_id), so response
+    guardrails never reach `_all_traces.csv` or the dashboard metric.
+    """
+
+    def _engine_stream(self, contents: list[list[str]]):
+        remaining = list(contents)
+        app = MagicMock()
+
+        def stream_side_effect(*a, **kw):
+            batch = remaining.pop(0)
+            updates = []
+            for i, text in enumerate(batch):
+                ai = AIMessage(content=text, name="order_agent", id=f"ai-{i}")
+                updates.append((("order_agent",), {"llm": {"messages": [ai]}}))
+            return iter(updates)
+
+        app.stream.side_effect = stream_side_effect
+        snapshot = MagicMock()
+        snapshot.values = {"messages": []}
+        app.get_state.return_value = snapshot
+        return app
+
+    def test_conversation_engine_propagates_thread_id_to_gateway_log(self):
+        sink = _CapturingLogSink()
+        gateway = _build_gateway_with_sink(sink)
+        # Two rounds: first off-menu (deny → retry), second clean (allow).
+        app = self._engine_stream([
+            ["How about a hazelnut latte?"],
+            ["One large latte coming up."],
+        ])
+        engine = ConversationEngine(
+            app,
+            mlflow_enabled=False,
+            setup_name="baseline",
+            gateways={"order_agent": gateway},
+        )
+        engine.send_message("thread-abc-123", "Recommend something")
+
+        response_events = [
+            e for e in sink.events
+            if e["tool_name"] == Gateway.RESPONSE_TOOL_NAME
+        ]
+        self.assertGreater(
+            len(response_events), 0,
+            "expected at least one response-guardrail log event",
+        )
+        for e in response_events:
+            self.assertEqual(
+                e["thread_id"], "thread-abc-123",
+                f"response-guardrail log lost thread_id: {e}",
+            )
+
+    def test_conversation_runner_propagates_thread_id_to_gateway_log(self):
+        from src.dashboard.interaction.conversation_runner import ConversationRunner
+
+        sink = _CapturingLogSink()
+        gateway = _build_gateway_with_sink(sink)
+
+        shop = MagicMock()
+        shop.config = None
+        shop.process_supervisor = None
+        shop.gateways = {"order_agent": gateway}
+        event_bus = MagicMock()
+        runner = ConversationRunner(shop, event_bus)
+
+        msg = AIMessage(
+            content="How about a hazelnut latte?",
+            name="order_agent",
+            id="ai-1",
+        )
+        reason = runner._evaluate_response_guardrails(
+            msg, "order_agent", thread_id="thread-xyz-789",
+        )
+        self.assertIsNotNone(reason)
+
+        response_events = [
+            e for e in sink.events
+            if e["tool_name"] == Gateway.RESPONSE_TOOL_NAME
+        ]
+        self.assertEqual(len(response_events), 1)
+        self.assertEqual(response_events[0]["thread_id"], "thread-xyz-789")
+
+
 if __name__ == "__main__":
     unittest.main()
