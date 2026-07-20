@@ -60,7 +60,7 @@ class ComplexitySection:
                 sizing_mode="stretch_width",
             )
         return pn.Column(
-            section_header("Complexity Metrics"),
+            section_header("Process Complexity"),
             pn.Row(
                 self._flag_impact_chart(),
                 self._repeats_impact_chart(),

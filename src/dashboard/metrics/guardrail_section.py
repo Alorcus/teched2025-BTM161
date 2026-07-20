@@ -77,7 +77,7 @@ class GuardrailSection:
         gw = _gateway_events(self._ocel)
         if gw.is_empty():
             return pn.Column(
-                section_header("Guardrail Metrics"),
+                section_header("Guardrails"),
                 pn.pane.HTML(
                     '<div style="font-size:11px;color:#999;padding:4px 0;">'
                     "No guardrail activity recorded for this log.</div>",
@@ -88,7 +88,7 @@ class GuardrailSection:
 
         triggers = _long_triggers(gw)
 
-        column = section_header("Guardrail Metrics")
+        column = section_header("Guardrails")
         column.append(self._kpi_row(gw, triggers))
         column.append(subsection_header("Trigger Frequency per Guardrail"))
         column.append(self._trigger_frequency_chart(triggers))
@@ -113,11 +113,9 @@ class GuardrailSection:
         if tool_call_tbl is None or tool_call_tbl.is_empty():
             total = denies + flags
             allows = 0
-            deny_rate_str = "—"
         else:
             total = int(tool_call_tbl.height)
             allows = max(0, total - denies - flags)
-            deny_rate_str = f"{denies / total:.1%}"
 
         cards = [
             (
@@ -146,17 +144,12 @@ class GuardrailSection:
                 "Distinct tools that were denied or flagged at least once.",
                 str(unique_tools),
             ),
-            (
-                "Deny rate",
-                "Share of gateway-evaluated tool calls that ended in a deny.",
-                deny_rate_str,
-            ),
         ]
         cards_html = "".join(
             subtitled_kpi_card(label, subtitle, value)
             for label, subtitle, value in cards
         )
-        return kpi_row(cards_html, columns=6, top_padding=12)
+        return kpi_row(cards_html, columns=5, top_padding=12)
 
     def _trigger_frequency_chart(self, triggers: pl.DataFrame) -> pn.viewable.Viewable:
         if triggers.is_empty():

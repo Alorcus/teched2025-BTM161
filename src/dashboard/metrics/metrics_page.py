@@ -13,15 +13,13 @@ from src.trace_processing.eventlog_conversion import ObjectCentricEventlog
 
 from ..nav import header_nav
 from .complexity_section import ComplexitySection
+from .conversation_composition_section import ConversationCompositionSection
 from .feedback_section import FeedbackSection
 from .overview_section import OverviewSection
-from .system_section import SystemMetricsSection
-from .time_section import TimeMetricsSection
 from .guardrail_section import GuardrailSection
 from .trace_cache import CACHE_FILENAME, ensure_trace_cache
 from .visualization_section import VisualizationSection
 from .styling_helpers import section_header
-from .object_cardinality_section import ObjectCardinalitySection
 
 
 _TIMESTAMP_COL = "time:timestamp"
@@ -736,11 +734,9 @@ def _render_metrics_from_ocel(
     return pn.Column(
         range_label.panel(),
         OverviewSection(ocel, range_label.fake_path()).panel(),
-        FeedbackSection(ocel).panel(),
+        ConversationCompositionSection(ocel).panel(),
         ComplexitySection(ocel).panel(),
-        SystemMetricsSection(ocel).panel(),
-        TimeMetricsSection(ocel).panel(),
-        ObjectCardinalitySection(ocel).panel(),
+        FeedbackSection(ocel).panel(),
         GuardrailSection(ocel).panel(),
         _lazy_visualization_panel(ocel),
         sizing_mode="stretch_width",
@@ -788,7 +784,7 @@ def _lazy_visualization_panel(ocel) -> pn.viewable.Viewable:
     button.on_click(_on_click)
     slot.append(button)
     return pn.Column(
-        section_header("Visualization Metrics"),
+        section_header("Process Visualization"),
         slot,
         sizing_mode="stretch_width",
     )
