@@ -196,8 +196,9 @@ def main():
                 score = feedback["feedback_score"]
                 reason = feedback["feedback_reason"]
                 valid_marker = "" if feedback["valid"] else " (fallback)"
+                score_str = f"{score:.2f}" if score is not None else "n/a"
                 coffee_shop_logger.info(
-                    f"Customer feedback [{score:.2f}{valid_marker}]: {reason}"
+                    f"Customer feedback [{score_str}{valid_marker}]: {reason}"
                 )
 
         per_setup_trace_counts.append((setup_name, len(setup_trace_ids)))

@@ -211,9 +211,11 @@ class ConversationEngine:
             **feedback,
         }
         self._save_feedback_store()
+        score = feedback["feedback_score"]
+        score_str = f"{score:.2f}" if score is not None else "n/a"
         logger.info(
-            "Customer feedback [%.2f]: %s",
-            feedback["feedback_score"],
+            "Customer feedback [%s]: %s",
+            score_str,
             feedback["feedback_reason"],
         )
 

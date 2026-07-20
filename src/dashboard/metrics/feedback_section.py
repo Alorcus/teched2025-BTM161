@@ -38,6 +38,7 @@ class FeedbackSection:
                 if df is not None and not df.is_empty():
                     if "feedback_score" in df.columns:
                         df = df.with_columns(pl.col("feedback_score").cast(pl.Float64))
+                        df = df.drop_nulls(subset=["feedback_score"])
                     return df
 
         return None
