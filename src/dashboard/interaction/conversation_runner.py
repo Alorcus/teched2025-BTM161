@@ -470,7 +470,7 @@ class ConversationRunner:
                                     and self._active_agent in SWARM_AGENTS
                                 ):
                                     msg_agent = self._active_agent
-                                outcome = self._process_message(msg, msg_agent)
+                                outcome = self._process_message(msg, msg_agent, thread_id)
 
                                 if outcome.get("status") == "rejected":
                                     rejection = outcome
@@ -646,7 +646,7 @@ class ConversationRunner:
                     return getattr(cand, "id", None)
         return None
 
-    def _process_message(self, msg, agent_name: str) -> dict:
+    def _process_message(self, msg, agent_name: str, thread_id: str) -> dict:
         # Ask the process supervisor for its verdict on THIS message and stamp
         # the resulting line on the first DashboardEvent we emit for it. Sibling
         # events (e.g. extra tool_calls in the same AIMessage) get None — the
@@ -672,7 +672,9 @@ class ConversationRunner:
         if is_violation_on_agent_aimessage:
             return self._handle_violation(msg, agent_name, supervisor_line, supervisor)
 
-        response_guardrail_denial = self._evaluate_response_guardrails(msg, agent_name)
+        response_guardrail_denial = self._evaluate_response_guardrails(
+            msg, agent_name, thread_id
+        )
         if response_guardrail_denial is not None:
             return self._handle_response_guardrail_violation(
                 msg, agent_name, response_guardrail_denial, supervisor_line
@@ -687,12 +689,17 @@ class ConversationRunner:
         self._publish_message_normally(msg, agent_name, supervisor_line)
         return {"status": "published"}
 
-    def _evaluate_response_guardrails(self, msg, agent_name: str) -> str | None:
+    def _evaluate_response_guardrails(
+        self, msg, agent_name: str, thread_id: str | None = None
+    ) -> str | None:
         """Return the guardrail's `deny_reason_for_llm` when a response-scoped
         guardrail denies the assistant message, else None. AIMessages from
         non-swarm agents (customer, system) are skipped. Any error in the
         gateway or predicate collapses to ALLOW so a broken guardrail can
-        never wedge the conversation."""
+        never wedge the conversation.
+
+        `thread_id` is forwarded so the emitted gateway_decision row survives
+        TraceProcessor's mandatory-fields filter and reaches the dashboard."""
         if not isinstance(msg, AIMessage) or agent_name not in SWARM_AGENTS:
             return None
         gateways = getattr(self.shop, "gateways", None) or {}
@@ -707,7 +714,7 @@ class ConversationRunner:
                 content=content,
                 message_id=getattr(msg, "id", "") or "",
                 state={},
-                thread_id=None,
+                thread_id=thread_id,
             )
         except Exception:
             logger.exception("response guardrail evaluation failed; allowing message")
