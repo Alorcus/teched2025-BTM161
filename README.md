@@ -141,7 +141,7 @@ Defined in `src/agents/customer_agent.py` (`CUSTOMER_SCENARIO_DEFS`) — single 
 
 ### Mixing setups and scenarios in one run
 
-To mix setups and scenarios in a single simulation (e.g. 10 traces of scenario 0 under `baseline`, then 10 of scenario 2 under `unconstrained`), pass `--batches` as one or more `SETUP:SCENARIO:COUNT` triples. Missing parts fall back to `baseline:0:1`, so `--batches baseline` runs one trace of scenario 0 under baseline. Consecutive batches sharing a setup reuse the same `CoffeeShop` instance, so keep same-setup entries adjacent.
+To mix setups and scenarios in a single simulation (e.g. 10 traces of scenario 0 under `baseline`, then 10 of scenario 2 under `unconstrained`), pass `--batches` as one or more `SETUP:SCENARIO:COUNT` triples. Missing parts fall back to `baseline:0:1`; scenario also accepts `all` and `random`. Consecutive batches sharing a setup reuse the same `CoffeeShop` instance, so keep same-setup entries adjacent.
 
 ```bash
 # Two batches, 10 traces each
@@ -150,14 +150,17 @@ poetry run simulate --batches baseline:0:10 unconstrained:2:10
 # Defaults: 1 trace of scenario 0 under baseline
 poetry run simulate --batches baseline
 
-# Defaults for the omitted parts: 10 traces of scenario 0 under baseline
+# 10 traces of scenario 0 under baseline (all defaults except count)
 poetry run simulate --batches ::10
+
+# Round-robin every scenario, 20 traces total
+poetry run simulate --batches baseline:all:20
 
 # Comma-separated form also works
 poetry run simulate --batches baseline:0:50,baseline:2:50,unconstrained:0:50
 ```
 
-`--batches` is mutually exclusive with `--setup/--scenario/--traces`; use it whenever you need more than a single (setup, scenario) combination in one invocation.
+`--setup/--scenario/--traces` are shortcuts for a single batch and are mutually exclusive with `--batches`.
 
 ## Agent Observatory Dashboard
 

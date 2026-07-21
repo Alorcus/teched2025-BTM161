@@ -1,11 +1,13 @@
 import argparse
 import logging
 import sys
+from dataclasses import dataclass
 from itertools import groupby
+from typing import Callable
 
 from .coffee_shop import CoffeeShop
 from .config import CoffeeShopConfig
-from .setups import list_setups, resolve_setup_name, resolve_setup_names, setup_dir
+from .setups import list_setups, resolve_setup_name, setup_dir
 from .agents.customer_agent import CUSTOMER_SCENARIOS
 from .trace_processing import TraceProcessor
 
@@ -19,133 +21,128 @@ def log_status(message):
     coffee_shop_logger.log(STATUS_LEVEL, message)
 
 
-def parse_scenario(value):
-    if value == "all":
-        return ("all", None)
-    if value == "random":
-        return ("random", None)
+ScenarioSpec = int | str  # int for fixed index, "random", or "all"
+
+
+@dataclass(frozen=True)
+class Batch:
+    setup: str
+    scenario: ScenarioSpec
+    count: int
+
+
+def _validate_scenario_index(idx: int, source: str) -> int:
+    if not (0 <= idx < len(CUSTOMER_SCENARIOS)):
+        raise argparse.ArgumentTypeError(
+            f"{source}: scenario {idx} out of range 0-{len(CUSTOMER_SCENARIOS) - 1}"
+        )
+    return idx
+
+
+def parse_scenario_token(token: str, source: str) -> ScenarioSpec:
+    """Accept an int-valued index, 'all', or 'random'."""
+    if token in ("all", "random"):
+        return token
     try:
-        idx = int(value)
-        if 0 <= idx < len(CUSTOMER_SCENARIOS):
-            return ("fixed", idx)
-        coffee_shop_logger.error(
-            f"scenario index must be 0-{len(CUSTOMER_SCENARIOS) - 1}"
-        )
-        sys.exit(1)
+        return _validate_scenario_index(int(token), source)
     except ValueError:
-        coffee_shop_logger.error(
-            f"'--scenario' must be 0-{len(CUSTOMER_SCENARIOS) - 1}, 'all', or 'random'"
+        raise argparse.ArgumentTypeError(
+            f"{source}: scenario must be an int 0-{len(CUSTOMER_SCENARIOS) - 1}, "
+            f"'all', or 'random' (got {token!r})"
         )
-        sys.exit(1)
 
 
-def pick_scenario_index(mode, fixed_index, trace_number):
-    if mode == "fixed":
-        return fixed_index
-    if mode == "all":
-        return trace_number % len(CUSTOMER_SCENARIOS)
-    return None
-
-
-def parse_batch_triple(raw: str) -> tuple[str, int, int]:
+def parse_batch_triple(raw: str) -> Batch:
     """Parse one SETUP:SCENARIO:COUNT triple with per-part defaults.
 
     Missing or empty parts fall back to: setup=<default>, scenario=0, count=1.
-    Accepts 1-3 colon-separated fields (`baseline`, `baseline:2`,
-    `baseline:2:10`, `::10`, `:2:`, etc.).
+    Accepts up to 3 colon-separated fields.
     """
     parts = raw.split(":")
     if len(parts) > 3:
         raise argparse.ArgumentTypeError(
-            f"--batches expects SETUP:SCENARIO:COUNT, got '{raw}' (too many ':' separators)"
+            f"--batches expects SETUP:SCENARIO:COUNT, got {raw!r} "
+            "(too many ':' separators)"
         )
-    parts = parts + [""] * (3 - len(parts))
+    parts.extend([""] * (3 - len(parts)))
     setup_str, scenario_str, count_str = (p.strip() for p in parts)
 
-    setup = setup_str if setup_str else resolve_setup_name(None)
-
-    if scenario_str:
-        try:
-            scenario = int(scenario_str)
-        except ValueError:
-            raise argparse.ArgumentTypeError(
-                f"--batches expects SETUP:SCENARIO:COUNT, got '{raw}' "
-                f"(scenario must be an int)"
-            )
-    else:
-        scenario = 0
+    setup = setup_str or resolve_setup_name(None)
+    scenario = parse_scenario_token(scenario_str, raw) if scenario_str else 0
 
     if count_str:
         try:
             count = int(count_str)
         except ValueError:
             raise argparse.ArgumentTypeError(
-                f"--batches expects SETUP:SCENARIO:COUNT, got '{raw}' "
-                f"(count must be an int)"
+                f"--batches expects SETUP:SCENARIO:COUNT, got {raw!r} "
+                "(count must be an int)"
             )
     else:
         count = 1
-
     if count <= 0:
         raise argparse.ArgumentTypeError(
-            f"--batches expects SETUP:SCENARIO:COUNT, got '{raw}' "
-            f"(count must be positive)"
+            f"--batches expects SETUP:SCENARIO:COUNT, got {raw!r} "
+            "(count must be positive)"
         )
-    if not (0 <= scenario < len(CUSTOMER_SCENARIOS)):
-        raise argparse.ArgumentTypeError(
-            f"--batches scenario {scenario} out of range "
-            f"0-{len(CUSTOMER_SCENARIOS) - 1} in '{raw}'"
-        )
-    return setup, scenario, count
+    return Batch(setup, scenario, count)
 
 
-def parse_batches_arg(values: list[str]) -> list[tuple[str, int, int]]:
-    triples: list[tuple[str, int, int]] = []
-    for value in values:
-        for chunk in value.split(","):
-            chunk = chunk.strip()
-            if not chunk:
-                continue
-            triples.append(parse_batch_triple(chunk))
+def parse_batches_arg(values: list[str]) -> list[Batch]:
+    triples = [
+        parse_batch_triple(chunk.strip())
+        for value in values
+        for chunk in value.split(",")
+        if chunk.strip()
+    ]
     if not triples:
         raise argparse.ArgumentTypeError("--batches requires at least one triple")
     return triples
 
 
-def build_batches_from_simple_args(
-    setup_names: list[str], scenario_mode: str, scenario_fixed: int | None, traces: int
-) -> list[tuple[str, int | str, int]]:
-    """Expand the simple `--setup/--scenario/--traces` shortcut into batches.
-
-    Scenario position may be an int (fixed), 'all' (round-robin), or 'random'.
-    """
-    scenario_value: int | str
-    if scenario_mode == "fixed":
-        scenario_value = scenario_fixed  # type: ignore[assignment]
-    else:
-        scenario_value = scenario_mode  # 'all' or 'random'
-    return [(name, scenario_value, traces) for name in setup_names]
-
-
-def resolve_batch_scenario(scenario_value, trace_number):
-    """Return a concrete scenario index (or None for random) for a batch item."""
-    if scenario_value == "random":
+def resolve_scenario(scenario: ScenarioSpec, trace_number: int) -> int | None:
+    """Return the concrete scenario index for a trace (or None for random)."""
+    if scenario == "random":
         return None
-    if scenario_value == "all":
+    if scenario == "all":
         return trace_number % len(CUSTOMER_SCENARIOS)
-    return scenario_value  # already an int
+    return scenario  # type: ignore[return-value]
 
 
-def make_on_message(args):
-    if args.quiet:
+def make_on_message(quiet: bool, full_messages: bool) -> Callable | None:
+    if quiet:
         return None
 
     def on_message(role, content):
         prefix = "[Customer]" if role == "customer" else "[Agent]   "
-        body = "\n" + content if args.full_messages else "\n" + content[:200]
+        body = "\n" + content if full_messages else "\n" + content[:200]
         coffee_shop_logger.info(f"{prefix} {body}")
 
     return on_message
+
+
+def _configure_logging(log_level: str) -> None:
+    """coffee_shop.py installs a StreamHandler on the 'coffee_shop' logger at
+    import time, so we only need to set its level here and muzzle httpx."""
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    coffee_shop_logger.setLevel(getattr(logging, log_level.upper()))
+
+
+def _batches_from_args(args, parser) -> list[Batch]:
+    """Materialize the list of batches to run from parsed CLI args.
+
+    Either `--batches` (explicit triples) or the sugar
+    `--setup/--scenario/--traces` shortcut (which becomes one batch per setup).
+    """
+    if args.batches is not None:
+        try:
+            return parse_batches_arg(args.batches)
+        except argparse.ArgumentTypeError as exc:
+            parser.error(str(exc))
+
+    setups = args.setup if args.setup else [resolve_setup_name(None)]
+    scenario = parse_scenario_token(args.scenario, "--scenario")
+    return [Batch(setup=name, scenario=scenario, count=args.traces) for name in setups]
 
 
 def main():
@@ -155,27 +152,40 @@ def main():
     parser.add_argument(
         "--batches",
         nargs="+",
+        default=argparse.SUPPRESS,
         metavar="SETUP:SCENARIO:COUNT",
         help=(
-            "One or more SETUP:SCENARIO:COUNT triples (e.g. "
-            "'baseline:0:50 unconstrained:2:50'). Missing parts fall back to "
-            "setup=<default>, scenario=0, count=1 — so 'baseline' means one "
-            "trace of scenario 0 under baseline, and '::10' means 10 traces of "
-            "scenario 0 under the default setup. Mutually exclusive with "
-            "--setup/--scenario/--traces."
+            "One or more SETUP:SCENARIO:COUNT triples. Missing parts default to "
+            "setup=<default>, scenario=0, count=1 (so 'baseline' means 1 trace of "
+            "scenario 0 under baseline; '::10' means 10 traces of scenario 0 under "
+            "the default setup). Scenario may also be 'all' or 'random'. Mutually "
+            "exclusive with --setup / --scenario / --traces."
         ),
     )
     parser.add_argument(
         "--traces",
         type=int,
-        default=1,
-        help="Number of conversation traces to run (default: 1)",
+        default=argparse.SUPPRESS,
+        help="Shortcut for a single batch: number of conversation traces (default: 1)",
     )
     parser.add_argument(
         "--scenario",
         type=str,
-        default="random",
-        help="Scenario index (0-3), 'all' (round-robin), or 'random' (default: random)",
+        default=argparse.SUPPRESS,
+        help=(
+            "Shortcut for a single batch: scenario index (0-6), 'all', or 'random' "
+            "(default: random)"
+        ),
+    )
+    parser.add_argument(
+        "--setup",
+        type=str,
+        default=argparse.SUPPRESS,
+        action="append",
+        help=(
+            "Shortcut for a single batch: setup under config/setups/ to load. "
+            "Repeat to sequence multiple setups. Mutually exclusive with --batches."
+        ),
     )
     parser.add_argument(
         "--export-logs",
@@ -186,7 +196,7 @@ def main():
         "--reset-inventory",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Reset inventory before each trace (default: true). Use --no-reset-inventory to keep inventory state across traces.",
+        help="Reset inventory before each trace (default: true).",
     )
     parser.add_argument(
         "--quiet",
@@ -203,18 +213,7 @@ def main():
         type=str,
         default="info",
         choices=["debug", "info", "warning", "error"],
-        help="Set the logging level for the coffee_shop logger (default: info). Note: levels above info will not show progress messages, and debug/info may produce output even with --quiet.",
-    )
-    parser.add_argument(
-        "--setup",
-        type=str,
-        default=None,
-        action="append",
-        help=(
-            "Name of the setup under config/setups/ to load. Repeat the flag to run "
-            "multiple setups sequentially (e.g. --setup baseline --setup all_handovers). "
-            "Mutually exclusive with --batches."
-        ),
+        help="coffee_shop logger level (default: info).",
     )
     parser.add_argument(
         "--list-setups",
@@ -225,62 +224,53 @@ def main():
         "--process-supervisor",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Enable the process supervisor (default: true). Use --no-process-supervisor to run without it.",
+        help="Enable the process supervisor (default: true).",
     )
     args = parser.parse_args()
 
     if args.list_setups:
         names = list_setups()
-        if not names:
-            print("(no setups found in config/setups/)")
-        else:
-            for name in names:
-                print(name)
+        print("\n".join(names) if names else "(no setups found in config/setups/)")
         return 0
 
-    if args.batches is not None and (
-        args.setup is not None or args.traces != 1 or args.scenario != "random"
-    ):
+    # SUPPRESS defaults mean these attributes only exist when the user passed the
+    # flag. That's how we detect real user input for the mutual-exclusion check.
+    batches_given = hasattr(args, "batches")
+    shortcut_flags = [f for f in ("setup", "scenario", "traces") if hasattr(args, f)]
+    if batches_given and shortcut_flags:
         parser.error(
             "--batches is mutually exclusive with --setup / --scenario / --traces"
         )
+
+    args.batches = getattr(args, "batches", None)
+    args.setup = getattr(args, "setup", None)
+    args.scenario = getattr(args, "scenario", "random")
+    args.traces = getattr(args, "traces", 1)
 
     if args.quiet and args.full_messages:
         coffee_shop_logger.warning(
             "'--full-messages' has no effect when '--quiet' is set"
         )
-    if args.quiet and args.log_level.lower() in ["debug", "info"]:
+    if args.quiet and args.log_level.lower() in ("debug", "info"):
         coffee_shop_logger.warning(
             "debug/info log levels may produce output even if '--quiet' is set"
         )
-    coffee_shop_logger.setLevel(getattr(logging, args.log_level.upper()))
 
-    if args.batches is not None:
-        try:
-            batches = parse_batches_arg(args.batches)
-        except argparse.ArgumentTypeError as exc:
-            parser.error(str(exc))
-    else:
-        setup_names = resolve_setup_names(args.setup)
-        scenario_mode, scenario_fixed = parse_scenario(args.scenario)
-        batches = build_batches_from_simple_args(
-            setup_names, scenario_mode, scenario_fixed, args.traces
-        )
+    _configure_logging(args.log_level)
+    batches = _batches_from_args(args, parser)
+    for batch in batches:
+        setup_dir(batch.setup)
 
-    for setup_name, _, _ in batches:
-        setup_dir(setup_name)
-
-    total_traces = sum(count for _, _, count in batches)
+    total_traces = sum(b.count for b in batches)
     total_batches = len(batches)
-    on_message = make_on_message(args)
+    on_message = make_on_message(args.quiet, args.full_messages)
 
     all_trace_ids: list[str] = []
-    per_batch_counts: list[tuple[str, object, int, int]] = []
+    per_batch_counts: list[tuple[str, ScenarioSpec, int]] = []
     batch_number = 0
     trace_number = 0
 
-    for setup_name, group in groupby(batches, key=lambda b: b[0]):
-        group_batches = list(group)
+    for setup_name, group in groupby(batches, key=lambda b: b.setup):
         coffee_shop_logger.info(f"=== Setup: {setup_name} ===")
         shop = CoffeeShop(
             CoffeeShopConfig(
@@ -293,61 +283,46 @@ def main():
             f"Resetting inventory before each trace: {args.reset_inventory}"
         )
 
-        for _, scenario_value, count in group_batches:
+        for batch in group:
             batch_number += 1
-            scenario_label_key = (
-                scenario_value if isinstance(scenario_value, int) else 0
-            )
-            label = CUSTOMER_SCENARIOS[scenario_label_key]
             log_status(
-                f"=== Batch {batch_number}/{total_batches} | setup '{setup_name}' "
-                f"| scenario {scenario_value}: {label[:60]} | {count} trace(s) ==="
+                f"=== Batch {batch_number}/{total_batches} | setup {setup_name!r} "
+                f"| scenario {batch.scenario} | {batch.count} trace(s) ==="
             )
-
-            batch_trace_ids: list[str] = []
-            for i in range(count):
+            for i in range(batch.count):
                 trace_number += 1
-                idx = resolve_batch_scenario(scenario_value, i)
+                idx = resolve_scenario(batch.scenario, i)
                 scenario_desc = (
                     CUSTOMER_SCENARIOS[idx] if idx is not None else "random"
                 )
                 log_status(
                     f"--- Trace {trace_number}/{total_traces} "
-                    f"(batch {batch_number}/{total_batches}, conv {i + 1}/{count}) "
+                    f"(batch {batch_number}/{total_batches}, conv {i + 1}/{batch.count}) "
                     f"| Scenario {idx}: {scenario_desc[:60]} ---"
                 )
-
                 trace_ids = shop.run_conversation(
                     scenario_index=idx,
                     on_message=on_message,
                     reset_inventory_first=args.reset_inventory,
                 )
-                batch_trace_ids.extend(trace_ids)
+                all_trace_ids.extend(trace_ids)
                 coffee_shop_logger.info(f"Trace IDs: {trace_ids}")
 
                 feedback = shop.get_last_feedback()
                 if feedback:
-                    score = feedback["feedback_score"]
-                    reason = feedback["feedback_reason"]
-                    valid_marker = "" if feedback["valid"] else " (fallback)"
+                    marker = "" if feedback["valid"] else " (fallback)"
                     coffee_shop_logger.info(
-                        f"Customer feedback [{score:.2f}{valid_marker}]: {reason}"
+                        f"Customer feedback [{feedback['feedback_score']:.2f}"
+                        f"{marker}]: {feedback['feedback_reason']}"
                     )
-
-            all_trace_ids.extend(batch_trace_ids)
-            per_batch_counts.append(
-                (setup_name, scenario_value, count, len(batch_trace_ids))
-            )
+            per_batch_counts.append((setup_name, batch.scenario, batch.count))
 
     coffee_shop_logger.info(
         f"=== Simulation complete: {total_batches} batch(es), "
         f"{len(all_trace_ids)} trace(s) generated ==="
     )
-    for setup_name, scenario_value, requested, actual in per_batch_counts:
-        coffee_shop_logger.info(
-            f"  - {setup_name} / scenario {scenario_value}: "
-            f"{actual} trace(s) (requested {requested})"
-        )
+    for name, scenario, count in per_batch_counts:
+        coffee_shop_logger.info(f"  - {name} / scenario {scenario}: {count} trace(s)")
 
     if args.export_logs:
         coffee_shop_logger.info("Exporting event logs...")
