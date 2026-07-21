@@ -186,7 +186,7 @@ A two-page observability dashboard built with [Panel](https://panel.holoviz.org/
 ### Launch
 
 ```bash
-# Start the dashboard (opens browser at http://localhost:5006)
+# Start the dashboard (serves http://localhost:5006 — open it in a browser)
 poetry run dashboard --setup baseline
 ```
 
@@ -194,7 +194,7 @@ poetry run dashboard --setup baseline
 
 #### Interaction Observatory (/)
 
-- **2x2 grid layout** showing all 4 agents at once (scales to 3x3 for up to 9)
+- **2x2 grid layout** showing the four business agents (Order, Inventory, Barista, Customer Service); the Customer Agent drives from the sidebar
 - **Live status badges**: idle / thinking / executing tool / handed off
 - **Handoff context display**: see what each agent received from the previous agent
 - **Tool call log**: arguments and results for every tool invocation
@@ -240,7 +240,7 @@ The Metrics Dashboard loads the consolidated `_all_traces.csv` cache into an `Ob
 
 ### Sharing the event log CSV
 
-`generated_event_log/_all_traces.csv` is designed to be handed to colleagues who don't have your MLflow store — but it embeds free-text content: verbatim customer utterances (in `message` on `user_prompt` rows), LLM assistant responses, and LLM reasoning from the guardrail gateway (in `gateway_tool_args_json`, `gateway_verdicts_json`, and `feedback_reason`). In this TechEd repository the "customer" is an LLM-simulated persona, so those cells are synthetic. **In any real deployment, the same columns would carry PII and unredacted model reasoning — review the file before sharing.** The complete column list, per-column sensitivity classification, and timezone/versioning contract live in [`EVENTLOG_SCHEMA.md`](EVENTLOG_SCHEMA.md); consult it before forwarding the CSV or attaching it to a ticket.
+`generated_event_log/_all_traces.csv` is designed to be handed to colleagues who don't have your MLflow store — but it embeds free-text content: verbatim customer utterances (in `message` on `user_prompt` rows), LLM assistant responses, and LLM reasoning from the guardrail gateway (in `gateway_tool_args_json`, `gateway_verdicts_json`, and `feedback_reason`). In this TechEd repository the "customer" is an LLM-simulated persona, so those cells are synthetic. **In any real deployment, the same columns would carry PII and unredacted model reasoning — review the file before sharing.**
 
 ## Observing the Database
 
@@ -321,7 +321,7 @@ Orders and inventory are persisted in a local SQLite database (`coffee_shop.db`)
 
 - Picks a scenario randomly (or by index via `reset()`)
 - Drives the conversation by sending an opening message and responding to agent replies
-- Ends the conversation after at most 8 turns, or when the goal is achieved (signals `DONE`)
+- Ends the conversation after at most 15 turns, or when the goal is achieved (signals `DONE`)
 
 ### Customer Service Agent
 
