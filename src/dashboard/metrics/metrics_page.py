@@ -61,19 +61,6 @@ def create_metrics_dashboard():
     if combined.is_empty() or _TIMESTAMP_COL not in combined.columns:
         return _empty_template(LOG_DIR)
 
-    # Hardcoded hotfix exclusions applied once at load time: drop noise cases
-    # (< 10 messages, no tool calls, scenario 2, unknown scenario, setup=None)
-    # from BOTH `case_metadata` (so the sidebar's scenario/setup checkboxes
-    # only offer options that survive) AND `combined` (so every downstream
-    # section — including OCEL construction — sees the reduced event log).
-    # Runtime `_apply_filters` still re-checks these predicates as a defence
-    # in depth, but the visible behaviour is fixed by pruning here.
-    case_metadata = _apply_hotfix_exclusions(case_metadata)
-    if not case_metadata.is_empty():
-        combined = combined.filter(
-            pl.col("case_id").is_in(case_metadata["case_id"])
-        )
-
     ts_series = combined[_TIMESTAMP_COL].drop_nulls()
     if ts_series.is_empty():
         return _empty_template(LOG_DIR)
@@ -491,8 +478,6 @@ def _build_case_metadata(eventlog: pl.DataFrame) -> pl.DataFrame:
                 "case_setup": pl.Utf8,
                 "case_scenario_index": pl.Int64,
                 "case_model": pl.Utf8,
-                "case_message_count": pl.UInt32,
-                "case_tool_call_count": pl.UInt32,
                 "first_t": pl.Datetime,
                 "last_t": pl.Datetime,
             }
@@ -512,28 +497,6 @@ def _build_case_metadata(eventlog: pl.DataFrame) -> pl.DataFrame:
         if "model" in eventlog.columns
         else pl.lit([], dtype=pl.List(pl.Utf8)).alias("_models")
     )
-    # Per-case activity counts used by the hardcoded hotfix filters in
-    # `_apply_filters` (min-messages threshold, must-have-tool-calls). "Message"
-    # here means any event that isn't the internal `call_llm` plumbing —
-    # user_prompt, execute_tool, user_feedback, gateway_decision, etc. Falls
-    # back to a zero literal when older caches lack `concept:name` so the
-    # hotfix simply degrades to a no-op rather than crashing the dashboard.
-    if "concept:name" in eventlog.columns:
-        message_count_expr = (
-            (pl.col("concept:name") != "call_llm")
-            .sum()
-            .cast(pl.UInt32)
-            .alias("case_message_count")
-        )
-        tool_call_count_expr = (
-            (pl.col("concept:name") == "execute_tool")
-            .sum()
-            .cast(pl.UInt32)
-            .alias("case_tool_call_count")
-        )
-    else:
-        message_count_expr = pl.lit(0, dtype=pl.UInt32).alias("case_message_count")
-        tool_call_count_expr = pl.lit(0, dtype=pl.UInt32).alias("case_tool_call_count")
     aggregated = (
         eventlog.drop_nulls(_TIMESTAMP_COL)
         .group_by("case_id")
@@ -541,8 +504,6 @@ def _build_case_metadata(eventlog: pl.DataFrame) -> pl.DataFrame:
             setup_expr,
             scenario_expr,
             model_expr,
-            message_count_expr,
-            tool_call_count_expr,
             pl.col(_TIMESTAMP_COL).min().alias("first_t"),
             pl.col(_TIMESTAMP_COL).max().alias("last_t"),
         )
@@ -561,33 +522,6 @@ def _build_case_metadata(eventlog: pl.DataFrame) -> pl.DataFrame:
     ).drop("_models")
 
 
-def _apply_hotfix_exclusions(case_metadata: pl.DataFrame) -> pl.DataFrame:
-    """Drop cases the current analysis treats as noise, unconditionally.
-
-    Hardcoded, always-on exclusions with no UI toggle: cases with fewer than
-    10 non-`call_llm` events, cases that never invoked a tool, scenario 2
-    ("2 espressos (hurry)"), the unknown-scenario sentinel (-1), and the
-    null-setup bucket. Applied once at page load so the sidebar checkbox
-    options only surface values that will actually match something, and
-    re-applied by `_apply_filters` as a defence in depth.
-
-    Each predicate is guarded on column presence so older caches without
-    the extended schema degrade to a no-op rather than crashing.
-    """
-    if case_metadata.is_empty():
-        return case_metadata
-    filt = pl.lit(True)
-    if "case_message_count" in case_metadata.columns:
-        filt = filt & (pl.col("case_message_count") >= 10)
-    if "case_tool_call_count" in case_metadata.columns:
-        filt = filt & (pl.col("case_tool_call_count") > 0)
-    if "case_scenario_index" in case_metadata.columns:
-        filt = filt & (pl.col("case_scenario_index") != 2) & (pl.col("case_scenario_index") != -1)
-    if "case_setup" in case_metadata.columns:
-        filt = filt & pl.col("case_setup").is_not_null()
-    return case_metadata.filter(filt)
-
-
 def _apply_filters(
     case_metadata: pl.DataFrame,
     start: datetime,
@@ -602,13 +536,6 @@ def _apply_filters(
     means "whitelist". Time keeps the existing 'fully-contained case'
     semantics.
     """
-    if case_metadata.is_empty():
-        return case_metadata
-    # Defence in depth: the same exclusions are already applied at load time
-    # in `create_metrics_dashboard`, but re-check here so any direct caller
-    # of `_apply_filters` (tests, future entry points) gets a consistent
-    # view. Cheap on an already-pruned frame.
-    case_metadata = _apply_hotfix_exclusions(case_metadata)
     if case_metadata.is_empty():
         return case_metadata
     filt = (pl.col("first_t") >= start) & (pl.col("last_t") <= end)
