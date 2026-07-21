@@ -4,6 +4,7 @@ import polars as pl
 from src.agents import CUSTOMER_SCENARIO_LABELS
 from src.trace_processing.eventlog_conversion import ObjectCentricEventlog
 
+from .eventlog_helpers import FEEDBACK_HIGH, FEEDBACK_LOW
 from .styling_helpers import kpi_row, section_header, subsection_header, subtitled_kpi_card
 
 _SCENARIO_NAMES = {i: label for i, label in enumerate(CUSTOMER_SCENARIO_LABELS)}
@@ -45,17 +46,18 @@ class FeedbackSection:
         df = self._data
         n = df.height
         avg_score = float(df["feedback_score"].mean())
-        excellent = int(df.filter(pl.col("feedback_score") >= 0.75).height)
+        excellent = int(df.filter(pl.col("feedback_score") >= FEEDBACK_HIGH).height)
         normal = int(
             df.filter(
-                (pl.col("feedback_score") >= 0.25) & (pl.col("feedback_score") < 0.75)
+                (pl.col("feedback_score") >= FEEDBACK_LOW)
+                & (pl.col("feedback_score") < FEEDBACK_HIGH)
             ).height
         )
-        not_satisfied = int(df.filter(pl.col("feedback_score") < 0.25).height)
+        not_satisfied = int(df.filter(pl.col("feedback_score") < FEEDBACK_LOW).height)
 
-        if avg_score >= 0.75:
+        if avg_score >= FEEDBACK_HIGH:
             avg_emoji = "😊"
-        elif avg_score >= 0.25:
+        elif avg_score >= FEEDBACK_LOW:
             avg_emoji = "😐"
         else:
             avg_emoji = "😞"
@@ -73,17 +75,17 @@ class FeedbackSection:
             ),
             (
                 "Excellent",
-                "Conversations that scored ≥ 0.75 on the feedback scale.",
+                f"Conversations that scored ≥ {FEEDBACK_HIGH} on the feedback scale.",
                 str(excellent),
             ),
             (
                 "Normal",
-                "Conversations that scored between 0.25 and 0.75.",
+                f"Conversations that scored between {FEEDBACK_LOW} and {FEEDBACK_HIGH}.",
                 str(normal),
             ),
             (
                 "Not satisfied",
-                "Conversations that scored below 0.25 — clearly unhappy customers.",
+                f"Conversations that scored below {FEEDBACK_LOW} — clearly unhappy customers.",
                 str(not_satisfied),
             ),
         ]
@@ -120,9 +122,9 @@ class FeedbackSection:
             bar_width = int(score * 100)
             color = (
                 "#4CAF50"
-                if score >= 0.75
+                if score >= FEEDBACK_HIGH
                 else "#FF9800"
-                if score >= 0.25
+                if score >= FEEDBACK_LOW
                 else "#F44336"
             )
             rows_html += (

@@ -1,12 +1,16 @@
 import re
 
+from src.agents.order_store import load_order
+from src.agents.shared_components import ALLOWED_EXTRAS, MENU
+
 from .types import Effect, GuardrailContext, Verdict
 
 _ORDER_ID_RE = re.compile(r"\bORD\d{3,}\b")
 
 
-def allowed_handover_targets_predicate(context: GuardrailContext) -> Verdict:
-    """Hard guardrail: target_agent of transfer_to_agent must be in allowed_handovers."""
+def _allowed_handover_targets_eval(
+    context: GuardrailContext, effect: str = "deny"
+) -> Verdict:
     target = context.tool_args.get("target_agent", "")
     allowed = context.allowed_handovers
     if target in allowed:
@@ -17,7 +21,7 @@ def allowed_handover_targets_predicate(context: GuardrailContext) -> Verdict:
             reason_internal=f"{target!r} is in allowed_handovers={allowed}",
         )
     return Verdict(
-        effect=Effect.DENY,
+        effect=Effect(effect),
         guardrail_name="",
         guardrail_type="",
         reason_internal=f"{target!r} not in allowed_handovers={allowed} for agent {context.agent_id!r}",
@@ -28,8 +32,32 @@ def allowed_handover_targets_predicate(context: GuardrailContext) -> Verdict:
     )
 
 
-def discount_within_limit_predicate(max_pct: int):
-    """Factory: FLAG verdict when calculate_total is called with discount_percent above max_pct."""
+def allowed_handover_targets_predicate(*args, **kwargs):
+    """Dual-use: called directly by the gateway with a GuardrailContext, OR called
+    as a factory with keyword `effect` to bind a non-default violation effect.
+
+    Setups without `predicate_args` (baseline, most others) get direct-call
+    semantics equivalent to the historical hard-DENY behavior. Setups that supply
+    `predicate_args: {effect: flag}` (e.g. baseline_flag) get a configured
+    evaluator that flags instead of denies.
+    """
+    if args and isinstance(args[0], GuardrailContext):
+        return _allowed_handover_targets_eval(args[0])
+    effect = kwargs.get("effect", "deny")
+
+    def _bound(context: GuardrailContext) -> Verdict:
+        return _allowed_handover_targets_eval(context, effect=effect)
+
+    return _bound
+
+
+def discount_within_limit_predicate(max_pct: int, effect: str = "flag"):
+    """Factory: verdict when calculate_total is called with discount_percent above max_pct.
+
+    `effect` selects deny vs flag on violation; defaults to flag so existing setups
+    (which pass only `max_pct`) keep their observe-only behavior.
+    """
+    violation_effect = Effect(effect)
 
     def _eval(context: GuardrailContext) -> Verdict:
         pct = int(context.tool_args.get("discount_percent", 0) or 0)
@@ -41,10 +69,13 @@ def discount_within_limit_predicate(max_pct: int):
                 reason_internal=f"discount_percent={pct} within limit {max_pct}",
             )
         return Verdict(
-            effect=Effect.FLAG,
+            effect=violation_effect,
             guardrail_name="",
             guardrail_type="",
-            reason_internal=f"discount_percent={pct} exceeds limit {max_pct} (flagged, not blocked)",
+            reason_internal=f"discount_percent={pct} exceeds limit {max_pct}",
+            reason_for_llm=(
+                f"A discount of {pct}% is not allowed; the maximum permitted discount is {max_pct}%."
+            ),
         )
 
     return _eval
@@ -73,9 +104,443 @@ def transfer_includes_order_id_predicate(context: GuardrailContext) -> Verdict:
     )
 
 
+def require_order_status_predicate(allowed: list[str], effect: str = "deny"):
+    """Factory: block (or flag) a tool call unless the order's *current* status is in
+    `allowed`. This is how the order lifecycle is enforced now that there is no state
+    machine — each state-gated tool declares the source statuses it may be called from.
+
+    The order is resolved from the tool's `order_id` argument. The transition target the
+    tool computes at runtime is always legal from an allowed source, so a source-status
+    precondition is equivalent to validating the transition. A missing or unresolvable
+    `order_id` yields the same violation effect as an out-of-set status: hallucinated
+    IDs must not silently bypass the gate. `effect` selects deny vs flag.
+    """
+    allowed_set = {str(s) for s in allowed}
+    violation_effect = Effect(effect)
+
+    def _eval(context: GuardrailContext) -> Verdict:
+        order_id = str(context.tool_args.get("order_id", ""))
+        order = load_order(order_id) if order_id else None
+        if order is None:
+            return Verdict(
+                effect=violation_effect,
+                guardrail_name="",
+                guardrail_type="",
+                reason_internal=f"order {order_id!r} not resolvable; treated as violation",
+                reason_for_llm=(
+                    f"Cannot call {context.tool_name!r} for order {order_id!r}: "
+                    f"the order does not exist. Verify the order id before retrying."
+                ),
+            )
+        current = order.status.value
+        if current in allowed_set:
+            return Verdict(
+                effect=Effect.ALLOW,
+                guardrail_name="",
+                guardrail_type="",
+                reason_internal=f"order {order_id} status={current} in allowed={sorted(allowed_set)}",
+            )
+        return Verdict(
+            effect=violation_effect,
+            guardrail_name="",
+            guardrail_type="",
+            reason_internal=f"order {order_id} status={current} not in allowed={sorted(allowed_set)}",
+            reason_for_llm=(
+                f"Cannot call {context.tool_name!r} while order {order_id} is '{current}'. "
+                f"This tool is only valid when the order status is one of: "
+                f"{', '.join(sorted(allowed_set))}."
+            ),
+        )
+
+    return _eval
+
+
+def order_size_within_range_predicate(
+    max_units: int, min_units: int = 1, effect: str = "deny"
+):
+    """Factory: constrain order size at process_order time. Size is counted in *units*
+    (summed quantities) read straight from the proposed `tool_args["order"]` — the order
+    row does not exist yet, so there is no order_id to load. Violation when total units
+    fall outside [min_units, max_units]. Missing/malformed `order` → ALLOW (nothing to
+    evaluate; the tool itself validates the payload).
+    """
+    violation_effect = Effect(effect)
+
+    def _eval(context: GuardrailContext) -> Verdict:
+        order = context.tool_args.get("order")
+        if not isinstance(order, list):
+            return Verdict(
+                effect=Effect.ALLOW,
+                guardrail_name="",
+                guardrail_type="",
+                reason_internal="no order list in tool_args; size not evaluated",
+            )
+        units = sum(
+            int(item.get("quantity", 1) or 1)
+            for item in order
+            if isinstance(item, dict)
+        )
+        if min_units <= units <= max_units:
+            return Verdict(
+                effect=Effect.ALLOW,
+                guardrail_name="",
+                guardrail_type="",
+                reason_internal=f"order size {units} units within [{min_units}, {max_units}]",
+            )
+        return Verdict(
+            effect=violation_effect,
+            guardrail_name="",
+            guardrail_type="",
+            reason_internal=f"order size {units} units outside [{min_units}, {max_units}]",
+            reason_for_llm=(
+                f"This order has {units} item(s), which is outside the permitted range of "
+                f"{min_units}–{max_units}. Adjust the order to fit within the allowed size."
+            ),
+        )
+
+    return _eval
+
+
+def refund_within_limit_predicate(max_pct: int, effect: str = "deny"):
+    """Factory: constrain offer_partial_refund's `refund_percent`. Violation when the
+    requested percentage exceeds `max_pct`. Mirrors the tool default of 50 when absent.
+    """
+    violation_effect = Effect(effect)
+
+    def _eval(context: GuardrailContext) -> Verdict:
+        pct = int(context.tool_args.get("refund_percent", 50) or 0)
+        if pct <= max_pct:
+            return Verdict(
+                effect=Effect.ALLOW,
+                guardrail_name="",
+                guardrail_type="",
+                reason_internal=f"refund_percent={pct} within limit {max_pct}",
+            )
+        return Verdict(
+            effect=violation_effect,
+            guardrail_name="",
+            guardrail_type="",
+            reason_internal=f"refund_percent={pct} exceeds limit {max_pct}",
+            reason_for_llm=(
+                f"A partial refund of {pct}% is not allowed; the maximum permitted refund is {max_pct}%."
+            ),
+        )
+
+    return _eval
+
+
+def max_tool_calls_predicate(tool_name: str, max_calls: int, effect: str = "deny"):
+    """Factory: cap the number of successful invocations of `tool_name` in one
+    conversation. Counts prior ToolMessages in `state["messages"]` whose `name`
+    matches and whose `status` is not "error" (i.e. previously allowed by the
+    gateway and executed by the tool). Violation when the count is already at or
+    above `max_calls` at the moment of evaluation — remember the gateway runs
+    *before* the current call, so `>= max_calls` blocks the (max+1)-th attempt.
+    """
+    violation_effect = Effect(effect)
+
+    def _eval(context: GuardrailContext) -> Verdict:
+        messages = context.state.get("messages", []) or []
+        prior = sum(
+            1
+            for m in messages
+            if getattr(m, "name", None) == tool_name
+            and getattr(m, "status", None) != "error"
+        )
+        if prior < max_calls:
+            return Verdict(
+                effect=Effect.ALLOW,
+                guardrail_name="",
+                guardrail_type="",
+                reason_internal=f"prior {tool_name!r} calls={prior} < max={max_calls}",
+            )
+        return Verdict(
+            effect=violation_effect,
+            guardrail_name="",
+            guardrail_type="",
+            reason_internal=f"prior {tool_name!r} calls={prior} >= max={max_calls}",
+            reason_for_llm=(
+                f"You have already called {tool_name!r} {prior} time(s) in this "
+                f"conversation; the limit is {max_calls}. Continue with this order "
+                f", you cannot use this tool again."
+            ),
+        )
+
+    return _eval
+
+
+def order_total_within_limit_predicate(max_total: float, effect: str = "deny"):
+    """Factory: constrain the order's total (in dollars). Resolves the order from
+    `tool_args["order_id"]` and reads `order.total`; violation when it exceeds `max_total`.
+    Unresolvable orders → ALLOW. Enforced at calculate_total, so it reads the pre-discount
+    total set by process_order.
+    """
+    violation_effect = Effect(effect)
+
+    def _eval(context: GuardrailContext) -> Verdict:
+        order_id = str(context.tool_args.get("order_id", ""))
+        order = load_order(order_id) if order_id else None
+        if order is None:
+            return Verdict(
+                effect=Effect.ALLOW,
+                guardrail_name="",
+                guardrail_type="",
+                reason_internal=f"order {order_id!r} not resolvable; total not evaluated",
+            )
+        if order.total <= max_total:
+            return Verdict(
+                effect=Effect.ALLOW,
+                guardrail_name="",
+                guardrail_type="",
+                reason_internal=f"order {order_id} total ${order.total:.2f} within limit ${max_total:.2f}",
+            )
+        return Verdict(
+            effect=violation_effect,
+            guardrail_name="",
+            guardrail_type="",
+            reason_internal=f"order {order_id} total ${order.total:.2f} exceeds limit ${max_total:.2f}",
+            reason_for_llm=(
+                f"Order {order_id} totals ${order.total:.2f}, which exceeds the maximum permitted "
+                f"order total of ${max_total:.2f}."
+            ),
+        )
+
+    return _eval
+
+
+_ITEM_TERMINALS: frozenset[str] = frozenset(MENU.keys()) | {
+    "coffee", "mocha", "macchiato", "chai", "frappe", "frappé",
+    "brew", "blend", "tea", "cortado", "matcha", "affogato",
+    "pastry", "pastries",
+}
+_MULTIWORD_TERMINALS: tuple[tuple[str, ...], ...] = (
+    ("flat", "white"),
+    ("pumpkin", "spice"),
+    ("hot", "chocolate"),
+    ("cold", "brew"),
+    ("london", "fog"),
+    ("house", "blend"),
+    ("iced", "tea"),
+)
+_REJECTION_TRIGGERS: tuple[str, ...] = (
+    "don't", "do not", "not on", "not have", "not serve", "not offer",
+    "out of", " no ", "cannot", "can't", "isn't", "aren't", "unfortunately",
+)
+_STOP_WORDS: frozenset[str] = frozenset({
+    "a", "an", "the", "some", "any", "one", "two", "three",
+    "that", "this", "these", "those",
+    "small", "medium", "large", "normal", "regular",
+    "your", "my", "his", "her", "their",
+    "please", "just", "only",
+})
+_CONNECTORS: frozenset[str] = frozenset({
+    "and", "or", "but", "to", "for", "in", "on", "at", "of", "from",
+    "have", "has", "had", "like", "want", "try", "add", "serve", "serves",
+    "get", "got", "make", "makes", "do", "does", "did", "put", "puts",
+    "recommend", "recommends", "suggest", "suggests", "offer", "offers",
+    "we", "you", "i", "they", "he", "she", "it", "us", "them",
+    "would", "could", "should", "will", "can", "may", "might",
+    "our", "how", "about", "perhaps", "what", "with",
+})
+_EXTRAS_TOKENS: frozenset[str] = frozenset(
+    tok for extra in ALLOWED_EXTRAS for tok in extra.split()
+)
+
+
+def _sentences(text: str) -> list[str]:
+    """Sentence-level split: only true terminators. Used for rejection-context
+    scoping — `you asked about mocha — we don't serve that` must be treated
+    as a single sentence so the rejection trigger applies to the mocha
+    mention. Phrase extraction runs a finer clause-level split (`_clauses`)
+    inside each sentence."""
+    return [s.strip() for s in re.split(r"[.!?\n]+", text) if s.strip()]
+
+
+def _clauses(sentence: str) -> list[str]:
+    """Clause-level split: also breaks on em/en-dashes, colons, semicolons,
+    and commas. Item phrases usually live in short noun phrases inside a
+    single clause; without this, `Great choice — an americano` gets left-
+    extended into a phony off-menu phrase during candidate extraction."""
+    return [c.strip() for c in re.split(r"[—–:;,]+", sentence) if c.strip()]
+
+
+def _is_rejection_context(sentence: str) -> bool:
+    lower = sentence.lower()
+    return any(trigger in lower for trigger in _REJECTION_TRIGGERS)
+
+
+def _tokens(sentence: str) -> list[str]:
+    """Tokenize and lightly singularize: fold a trailing plural into its
+    singular form when the singular is a known menu item. `muffins`→`muffin`,
+    `sandwiches`→`sandwich`, `pastries`→`pastry`. Leaves unknown words
+    untouched so extras like `oat` are not mangled."""
+    raw = re.findall(r"[a-zA-Zé']+", sentence.lower())
+    normalized: list[str] = []
+    for tok in raw:
+        normalized.append(_singularize(tok))
+    return normalized
+
+
+def _singularize(tok: str) -> str:
+    """Return the singular form iff that singular is a menu item / family
+    word / extras token. Otherwise return `tok` unchanged."""
+    known = _ITEM_TERMINALS | _EXTRAS_TOKENS
+    if tok in known:
+        return tok
+    if tok.endswith("ies") and len(tok) > 3:
+        cand = tok[:-3] + "y"
+        if cand in known:
+            return cand
+    if tok.endswith("es") and len(tok) > 2:
+        cand = tok[:-2]
+        if cand in known:
+            return cand
+    if tok.endswith("s") and len(tok) > 1:
+        cand = tok[:-1]
+        if cand in known:
+            return cand
+    return tok
+
+
+def _find_candidate_phrases(tokens: list[str]) -> list[tuple[list[str], int]]:
+    """Return (phrase_tokens, terminal_index) for each item-shape phrase in tokens.
+
+    A phrase terminates at either a single-token terminal (in `_ITEM_TERMINALS`) or
+    a multi-word terminal (e.g. "flat white"). The phrase extends left through
+    *content* tokens (anything not in `_CONNECTORS`) — this is how off-menu
+    modifiers like "hazelnut" or "honey" end up inside the phrase and cause it to
+    fail on-menu validation. Extension stops when a connector (verb, preposition,
+    pronoun, conjunction) is hit; connectors are not included in the phrase.
+    """
+    phrases: list[tuple[list[str], int]] = []
+    i = 0
+    n = len(tokens)
+
+    def _extend_left(start_left: int) -> list[str]:
+        acc: list[str] = []
+        left = start_left
+        while left >= 0 and tokens[left] not in _CONNECTORS and tokens[left] not in _ITEM_TERMINALS:
+            acc.insert(0, tokens[left])
+            left -= 1
+        return acc
+
+    while i < n:
+        matched_multi = False
+        for mw in _MULTIWORD_TERMINALS:
+            if tuple(tokens[i : i + len(mw)]) == mw:
+                terminal_end = i + len(mw) - 1
+                phrase_tokens = _extend_left(i - 1) + list(tokens[i : i + len(mw)])
+                phrases.append((phrase_tokens, terminal_end))
+                i += len(mw)
+                matched_multi = True
+                break
+        if matched_multi:
+            continue
+        if tokens[i] in _ITEM_TERMINALS:
+            phrase_tokens = _extend_left(i - 1) + [tokens[i]]
+            phrases.append((phrase_tokens, i))
+        i += 1
+    return phrases
+
+
+def _phrase_is_on_menu(phrase: list[str]) -> bool:
+    """A phrase is on-menu iff its terminal is a MENU key AND every preceding token
+    is an ALLOWED_EXTRAS token or a stop word. Anything else — including family-word
+    terminals like 'mocha' or 'flat white' — is off-menu."""
+    if not phrase:
+        return True
+    terminal_tokens: list[str] = []
+    for mw in _MULTIWORD_TERMINALS:
+        if tuple(phrase[-len(mw):]) == mw:
+            terminal_tokens = list(mw)
+            break
+    if terminal_tokens:
+        return False
+    terminal = phrase[-1]
+    if terminal not in MENU:
+        return False
+    for tok in phrase[:-1]:
+        if tok in _STOP_WORDS:
+            continue
+        if tok in _EXTRAS_TOKENS:
+            continue
+        return False
+    return True
+
+
+def off_menu_recommendation_predicate(effect: str = "deny"):
+    """Factory: detect off-menu drink/food recommendations in an assistant message.
+
+    Applies to the synthetic `assistant_message` tool call synthesized in the
+    subgraph's `response_gateway` node — `tool_args["content"]` holds the raw
+    `AIMessage.content`. Violation when the message contains a recommendation-shaped
+    sentence naming a drink/food whose composed tokens are not in MENU + ALLOWED_EXTRAS.
+    Sentences without a recommendation intent verb, or in a rejection context
+    ("we don't serve mocha"), are ignored. Any internal error → ALLOW.
+    """
+    violation_effect = Effect(effect)
+
+    def _eval(context: GuardrailContext) -> Verdict:
+        try:
+            content = context.tool_args.get("content", "")
+            if not isinstance(content, str) or not content.strip():
+                return Verdict(
+                    effect=Effect.ALLOW,
+                    guardrail_name="",
+                    guardrail_type="",
+                    reason_internal="empty or non-string content; nothing to scan",
+                )
+
+            offenders: list[str] = []
+            for sentence in _sentences(content):
+                if _is_rejection_context(sentence):
+                    continue
+                for clause in _clauses(sentence):
+                    for phrase, _terminal_idx in _find_candidate_phrases(_tokens(clause)):
+                        if not _phrase_is_on_menu(phrase):
+                            offenders.append(" ".join(phrase))
+
+            if not offenders:
+                return Verdict(
+                    effect=Effect.ALLOW,
+                    guardrail_name="",
+                    guardrail_type="",
+                    reason_internal="no off-menu recommendation detected",
+                )
+
+            unique = sorted(set(offenders))
+            return Verdict(
+                effect=violation_effect,
+                guardrail_name="",
+                guardrail_type="",
+                reason_internal=f"off-menu recommendations detected: {unique}",
+                reason_for_llm=(
+                    "Your last message recommended items we do not offer: "
+                    f"{', '.join(repr(o) for o in unique)}. "
+                    f"The menu is: {', '.join(sorted(MENU.keys()))}. "
+                    f"Available extras: {', '.join(sorted(ALLOWED_EXTRAS))}. "
+                    "Recommend only from these; do not invent flavors, syrups, or drinks."
+                ),
+            )
+        except Exception as exc:
+            return Verdict(
+                effect=Effect.ALLOW,
+                guardrail_name="",
+                guardrail_type="",
+                reason_internal=f"predicate error, defaulting to ALLOW: {exc!r}",
+            )
+
+    return _eval
+
+
 PREDICATE_REGISTRY = {
     "allowed_handover_targets": allowed_handover_targets_predicate,
     "discount_within_limit": discount_within_limit_predicate,
     "transfer_includes_order_id": transfer_includes_order_id_predicate,
-    "transfer_includes_order_id": transfer_includes_order_id_predicate,
+    "require_order_status": require_order_status_predicate,
+    "order_size_within_range": order_size_within_range_predicate,
+    "refund_within_limit": refund_within_limit_predicate,
+    "order_total_within_limit": order_total_within_limit_predicate,
+    "off_menu_recommendation": off_menu_recommendation_predicate,
+    "max_tool_calls": max_tool_calls_predicate,
 }

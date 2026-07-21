@@ -14,9 +14,13 @@ from sqlalchemy import Engine, event
 from sqlalchemy.orm import make_transient
 from sqlmodel import Session, SQLModel, create_engine, select
 
-from .shared_components import Order, MenuItem, MENU
+from .shared_components import Order, MenuItem, MENU, OrderStatus
 
-_DB_PATH = Path(os.environ.get("COFFEE_SHOP_DB", Path(__file__).resolve().parents[2] / "coffee_shop.db"))
+_DB_PATH = Path(
+    os.environ.get(
+        "COFFEE_SHOP_DB", Path(__file__).resolve().parents[2] / "coffee_shop.db"
+    )
+)
 _write_lock = threading.Lock()
 
 _engine_var: ContextVar[Engine] = ContextVar("coffee_shop_engine")
@@ -88,8 +92,14 @@ def _parse_order_id(order_id: str) -> Optional[int]:
         return None
 
 
+# ---------------------------------------------------------------------------
+# Order CRUD
+# ---------------------------------------------------------------------------
+
+
 def save_order(order: Order) -> None:
-    """Persist an Order (insert or update)."""
+    """Persist an Order (insert or update). Status legality is enforced by gateway
+    guardrails, not here — this writes whatever status the caller set."""
     is_new = order.id is None
     order.last_modified = datetime.now(timezone.utc)
     with _write_lock:
@@ -105,9 +115,31 @@ def save_order(order: Order) -> None:
                 session.commit()
                 session.refresh(order)
     if is_new:
-        logger.debug(f"Order {order.order_id_str} created for {order.customer} — {len(order.items)} item(s), ${order.total:.2f}")
+        logger.debug(
+            f"Order {order.order_id_str} created for {order.customer} — {len(order.items)} item(s), ${order.total:.2f}"
+        )
     else:
-        logger.debug(f"Order {order.order_id_str} updated — status={order.status.value}, total=${order.total:.2f}")
+        logger.debug(
+            f"Order {order.order_id_str} updated — status={order.status.value}, total=${order.total:.2f}"
+        )
+
+
+def set_order_status(
+    order: Order, new_status: OrderStatus, *, context: str = ""
+) -> None:
+    """Persist a status change and log it. Non-validating on purpose: transition
+    legality is enforced by gateway guardrails (see control_plane), not here. This
+    is only a persistence + observability helper — it makes no policy decision.
+
+    Mutates `order` in place; does not return the object (do not reassign at call sites)."""
+    old_status = order.status
+    order.status = new_status
+    save_order(order)
+    logger.info(
+        f"[TRANSITION] order={order.order_id_str} "
+        f"from={old_status.value} to={new_status.value}"
+        f"{f' context={context}' if context else ''}"
+    )
 
 
 def load_order(order_id: str) -> Optional[Order]:
@@ -141,6 +173,11 @@ def load_recent_order() -> Optional[Order]:
         return order
 
 
+# ---------------------------------------------------------------------------
+# Inventory operations
+# ---------------------------------------------------------------------------
+
+
 def check_inventory_availability(order: Order) -> dict:
     """Check stock levels for every item in the order (read-only)."""
     with Session(get_engine()) as session:
@@ -163,12 +200,14 @@ def check_inventory_availability(order: Order) -> dict:
                 status = "out_of_stock"
                 all_available = False
                 unavailable_items.append(oi.name)
-            details.append({
-                "name": oi.name,
-                "requested": oi.quantity,
-                "available": avail,
-                "status": status,
-            })
+            details.append(
+                {
+                    "name": oi.name,
+                    "requested": oi.quantity,
+                    "available": avail,
+                    "status": status,
+                }
+            )
 
         return {
             "all_available": all_available,
@@ -283,6 +322,11 @@ def get_alternatives_from_db(item_name: str) -> list[dict]:
         return [{"name": a.name, "price": a.price, "stock": a.stock} for a in alts]
 
 
+# ---------------------------------------------------------------------------
+# Shared LangChain tool — all agents get this
+# ---------------------------------------------------------------------------
+
+
 class GetOrderSchema(BaseModel):
     order_id: str = Field(description="The order ID to look up (e.g. 'ORD0001')")
 
@@ -295,7 +339,9 @@ def get_order(order_id: str) -> str:
     if order is None:
         return f"Error: Order '{order_id}' not found."
 
-    summary = f"Order {order.order_id_str} ({order.status.value}) for {order.customer}:\n"
+    summary = (
+        f"Order {order.order_id_str} ({order.status.value}) for {order.customer}:\n"
+    )
     for item in order.items:
         extras_str = f" with {', '.join(item.extras)}" if item.extras else ""
         size_str = f" ({item.size.value})" if item.size else ""

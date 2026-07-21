@@ -31,6 +31,7 @@ guardrails:
   - discount_within_30pct
   - handover_appropriateness_soft_stub
   - order_id_in_handoff
+  - off_menu_recommendation
 guidelines:
   - handoff_etiquette
   - handoff_order_id

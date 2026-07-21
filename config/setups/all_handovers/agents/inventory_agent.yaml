@@ -27,6 +27,8 @@ tools:
 guardrails:
   - allowed_handover_targets
   - order_id_in_handoff
+  - gate_check_inventory
+  - gate_update_stock
 guidelines:
   - handoff_etiquette
   - handoff_order_id

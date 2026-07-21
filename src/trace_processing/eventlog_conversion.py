@@ -229,6 +229,11 @@ EVENT_ATTRIBUTES = {
         "n_verdicts",
         "reason_for_llm",
     ],
+    # historical data support
+    "transfer_to_order_agent": ["ocel_time", "duration"],
+    "transfer_to_inventory_agent": ["ocel_time", "duration"],
+    "transfer_to_barista_agent": ["ocel_time", "duration"],
+    "transfer_to_customer_service_agent": ["ocel_time", "duration"],
 }
 
 OBJECT_ATTRIBUTES = {
@@ -448,7 +453,9 @@ class ObjectCentricEventlog:
         for evt_type in event_map_type["ocel_type"].to_list():
             if evt_type in GATEWAY_EVENT_TYPES:
                 continue
-            attrs = EVENT_ATTRIBUTES.get(evt_type, [])
+            # Unknown event types (e.g. new tools not yet registered above)
+            # must still carry ocel_time — export_to_json requires it.
+            attrs = EVENT_ATTRIBUTES.get(evt_type, ["ocel_time"])
             evt_type_tbl = (
                 events.filter(pl.col("ocel_type") == evt_type)
                 .join(

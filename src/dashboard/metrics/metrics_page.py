@@ -12,6 +12,7 @@ from src.config import CoffeeShopConfig
 from src.trace_processing.eventlog_conversion import ObjectCentricEventlog
 
 from ..nav import header_nav
+from .complexity_section import ComplexitySection
 from .feedback_section import FeedbackSection
 from .overview_section import OverviewSection
 from .system_metrics_section import SystemMetricsSection
@@ -40,6 +41,11 @@ _SCENARIO_LABELS[-1] = "Custom / Unspecified"
 # named constant because it's the string that both populates the checkbox and
 # encodes "null" in the applied-state tuple — one place to change.
 _UNKNOWN_SETUP_LABEL = "(unknown)"
+# Model filter's option label for cases whose events carried no `model`
+# attribute (e.g. crashed before any `call_llm` event fired, or exports from
+# before the `model` column existed). Same string as `_UNKNOWN_SETUP_LABEL`,
+# but scoped independently so future divergence is a one-line change.
+_UNKNOWN_MODEL_LABEL = "(unknown)"
 
 
 def create_metrics_dashboard():
@@ -90,6 +96,16 @@ def create_metrics_dashboard():
             setup_options[_UNKNOWN_SETUP_LABEL] = None
         else:
             setup_options[s] = s
+    models_present_raw = (
+        case_metadata["case_model"].unique().to_list()
+        if not case_metadata.is_empty() and "case_model" in case_metadata.columns else []
+    )
+    model_options: dict[str, str | None] = {}
+    for m in sorted(models_present_raw, key=lambda x: (x is None, x or "")):
+        if m is None:
+            model_options[_UNKNOWN_MODEL_LABEL] = None
+        else:
+            model_options[m] = m
 
     start_picker = pn.widgets.DatetimePicker(
         name="From",
@@ -178,14 +194,21 @@ def create_metrics_dashboard():
         inline=False,
         sizing_mode="stretch_width",
     )
+    model_group = pn.widgets.CheckBoxGroup(
+        name="",
+        options=model_options,
+        value=[],
+        inline=False,
+        sizing_mode="stretch_width",
+    )
 
     trace_count_label = pn.pane.HTML(
-        _format_count_label(*_case_counts(case_metadata, full_start, full_end, [], [])),
+        _format_count_label(*_case_counts(case_metadata, full_start, full_end, [], [], [])),
         sizing_mode="stretch_width",
         margin=(0, 0, 4, 0),
     )
     span_hint_label = pn.pane.HTML(
-        _format_span_hint(case_metadata, full_start, full_end, [], []),
+        _format_span_hint(case_metadata, full_start, full_end, [], [], []),
         sizing_mode="stretch_width",
         margin=(0, 0, 8, 0),
     )
@@ -222,6 +245,15 @@ def create_metrics_dashboard():
         sizing_mode="stretch_width",
         styles={"margin-bottom": "6px"},
     )
+    model_card = pn.Card(
+        model_group if model_options else pn.pane.HTML(
+            '<div style="font-size:11px;color:#999;">No models found.</div>'
+        ),
+        title="Model",
+        collapsed=False,
+        sizing_mode="stretch_width",
+        styles={"margin-bottom": "6px"},
+    )
 
     # Applied state = filter values currently reflected by the metrics pane.
     # Staged state = whatever the widgets say right now. Apply button is
@@ -231,6 +263,7 @@ def create_metrics_dashboard():
         "end": full_end,
         "scenarios": [],
         "setups": [],
+        "models": [],
     }
 
     def _staged() -> dict:
@@ -239,27 +272,28 @@ def create_metrics_dashboard():
             "end": end_picker.value,
             "scenarios": list(scenario_group.value),
             "setups": list(setup_group.value),
+            "models": list(model_group.value),
         }
 
     def _restage(_event=None) -> None:
         s = _staged()
         trace_count_label.object = _format_count_label(
-            *_case_counts(case_metadata, s["start"], s["end"], s["scenarios"], s["setups"])
+            *_case_counts(case_metadata, s["start"], s["end"], s["scenarios"], s["setups"], s["models"])
         )
         span_hint_label.object = _format_span_hint(
-            case_metadata, s["start"], s["end"], s["scenarios"], s["setups"]
+            case_metadata, s["start"], s["end"], s["scenarios"], s["setups"], s["models"]
         )
         apply_button.disabled = _same_filter(s, applied)
 
     render_cache: OrderedDict[
-        tuple[datetime, datetime, tuple[int, ...], tuple[str | None, ...]],
+        tuple[datetime, datetime, tuple[int, ...], tuple[str | None, ...], tuple[str | None, ...]],
         tuple[ObjectCentricEventlog, int],
     ] = OrderedDict()
 
     def _render_from_applied() -> pn.viewable.Viewable:
         key = _filter_signature(
             applied["start"], applied["end"],
-            applied["scenarios"], applied["setups"],
+            applied["scenarios"], applied["setups"], applied["models"],
         )
         cached = render_cache.get(key)
         if cached is not None:
@@ -272,7 +306,7 @@ def create_metrics_dashboard():
         view, entry = _build_metrics(
             combined, case_metadata,
             applied["start"], applied["end"],
-            applied["scenarios"], applied["setups"],
+            applied["scenarios"], applied["setups"], applied["models"],
         )
         if entry is not None:
             render_cache[key] = entry
@@ -295,6 +329,7 @@ def create_metrics_dashboard():
     end_picker.param.watch(_restage, "value")
     scenario_group.param.watch(_restage, "value")
     setup_group.param.watch(_restage, "value")
+    model_group.param.watch(_restage, "value")
     apply_button.on_click(_on_apply)
 
     total_cases = (
@@ -313,6 +348,7 @@ def create_metrics_dashboard():
         time_card,
         scenario_card,
         setup_card,
+        model_card,
         trace_count_label,
         span_hint_label,
         apply_button,
@@ -425,11 +461,14 @@ def _local_tz_name() -> str:
 
 
 def _build_case_metadata(eventlog: pl.DataFrame) -> pl.DataFrame:
-    """One row per case_id with setup, scenario, and first/last timestamps.
+    """One row per case_id with setup, scenario, model, and first/last timestamps.
 
     Case-level attributes (`case_setup`, `case_scenario_index`) are already
     broadcast onto every event row by the extractor, so `.first()` per case
-    is authoritative. Missing columns fall back to null / -1 so older caches
+    is authoritative. `model` is event-level (populated only on `call_llm`
+    rows), so we aggregate distinct non-null values per case and collapse:
+    zero → null (unknown bucket), one → the model string, two-or-more →
+    `"(mixed: A, B)"`. Missing columns fall back to null / -1 so older caches
     without the extractor's schema-v4 columns keep loading.
     """
     if eventlog.is_empty() or "case_id" not in eventlog.columns:
@@ -438,6 +477,7 @@ def _build_case_metadata(eventlog: pl.DataFrame) -> pl.DataFrame:
                 "case_id": pl.Utf8,
                 "case_setup": pl.Utf8,
                 "case_scenario_index": pl.Int64,
+                "case_model": pl.Utf8,
                 "first_t": pl.Datetime,
                 "last_t": pl.Datetime,
             }
@@ -452,16 +492,34 @@ def _build_case_metadata(eventlog: pl.DataFrame) -> pl.DataFrame:
         if "case_scenario_index" in eventlog.columns
         else pl.lit(-1, dtype=pl.Int64).alias("case_scenario_index")
     )
-    return (
+    model_expr = (
+        pl.col("model").drop_nulls().unique().sort().alias("_models")
+        if "model" in eventlog.columns
+        else pl.lit([], dtype=pl.List(pl.Utf8)).alias("_models")
+    )
+    aggregated = (
         eventlog.drop_nulls(_TIMESTAMP_COL)
         .group_by("case_id")
         .agg(
             setup_expr,
             scenario_expr,
+            model_expr,
             pl.col(_TIMESTAMP_COL).min().alias("first_t"),
             pl.col(_TIMESTAMP_COL).max().alias("last_t"),
         )
     )
+    return aggregated.with_columns(
+        pl.when(pl.col("_models").list.len() == 0)
+        .then(pl.lit(None, dtype=pl.Utf8))
+        .when(pl.col("_models").list.len() == 1)
+        .then(pl.col("_models").list.first())
+        .otherwise(
+            pl.lit("(mixed: ")
+            + pl.col("_models").list.join(", ")
+            + pl.lit(")")
+        )
+        .alias("case_model")
+    ).drop("_models")
 
 
 def _apply_filters(
@@ -470,11 +528,13 @@ def _apply_filters(
     end: datetime,
     scenarios: list[int],
     setups: list[str | None],
+    models: list[str | None],
 ) -> pl.DataFrame:
     """Return the subset of `case_metadata` matching all filter groups.
 
-    Empty scenarios / setups mean "no filter" (all pass). Non-empty means
-    "whitelist". Time keeps the existing 'fully-contained case' semantics.
+    Empty scenarios / setups / models mean "no filter" (all pass). Non-empty
+    means "whitelist". Time keeps the existing 'fully-contained case'
+    semantics.
     """
     if case_metadata.is_empty():
         return case_metadata
@@ -490,15 +550,26 @@ def _apply_filters(
         if has_unknown:
             setup_filt = setup_filt | pl.col("case_setup").is_null()
         filt = filt & setup_filt
+    if models:
+        has_unknown = None in models
+        concrete = [m for m in models if m is not None]
+        model_filt = pl.lit(False)
+        if concrete:
+            model_filt = model_filt | pl.col("case_model").is_in(concrete)
+        if has_unknown:
+            model_filt = model_filt | pl.col("case_model").is_null()
+        filt = filt & model_filt
     return case_metadata.filter(filt)
 
 
 def _same_filter(a: dict, b: dict) -> bool:
+    null_safe = lambda x: (x is None, x)
     return (
         a["start"] == b["start"]
         and a["end"] == b["end"]
         and sorted(a["scenarios"]) == sorted(b["scenarios"])
-        and sorted(a["setups"], key=lambda x: (x is None, x)) == sorted(b["setups"], key=lambda x: (x is None, x))
+        and sorted(a["setups"], key=null_safe) == sorted(b["setups"], key=null_safe)
+        and sorted(a["models"], key=null_safe) == sorted(b["models"], key=null_safe)
     )
 
 
@@ -512,13 +583,16 @@ def _filter_signature(
     end: datetime,
     scenarios: list[int],
     setups: list[str | None],
+    models: list[str | None],
 ) -> tuple:
     """Hashable, order-insensitive key for the render cache."""
+    null_safe = lambda x: (x is None, x)
     return (
         start,
         end,
         tuple(sorted(scenarios)),
-        tuple(sorted(setups, key=lambda x: (x is None, x))),
+        tuple(sorted(setups, key=null_safe)),
+        tuple(sorted(models, key=null_safe)),
     )
 
 
@@ -528,16 +602,17 @@ def _case_counts(
     end: datetime,
     scenarios: list[int],
     setups: list[str | None],
+    models: list[str | None],
 ) -> tuple[int, int]:
     """Return (contained, partial) case counts for the current filter set.
 
     Contained cases pass all filters (time fully-contained AND scenario AND
-    setup). Partial counts cases that overlap the time window without full
-    containment; scenario/setup are still applied so the "excluded" number
-    reflects what a widened time window would rescue."""
+    setup AND model). Partial counts cases that overlap the time window
+    without full containment; scenario/setup/model are still applied so the
+    "excluded" number reflects what a widened time window would rescue."""
     if case_metadata.is_empty():
         return 0, 0
-    contained = _apply_filters(case_metadata, start, end, scenarios, setups).height
+    contained = _apply_filters(case_metadata, start, end, scenarios, setups, models).height
     overlap_filt = (pl.col("first_t") <= end) & (pl.col("last_t") >= start)
     if scenarios:
         overlap_filt = overlap_filt & pl.col("case_scenario_index").is_in(scenarios)
@@ -550,6 +625,15 @@ def _case_counts(
         if has_unknown:
             s_filt = s_filt | pl.col("case_setup").is_null()
         overlap_filt = overlap_filt & s_filt
+    if models:
+        has_unknown = None in models
+        concrete = [m for m in models if m is not None]
+        m_filt = pl.lit(False)
+        if concrete:
+            m_filt = m_filt | pl.col("case_model").is_in(concrete)
+        if has_unknown:
+            m_filt = m_filt | pl.col("case_model").is_null()
+        overlap_filt = overlap_filt & m_filt
     overlapping = case_metadata.filter(overlap_filt).height
     return contained, overlapping - contained
 
@@ -580,11 +664,12 @@ def _format_span_hint(
     end: datetime,
     scenarios: list[int],
     setups: list[str | None],
+    models: list[str | None],
 ) -> str:
     """Show the actual time-span the currently-staged filter selects. Helps
     users understand "why is my Last-10-min preset empty" without needing
     them to zoom the picker."""
-    filtered = _apply_filters(case_metadata, start, end, scenarios, setups)
+    filtered = _apply_filters(case_metadata, start, end, scenarios, setups, models)
     if filtered.is_empty():
         return (
             '<div style="font-size:11px;color:#999;padding-top:2px;">'
@@ -607,10 +692,11 @@ def _build_metrics(
     end: datetime,
     scenarios: list[int],
     setups: list[str | None],
+    models: list[str | None],
 ) -> tuple[pn.viewable.Viewable, tuple | None]:
     """Returns `(view, cache_entry)`. `cache_entry` is `(ocel, event_count)`
     for the render cache, or `None` when the filter yielded nothing."""
-    keep_ids = _apply_filters(case_metadata, start, end, scenarios, setups)["case_id"]
+    keep_ids = _apply_filters(case_metadata, start, end, scenarios, setups, models)["case_id"]
     if keep_ids.is_empty():
         return pn.pane.Alert(
             "No traces match the current filters.", alert_type="warning"
@@ -649,6 +735,7 @@ def _render_metrics_from_ocel(
         range_label.panel(),
         OverviewSection(ocel, range_label.fake_path()).panel(),
         FeedbackSection(ocel).panel(),
+        ComplexitySection(ocel).panel(),
         SystemMetricsSection(ocel).panel(),
         TimeMetricsSection(ocel).panel(),
         GuardrailSection(ocel).panel(),
@@ -667,7 +754,7 @@ def _lazy_visualization_panel(ocel) -> pn.viewable.Viewable:
     slot = pn.Column(
         pn.pane.HTML(
             '<div style="font-size:12px;color:#666;padding:4px 0;">'
-            "Process visualization (OC-DFG, OC-PN, Event → Object Types) is "
+            "Process visualization (Case DFG, OC-DFG, OC-PN) is "
             "generated on demand — it takes a few seconds.</div>",
             sizing_mode="stretch_width",
         ),

@@ -3,17 +3,25 @@
 Validates check_inventory (all available / partial unavailable),
 update_stock (decrement, precondition guard, race condition).
 """
+
 import json
 import threading
 import unittest
 
 from src.agents.order_store import (
-    init_db, reset_inventory, save_order, load_order,
-    set_item_stock, check_and_update_stock,
+    init_db,
+    reset_inventory,
+    save_order,
+    load_order,
+    set_item_stock,
+    check_and_update_stock,
 )
 from src.agents.inventory_agent import check_inventory, update_stock
 from src.agents.shared_components import (
-    Order, OrderItem, OrderStatus, MENU,
+    Order,
+    OrderItem,
+    OrderStatus,
+    MENU,
 )
 
 
@@ -39,9 +47,11 @@ class TestCheckInventoryAllAvailable(unittest.TestCase):
         reset_inventory()
 
     def test_all_available(self):
-        order_id = _create_test_order(items=[
-            OrderItem(name="latte", quantity=2, price=8.0, size=None, extras=[]),
-        ])
+        order_id = _create_test_order(
+            items=[
+                OrderItem(name="latte", quantity=2, price=8.0, size=None, extras=[]),
+            ]
+        )
         result = check_inventory.invoke({"order_id": order_id})
         data = json.loads(result)
         self.assertTrue(data["all_available"])
@@ -60,10 +70,12 @@ class TestCheckInventoryPartialUnavailable(unittest.TestCase):
 
     def test_out_of_stock_item(self):
         set_item_stock("muffin", 0)
-        order_id = _create_test_order(items=[
-            OrderItem(name="muffin", quantity=1, price=3.25, size=None, extras=[]),
-            OrderItem(name="latte", quantity=1, price=4.0, size=None, extras=[]),
-        ])
+        order_id = _create_test_order(
+            items=[
+                OrderItem(name="muffin", quantity=1, price=3.25, size=None, extras=[]),
+                OrderItem(name="latte", quantity=1, price=4.0, size=None, extras=[]),
+            ]
+        )
         result = check_inventory.invoke({"order_id": order_id})
         data = json.loads(result)
         self.assertFalse(data["all_available"])
@@ -74,9 +86,13 @@ class TestCheckInventoryPartialUnavailable(unittest.TestCase):
 
     def test_partial_stock(self):
         set_item_stock("sandwich", 1)
-        order_id = _create_test_order(items=[
-            OrderItem(name="sandwich", quantity=3, price=19.5, size=None, extras=[]),
-        ])
+        order_id = _create_test_order(
+            items=[
+                OrderItem(
+                    name="sandwich", quantity=3, price=19.5, size=None, extras=[]
+                ),
+            ]
+        )
         result = check_inventory.invoke({"order_id": order_id})
         data = json.loads(result)
         self.assertFalse(data["all_available"])
@@ -104,27 +120,13 @@ class TestUpdateStockDecrementsCorrectly(unittest.TestCase):
         self.assertEqual(data["items_updated"], 1)
 
         from src.agents.order_store import get_all_inventory
+
         inventory = get_all_inventory()
         self.assertEqual(inventory["espresso"].stock, original_stock - 3)
 
 
-class TestUpdateStockRejectsNonConfirmedOrder(unittest.TestCase):
-    """Test 18: Refuses to update stock if order isn't INVENTORY_CONFIRMED."""
-
-    def setUp(self):
-        init_db()
-        reset_inventory()
-
-    def test_pending_order_rejected(self):
-        order_id = _create_test_order(status=OrderStatus.PENDING)
-        result = update_stock.invoke({"order_id": order_id})
-        self.assertIn("error", result.lower())
-        self.assertIn("not 'inventory_confirmed'", result.lower())
-
-    def test_completed_order_rejected(self):
-        order_id = _create_test_order(status=OrderStatus.COMPLETED)
-        result = update_stock.invoke({"order_id": order_id})
-        self.assertIn("error", result.lower())
+# Test 18 (update_stock status precondition) moved to the gateway — the tool no longer
+# self-gates on order status. See tests/test_require_order_status.py.
 
 
 class TestUpdateStockRaceCondition(unittest.TestCase):
@@ -143,13 +145,17 @@ class TestUpdateStockRaceCondition(unittest.TestCase):
             customer="Thread1",
             status=OrderStatus.INVENTORY_CONFIRMED,
             total=26.0,
-            items=[OrderItem(name="sandwich", quantity=4, price=26.0, size=None, extras=[])],
+            items=[
+                OrderItem(name="sandwich", quantity=4, price=26.0, size=None, extras=[])
+            ],
         )
         order2 = Order(
             customer="Thread2",
             status=OrderStatus.INVENTORY_CONFIRMED,
             total=26.0,
-            items=[OrderItem(name="sandwich", quantity=4, price=26.0, size=None, extras=[])],
+            items=[
+                OrderItem(name="sandwich", quantity=4, price=26.0, size=None, extras=[])
+            ],
         )
         save_order(order1)
         save_order(order2)
@@ -177,6 +183,7 @@ class TestUpdateStockRaceCondition(unittest.TestCase):
 
         # Final stock must be >= 0
         from src.agents.order_store import get_all_inventory
+
         inventory = get_all_inventory()
         self.assertGreaterEqual(inventory["sandwich"].stock, 0)
         self.assertEqual(inventory["sandwich"].stock, 1)  # 5 - 4 = 1

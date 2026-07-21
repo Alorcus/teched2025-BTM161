@@ -55,4 +55,4 @@ def build(
         prompt=composed_prompt,
         gateway=gateway,
     )
-    return subgraph, definition, snapshot
+    return subgraph, definition, snapshot, gateway
