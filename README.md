@@ -52,8 +52,8 @@ The catalogue is designed as a spectrum from *no rules* to *hostile rules*, so y
 
 Reference points:
 
-- `unconstrained` — every business agent can transfer to every other agent, with no guardrails, no guidelines, and no supervisor preamble — maximum agent freedom for observing emergent behavior.
-- `baseline` — the standard coffee shop: each agent can only hand off to the next role in the workflow, `deny` lifecycle gates enforce the order state machine (`pending → inventory_confirmed → in_preparation → completed/preparation_error → refunded`), and every agent prompt declares that a runtime process supervisor is watching.
+- `unconstrained` — every business agent can transfer to every other agent, with no guardrails and no guidelines — maximum agent freedom for observing emergent behavior.
+- `baseline` — the standard coffee shop: each agent can only hand off to the next role in the workflow, and `deny` lifecycle gates enforce the order state machine (`pending → inventory_confirmed → in_preparation → completed/preparation_error → refunded`).
 - `all_handovers` — every business agent can transfer to every other agent, and an `order_id_in_handoff` flag guardrail (plus matching `handoff_order_id` guideline) requires handoffs to carry an `ORDXXXX` once an order exists.
 
 Governance dials on top of `baseline`:
@@ -153,7 +153,7 @@ poetry run python -m scripts.run_batches --batches baseline:0:10 unconstrained:2
 poetry run python -m scripts.run_batches --config batches.json
 ```
 
-Boolean toggles: `--reset-inventory` / `--no-reset-inventory`, `--process-supervisor` / `--no-process-supervisor`, `--export-logs` / `--no-export-logs`. The JSON config schema is `{"batches": [["baseline", 0, 50], ...], "reset_inventory": true, "process_supervisor": false, "export_logs": false}`.
+Boolean toggles: `--reset-inventory` / `--no-reset-inventory`, `--export-logs` / `--no-export-logs`. The JSON config schema is `{"batches": [["baseline", 0, 50], ...], "reset_inventory": true, "export_logs": false}`.
 
 Make sure the Poetry virtual environment is active (`poetry env activate`) or prefix with `poetry run` as shown; the script imports from `src/` and needs the project's dependencies. Batches sharing a setup reuse the same `CoffeeShop` instance, so keep same-setup entries consecutive in the list.
 

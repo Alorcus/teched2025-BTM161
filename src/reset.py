@@ -30,7 +30,6 @@ _TARGETS: tuple[str, ...] = (
     "generated_ocel",
     "generated_visualizations",
     "feedback_store.json",
-    "process_log",
     "guardrail_log",
     "retrospective_log",
     "coffee_shop.db",

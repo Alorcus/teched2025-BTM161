@@ -182,10 +182,10 @@ class AgentPanel(param.Parameterized):
             },
         )
 
-    def add_message(self, role: str, content: str, reason: str | None = None, tool_name: str | None = None):
+    def add_message(self, role: str, content: str, tool_name: str | None = None):
         ts = time.strftime("%H:%M:%S")
         msgs = list(self.messages)
-        msgs.append({"role": role, "content": content, "ts": ts, "reason": reason or "", "tool_name": tool_name or ""})
+        msgs.append({"role": role, "content": content, "ts": ts, "tool_name": tool_name or ""})
         self.messages = msgs
         self._render_messages()
 
@@ -268,12 +268,6 @@ class AgentPanel(param.Parameterized):
             '.agent-msg:hover .agent-msg-body{white-space:pre-wrap;word-break:break-word;'
             'overflow:visible;text-overflow:clip;display:block;}'
             '.agent-msg:hover .agent-msg-truncated{display:none;}'
-            '.agent-msg-reason{margin-top:4px;font-size:11px;color:#8a3a34;'
-            'font-style:italic;border-left:2px solid #b3261e;padding-left:6px;}'
-            '.agent-msg-reason-body{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'
-            'display:inline-block;max-width:100%;vertical-align:bottom;}'
-            '.agent-msg-reason:hover .agent-msg-reason-body{white-space:pre-wrap;'
-            'word-break:break-word;overflow:visible;text-overflow:clip;display:block;}'
             '</style>'
         ]
         html_parts.append(
@@ -287,8 +281,6 @@ class AgentPanel(param.Parameterized):
             ts = msg.get("ts", "")
             if role == "ai":
                 prefix = f'<span style="color:{self.color};font-weight:bold;">AI:</span>'
-            elif role == "ai_rejected":
-                prefix = '<span style="color:#b3261e;font-weight:bold;">AI&nbsp;[REJECTED]:</span>'
             elif role == "user":
                 prefix = '<span style="color:#2E7D32;font-weight:bold;">User:</span>'
             elif role == "tool":
@@ -301,18 +293,8 @@ class AgentPanel(param.Parameterized):
                 prefix = '<span style="color:#6b6478;">🧠</span>'
             else:
                 prefix = f'<span style="font-weight:bold;">{html_mod.escape(role)}:</span>'
-            reason = msg.get("reason") or ""
-            reason_html = ""
-            if reason:
-                reason_full = html_mod.escape(reason)
-                reason_html = (
-                    f'<div class="agent-msg-reason">⚠ supervisor: '
-                    f'<span class="agent-msg-reason-body">{reason_full}</span></div>'
-                )
             body_style = ""
-            if role == "ai_rejected":
-                body_style = "color:#b3261e;"
-            elif role == "thought":
+            if role == "thought":
                 body_style = "color:#555;font-style:italic;"
             tool_name = msg.get("tool_name") or ""
             suffix_html = ""
@@ -325,7 +307,7 @@ class AgentPanel(param.Parameterized):
                 f'<div class="agent-msg">'
                 f'<span style="color:#999;font-size:10px;margin-right:4px;">{ts}</span>'
                 f'{prefix} <span class="agent-msg-body" style="{body_style}">{full_escaped}</span>'
-                f'{suffix_html}{reason_html}</div>'
+                f'{suffix_html}</div>'
             )
         html_parts.append("</div>")
         html_parts.append(script)

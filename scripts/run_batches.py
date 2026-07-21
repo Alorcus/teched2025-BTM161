@@ -28,7 +28,6 @@ BATCHES: list[tuple[str, int, int]] = [
 ]
 
 RESET_INVENTORY = True
-PROCESS_SUPERVISOR = False
 EXPORT_LOGS = False
 
 logger = logging.getLogger("coffee_shop")
@@ -82,7 +81,6 @@ def _load_config(path: Path) -> tuple[
     list[tuple[str, int, int]] | None,
     bool | None,
     bool | None,
-    bool | None,
 ]:
     with path.open("r", encoding="utf-8") as f:
         data = json.load(f)
@@ -113,17 +111,15 @@ def _load_config(path: Path) -> tuple[
             batches.append((setup, scenario, count))
 
     reset = data.get("reset_inventory")
-    supervisor = data.get("process_supervisor")
     export = data.get("export_logs")
     for name, value in (
         ("reset_inventory", reset),
-        ("process_supervisor", supervisor),
         ("export_logs", export),
     ):
         if value is not None and not isinstance(value, bool):
             raise ValueError(f"config '{name}' must be a boolean, got {value!r}")
 
-    return batches, reset, supervisor, export
+    return batches, reset, export
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -152,7 +148,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             "Path to a JSON config file with schema "
             '{"batches": [["baseline", 0, 50], ...], "reset_inventory": true, '
-            '"process_supervisor": false, "export_logs": false}. '
+            '"export_logs": false}. '
             "Mutually exclusive with --batches."
         ),
     )
@@ -161,12 +157,6 @@ def _build_parser() -> argparse.ArgumentParser:
         action=argparse.BooleanOptionalAction,
         default=None,
         help="Reset inventory between conversations (default: True).",
-    )
-    parser.add_argument(
-        "--process-supervisor",
-        action=argparse.BooleanOptionalAction,
-        default=None,
-        help="Enable the process supervisor (default: False).",
     )
     parser.add_argument(
         "--export-logs",
@@ -179,20 +169,17 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def _resolve_settings(
     args: argparse.Namespace,
-) -> tuple[list[tuple[str, int, int]], bool, bool, bool]:
+) -> tuple[list[tuple[str, int, int]], bool, bool]:
     batches: list[tuple[str, int, int]] = BATCHES
     reset = RESET_INVENTORY
-    supervisor = PROCESS_SUPERVISOR
     export = EXPORT_LOGS
 
     if args.config is not None:
-        cfg_batches, cfg_reset, cfg_supervisor, cfg_export = _load_config(args.config)
+        cfg_batches, cfg_reset, cfg_export = _load_config(args.config)
         if cfg_batches is not None:
             batches = cfg_batches
         if cfg_reset is not None:
             reset = cfg_reset
-        if cfg_supervisor is not None:
-            supervisor = cfg_supervisor
         if cfg_export is not None:
             export = cfg_export
     elif args.batches is not None:
@@ -200,12 +187,10 @@ def _resolve_settings(
 
     if args.reset_inventory is not None:
         reset = args.reset_inventory
-    if args.process_supervisor is not None:
-        supervisor = args.process_supervisor
     if args.export_logs is not None:
         export = args.export_logs
 
-    return batches, reset, supervisor, export
+    return batches, reset, export
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -217,9 +202,7 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = _build_parser()
     args = parser.parse_args(argv)
-    batches_list, reset_inventory, process_supervisor, export_logs = _resolve_settings(
-        args
-    )
+    batches_list, reset_inventory, export_logs = _resolve_settings(args)
 
     for setup, scenario, count in batches_list:
         if not (0 <= scenario < len(CUSTOMER_SCENARIOS)):
@@ -238,12 +221,7 @@ def main(argv: list[str] | None = None) -> int:
     for setup_name, batches in groupby(batches_list, key=lambda b: b[0]):
         batches = list(batches)
         logger.info(f"=== Setup: {setup_name} ===")
-        shop = CoffeeShop(
-            CoffeeShopConfig(
-                setup_name=setup_name,
-                process_supervisor_enabled=process_supervisor,
-            )
-        )
+        shop = CoffeeShop(CoffeeShopConfig(setup_name=setup_name))
         shop.open_shop(reset_inventory_first=reset_inventory)
 
         for _, scenario, count in batches:
