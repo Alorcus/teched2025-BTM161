@@ -23,6 +23,8 @@ def log_status(message):
 
 ScenarioSpec = int | str  # int for fixed index, "random", or "all"
 
+OnMessage = Callable[[str, str], None]
+
 
 @dataclass(frozen=True)
 class Batch:
@@ -31,25 +33,22 @@ class Batch:
     count: int
 
 
-def _validate_scenario_index(idx: int, source: str) -> int:
-    if not (0 <= idx < len(CUSTOMER_SCENARIOS)):
-        raise argparse.ArgumentTypeError(
-            f"{source}: scenario {idx} out of range 0-{len(CUSTOMER_SCENARIOS) - 1}"
-        )
-    return idx
-
-
 def parse_scenario_token(token: str, source: str) -> ScenarioSpec:
     """Accept an int-valued index, 'all', or 'random'."""
     if token in ("all", "random"):
         return token
     try:
-        return _validate_scenario_index(int(token), source)
+        idx = int(token)
     except ValueError:
         raise argparse.ArgumentTypeError(
             f"{source}: scenario must be an int 0-{len(CUSTOMER_SCENARIOS) - 1}, "
             f"'all', or 'random' (got {token!r})"
         )
+    if not (0 <= idx < len(CUSTOMER_SCENARIOS)):
+        raise argparse.ArgumentTypeError(
+            f"{source}: scenario {idx} out of range 0-{len(CUSTOMER_SCENARIOS) - 1}"
+        )
+    return idx
 
 
 def parse_batch_triple(raw: str) -> Batch:
@@ -89,6 +88,11 @@ def parse_batch_triple(raw: str) -> Batch:
 
 
 def parse_batches_arg(values: list[str]) -> list[Batch]:
+    """Parse `--batches` values into a list of Batch entries.
+
+    Accepts both space-separated (via argparse `nargs="+"`) and
+    comma-separated forms; empty chunks are ignored.
+    """
     triples = [
         parse_batch_triple(chunk.strip())
         for value in values
@@ -106,14 +110,15 @@ def resolve_scenario(scenario: ScenarioSpec, trace_number: int) -> int | None:
         return None
     if scenario == "all":
         return trace_number % len(CUSTOMER_SCENARIOS)
-    return scenario  # type: ignore[return-value]
+    assert isinstance(scenario, int)
+    return scenario
 
 
-def make_on_message(quiet: bool, full_messages: bool) -> Callable | None:
+def make_on_message(quiet: bool, full_messages: bool) -> OnMessage | None:
     if quiet:
         return None
 
-    def on_message(role, content):
+    def on_message(role: str, content: str) -> None:
         prefix = "[Customer]" if role == "customer" else "[Agent]   "
         body = "\n" + content if full_messages else "\n" + content[:200]
         coffee_shop_logger.info(f"{prefix} {body}")
@@ -126,23 +131,6 @@ def _configure_logging(log_level: str) -> None:
     import time, so we only need to set its level here and muzzle httpx."""
     logging.getLogger("httpx").setLevel(logging.WARNING)
     coffee_shop_logger.setLevel(getattr(logging, log_level.upper()))
-
-
-def _batches_from_args(args, parser) -> list[Batch]:
-    """Materialize the list of batches to run from parsed CLI args.
-
-    Either `--batches` (explicit triples) or the sugar
-    `--setup/--scenario/--traces` shortcut (which becomes one batch per setup).
-    """
-    if args.batches is not None:
-        try:
-            return parse_batches_arg(args.batches)
-        except argparse.ArgumentTypeError as exc:
-            parser.error(str(exc))
-
-    setups = args.setup if args.setup else [resolve_setup_name(None)]
-    scenario = parse_scenario_token(args.scenario, "--scenario")
-    return [Batch(setup=name, scenario=scenario, count=args.traces) for name in setups]
 
 
 def main():
@@ -233,8 +221,9 @@ def main():
         print("\n".join(names) if names else "(no setups found in config/setups/)")
         return 0
 
-    # SUPPRESS defaults mean these attributes only exist when the user passed the
-    # flag. That's how we detect real user input for the mutual-exclusion check.
+    # `argparse.SUPPRESS` defaults keep these attributes absent unless the user
+    # actually passed the flag — that's how the mutual-exclusion check
+    # distinguishes explicit input from unset.
     batches_given = hasattr(args, "batches")
     shortcut_flags = [f for f in ("setup", "scenario", "traces") if hasattr(args, f)]
     if batches_given and shortcut_flags:
@@ -242,10 +231,21 @@ def main():
             "--batches is mutually exclusive with --setup / --scenario / --traces"
         )
 
-    args.batches = getattr(args, "batches", None)
-    args.setup = getattr(args, "setup", None)
-    args.scenario = getattr(args, "scenario", "random")
-    args.traces = getattr(args, "traces", 1)
+    if batches_given:
+        try:
+            batches = parse_batches_arg(args.batches)
+        except argparse.ArgumentTypeError as exc:
+            parser.error(str(exc))
+    else:
+        setups = getattr(args, "setup", None) or [resolve_setup_name(None)]
+        try:
+            scenario = parse_scenario_token(
+                getattr(args, "scenario", "random"), "--scenario"
+            )
+        except argparse.ArgumentTypeError as exc:
+            parser.error(str(exc))
+        traces = getattr(args, "traces", 1)
+        batches = [Batch(setup=name, scenario=scenario, count=traces) for name in setups]
 
     if args.quiet and args.full_messages:
         coffee_shop_logger.warning(
@@ -257,7 +257,7 @@ def main():
         )
 
     _configure_logging(args.log_level)
-    batches = _batches_from_args(args, parser)
+
     for batch in batches:
         setup_dir(batch.setup)
 
@@ -266,10 +266,11 @@ def main():
     on_message = make_on_message(args.quiet, args.full_messages)
 
     all_trace_ids: list[str] = []
-    per_batch_counts: list[tuple[str, ScenarioSpec, int]] = []
-    batch_number = 0
     trace_number = 0
 
+    # `groupby` merges consecutive same-setup batches so we open the shop once
+    # per contiguous block; interleaved setups reopen the shop by design.
+    batch_number = 0
     for setup_name, group in groupby(batches, key=lambda b: b.setup):
         coffee_shop_logger.info(f"=== Setup: {setup_name} ===")
         shop = CoffeeShop(
@@ -289,15 +290,16 @@ def main():
                 f"=== Batch {batch_number}/{total_batches} | setup {setup_name!r} "
                 f"| scenario {batch.scenario} | {batch.count} trace(s) ==="
             )
-            for i in range(batch.count):
+            for conv_number in range(1, batch.count + 1):
                 trace_number += 1
-                idx = resolve_scenario(batch.scenario, i)
+                idx = resolve_scenario(batch.scenario, conv_number - 1)
                 scenario_desc = (
                     CUSTOMER_SCENARIOS[idx] if idx is not None else "random"
                 )
                 log_status(
                     f"--- Trace {trace_number}/{total_traces} "
-                    f"(batch {batch_number}/{total_batches}, conv {i + 1}/{batch.count}) "
+                    f"(batch {batch_number}/{total_batches}, "
+                    f"conv {conv_number}/{batch.count}) "
                     f"| Scenario {idx}: {scenario_desc[:60]} ---"
                 )
                 trace_ids = shop.run_conversation(
@@ -315,14 +317,15 @@ def main():
                         f"Customer feedback [{feedback['feedback_score']:.2f}"
                         f"{marker}]: {feedback['feedback_reason']}"
                     )
-            per_batch_counts.append((setup_name, batch.scenario, batch.count))
 
     coffee_shop_logger.info(
         f"=== Simulation complete: {total_batches} batch(es), "
         f"{len(all_trace_ids)} trace(s) generated ==="
     )
-    for name, scenario, count in per_batch_counts:
-        coffee_shop_logger.info(f"  - {name} / scenario {scenario}: {count} trace(s)")
+    for batch in batches:
+        coffee_shop_logger.info(
+            f"  - {batch.setup} / scenario {batch.scenario}: {batch.count} trace(s)"
+        )
 
     if args.export_logs:
         coffee_shop_logger.info("Exporting event logs...")

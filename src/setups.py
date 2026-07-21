@@ -43,14 +43,3 @@ def resolve_setup_name(cli_value: str | None) -> str:
     raise SystemExit(
         f"No setup selected. Pass --setup <name>. Available: {available or '(none)'}"
     )
-
-
-def resolve_setup_names(cli_values: list[str] | None) -> list[str]:
-    """Resolve the ordered list of setups to run.
-
-    - If cli_values is non-empty, return it (order preserved; duplicates allowed).
-    - Else fall back to the default via resolve_setup_name(None).
-    """
-    if cli_values:
-        return list(cli_values)
-    return [resolve_setup_name(None)]

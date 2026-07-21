@@ -1,5 +1,8 @@
 import argparse
+import subprocess
+import sys
 import unittest
+from pathlib import Path
 
 from src.simulate import (
     Batch,
@@ -8,6 +11,8 @@ from src.simulate import (
     parse_scenario_token,
     resolve_scenario,
 )
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 class TestParseBatchTriple(unittest.TestCase):
@@ -123,6 +128,40 @@ class TestResolveScenario(unittest.TestCase):
         self.assertEqual(resolve_scenario("all", 0), 0)
         self.assertEqual(resolve_scenario("all", 1), 1 % n)
         self.assertEqual(resolve_scenario("all", n), 0)
+
+
+class TestCLIMutualExclusion(unittest.TestCase):
+    """Verify --batches rejects mixing with --setup/--scenario/--traces even
+    when the shortcut flag is passed its default value."""
+
+    def _run(self, *cli_args):
+        return subprocess.run(
+            [sys.executable, "-m", "src.simulate", *cli_args],
+            capture_output=True,
+            text=True,
+            cwd=str(PROJECT_ROOT),
+            timeout=30,
+        )
+
+    def test_batches_with_scenario_default_still_rejected(self):
+        result = self._run("--batches", "baseline:0:1", "--scenario", "random")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("mutually exclusive", result.stderr)
+
+    def test_batches_with_traces_default_still_rejected(self):
+        result = self._run("--batches", "baseline:0:1", "--traces", "1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("mutually exclusive", result.stderr)
+
+    def test_batches_with_setup_rejected(self):
+        result = self._run("--batches", "baseline:0:1", "--setup", "baseline")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("mutually exclusive", result.stderr)
+
+    def test_list_setups_still_works(self):
+        result = self._run("--list-setups")
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("baseline", result.stdout)
 
 
 if __name__ == "__main__":
