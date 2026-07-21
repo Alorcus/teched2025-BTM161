@@ -101,14 +101,3 @@ guardrails:
     predicate_args:
       allowed: [completed]
       effect: deny
-
-  - id: off_menu_recommendation
-    type: hard
-    version: v1
-    tools:
-      - assistant_message
-    effect: deny
-    description: Deny order_agent assistant turns that recommend items outside MENU + ALLOWED_EXTRAS.
-    predicate: off_menu_recommendation
-    predicate_args:
-      effect: deny

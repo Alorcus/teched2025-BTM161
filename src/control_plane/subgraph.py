@@ -7,14 +7,6 @@ Topology:
                                                 ├─ batch-denied → llm (loop, synthetic ToolMessages for every tool_call_id)
                                                 └─ batch-allowed → tools → llm (loop)
 
-Response-scoped guardrails (predicates that declare themselves against the
-synthetic `assistant_message` tool) are evaluated **outside** the subgraph, by
-the runner that consumes `app.stream(...)` — see `ConversationRunner._process_message`
-and `ConversationEngine.send_message`. Doing the check there lets the runner
-suppress the offending message from the UI *before* it is published to the
-customer, and route the correction through the same active-supervisor path
-that already exists for process-model violations.
-
 Batch-verdict policy (all-or-nothing per LLM turn): per-call verdicts are still
 evaluated and logged individually, but if ANY call in the batch is denied the
 entire batch is rejected — synthetic ToolMessages are emitted for every

@@ -208,12 +208,6 @@ def main():
         action="store_true",
         help="List available setups under config/setups/ and exit.",
     )
-    parser.add_argument(
-        "--process-supervisor",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Enable the process supervisor (default: true).",
-    )
     args = parser.parse_args()
 
     if args.list_setups:
@@ -276,7 +270,6 @@ def main():
         shop = CoffeeShop(
             CoffeeShopConfig(
                 setup_name=setup_name,
-                process_supervisor_enabled=args.process_supervisor,
             )
         )
         shop.open_shop(reset_inventory_first=args.reset_inventory)
