@@ -7,11 +7,12 @@ import unittest
 from unittest.mock import patch, MagicMock
 
 from langgraph.prebuilt.tool_node import ToolNode
+from langgraph.runtime import CONF, CONFIG_KEY_RUNTIME, DEFAULT_RUNTIME
 from langgraph.types import Command
 from langchain_core.messages import AIMessage, ToolMessage, HumanMessage
 
 from src.agents.shared_components import (
-    transfer_to_agent, 
+    transfer_to_agent,
     _resolve_from_agent,
 )
 
@@ -22,6 +23,9 @@ TOOLS_AND_TARGETS = [
     (transfer_to_agent, "customer_service_agent"),
     (transfer_to_agent, "order_agent"),
 ]
+
+
+_TOOL_NODE_CONFIG = {CONF: {CONFIG_KEY_RUNTIME: DEFAULT_RUNTIME}}
 
 
 def _invoke_handoff(tool, target="inventory_agent", from_agent="order_agent"):
@@ -44,7 +48,7 @@ def _invoke_handoff(tool, target="inventory_agent", from_agent="order_agent"):
         ],
         "active_agent": from_agent,
     }
-    result = tn.invoke(state)
+    result = tn.invoke(state, config=_TOOL_NODE_CONFIG)
     return result[0]
 
 
