@@ -4,13 +4,17 @@ Verifies that handoff tools execute correctly through LangGraph's ToolNode,
 that state injection works, and that the full graph compiles and routes properly.
 """
 import unittest
-from langgraph.prebuilt.tool_node import ToolNode, _get_state_args
+from langgraph.prebuilt.tool_node import ToolNode
+from langgraph.runtime import CONF, CONFIG_KEY_RUNTIME, DEFAULT_RUNTIME
 from langgraph.types import Command
 from langchain_core.messages import AIMessage
 
 from src.agents.shared_components import (
-    transfer_to_agent, 
+    transfer_to_agent,
 )
+
+
+_TOOL_NODE_CONFIG = {CONF: {CONFIG_KEY_RUNTIME: DEFAULT_RUNTIME}}
 
 
 class TestHandoffToolInjection(unittest.TestCase):
@@ -19,14 +23,6 @@ class TestHandoffToolInjection(unittest.TestCase):
     ALL_TOOLS = [
         transfer_to_agent,
     ]
-
-    def test_state_args_detected(self):
-        """ToolNode must detect InjectedState on all handoff tools."""
-        for tool in self.ALL_TOOLS:
-            state_args = _get_state_args(tool)
-            self.assertIn("state", state_args,
-                          f"{tool.name} missing 'state' in state_args — "
-                          f"InjectedState not detected (got {state_args})")
 
     def test_tool_call_schema_excludes_injected_params(self):
         """LLM-facing schema must expose target_agent, context_summary, and expectation only."""
@@ -54,7 +50,7 @@ class TestHandoffToolInjection(unittest.TestCase):
             "active_agent": "order_agent",
         }
 
-        result = tn.invoke(state)
+        result = tn.invoke(state, config=_TOOL_NODE_CONFIG)
 
         self.assertIsInstance(result, list)
         self.assertEqual(len(result), 1)
@@ -98,7 +94,7 @@ class TestHandoffToolInjection(unittest.TestCase):
                     "messages": [AIMessage(content="", tool_calls=[tool_call])],
                     "active_agent": "source_agent",
                 }
-                result = tn.invoke(state)
+                result = tn.invoke(state, config=_TOOL_NODE_CONFIG)
                 self.assertIsInstance(result, list)
                 cmd = result[0]
                 self.assertEqual(cmd.goto, expected_target)

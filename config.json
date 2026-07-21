@@ -7,6 +7,5 @@
     ]
   ],
   "reset_inventory": true,
-  "process_supervisor": false,
   "export_logs": true
 }

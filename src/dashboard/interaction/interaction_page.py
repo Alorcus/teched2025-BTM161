@@ -688,35 +688,11 @@ def _dispatch_event(
             f"<b>{event.agent_name}</b></span>: {_truncate(event.content)}",
         )
 
-    elif event.event_type == EventType.AGENT_MESSAGE_REJECTED:
-        if panel:
-            panel.set_status("idle")
-            panel.add_message(
-                "ai_rejected", event.content, reason=event.rejection_reason
-            )
-        reason_short = ""
-        if event.rejection_reason:
-            reason_short = (
-                f' <span style="color:#8a3a34;font-style:italic;font-size:11px;">'
-                f"⚠ {_truncate(event.rejection_reason, 160)}</span>"
-            )
-        _log(
-            log_entries,
-            conversation_log,
-            f'<span style="color:#b3261e"><b>{event.agent_name} [REJECTED]</b></span>: '
-            f'<span style="color:#b3261e;">'
-            f"{_truncate(event.content)}</span>{reason_short}",
-        )
-
     elif event.event_type == EventType.TOOL_CALL:
-        # Render-only TOOL_CALL events for rejected attempts: show in agent
-        # panel but skip coffee-machine side effects.
-        rejected_render_only = (event.supervisor_line or "").startswith("REJECTED")
         if panel:
-            if not rejected_render_only:
-                panel.set_status("executing_tool")
+            panel.set_status("executing_tool")
             panel.add_tool_call(event.tool_name or "?", event.tool_args)
-        if not rejected_render_only and event.tool_name == "start_preparation":
+        if event.tool_name == "start_preparation":
             coffee_machine_panel.start_brewing("coffee")
 
     elif event.event_type == EventType.TOOL_RESULT:
