@@ -15,6 +15,7 @@ from src.control_plane.subgraph import (
     CORRECTION_KWARG,
     REJECTED_AGENT_KWARG,
     REJECTED_CONTENT_KWARG,
+    REJECTED_MESSAGE_ID_KWARG,
     REJECTING_GUARDRAIL_KWARG,
     REJECTION_REASON_KWARG,
 )
@@ -283,6 +284,7 @@ class ConversationRunner:
             "handoff_context": None,
         }
         last_agent_message = None
+        last_agent_message_id: str | None = None
         seen: set[str] = set()
         # `handoff_context` is set in the parent graph state by transfer_to_agent
         # and is never cleared, so terminal/router updates can re-surface the
@@ -413,14 +415,20 @@ class ConversationRunner:
                                 msg_agent = self._active_agent
                             self._publish_message(msg, msg_agent)
 
-                            if isinstance(msg, HumanMessage) and (
-                                (msg.additional_kwargs or {}).get(CORRECTION_KWARG) is True
-                            ):
-                                rejected_content = (msg.additional_kwargs or {}).get(
-                                    REJECTED_CONTENT_KWARG, ""
-                                )
-                                if last_agent_message == rejected_content:
+                            msg_kwargs = getattr(msg, "additional_kwargs", None) or {}
+                            if msg_kwargs.get(CORRECTION_KWARG) is True:
+                                rejected_id = msg_kwargs.get(REJECTED_MESSAGE_ID_KWARG, "")
+                                rejected_content = msg_kwargs.get(REJECTED_CONTENT_KWARG, "")
+                                if last_agent_message_id and rejected_id:
+                                    matched = last_agent_message_id == rejected_id
+                                else:
+                                    matched = (
+                                        last_agent_message is not None
+                                        and _extract_text(last_agent_message) == rejected_content
+                                    )
+                                if matched:
                                     last_agent_message = None
+                                    last_agent_message_id = None
 
                             if (
                                 isinstance(msg, AIMessage)
@@ -428,7 +436,8 @@ class ConversationRunner:
                                 and not msg.tool_calls
                                 and getattr(msg, "name", None) in SWARM_AGENTS
                             ):
-                                last_agent_message = msg.content
+                                last_agent_message = _extract_text(msg.content) or msg.content
+                                last_agent_message_id = getattr(msg, "id", None)
         except Exception as e:
             logger.exception("Error during stream iteration")
             self.event_bus.publish(
@@ -459,19 +468,24 @@ class ConversationRunner:
         return last_agent_message
 
     def _publish_message(self, msg, agent_name: str) -> None:
-        if isinstance(msg, HumanMessage):
-            kwargs = msg.additional_kwargs or {}
-            if kwargs.get(CORRECTION_KWARG) is True:
-                rejected_agent = kwargs.get(REJECTED_AGENT_KWARG) or agent_name
-                self.event_bus.publish(
-                    DashboardEvent(
-                        event_type=EventType.AGENT_MESSAGE_REJECTED,
-                        agent_name=rejected_agent,
-                        content=kwargs.get(REJECTED_CONTENT_KWARG, ""),
-                        rejection_reason=kwargs.get(REJECTION_REASON_KWARG, ""),
-                        rejecting_guardrail=kwargs.get(REJECTING_GUARDRAIL_KWARG, ""),
-                    )
+        kwargs = getattr(msg, "additional_kwargs", None) or {}
+        if kwargs.get(CORRECTION_KWARG) is True:
+            rejected_agent = kwargs.get(REJECTED_AGENT_KWARG) or agent_name
+            self.event_bus.publish(
+                DashboardEvent(
+                    event_type=EventType.AGENT_MESSAGE_REJECTED,
+                    agent_name=rejected_agent,
+                    content=kwargs.get(REJECTED_CONTENT_KWARG, ""),
+                    rejection_reason=kwargs.get(REJECTION_REASON_KWARG, ""),
+                    rejecting_guardrail=kwargs.get(REJECTING_GUARDRAIL_KWARG, ""),
                 )
+            )
+            if isinstance(msg, HumanMessage):
+                return
+            # Fallback AIMessage at retry-cap: after surfacing the rejection,
+            # publish the fallback text as a normal AGENT_MESSAGE so the
+            # customer's chat log has a coherent last line.
+        if isinstance(msg, HumanMessage):
             return
         if isinstance(msg, AIMessage):
             if msg.tool_calls:

@@ -166,10 +166,15 @@ class TestResponseGateway(unittest.TestCase):
         self.assertEqual(stamp[REJECTED_AGENT_KWARG], "order_agent")
         self.assertIn("not on our menu", stamp[REJECTION_REASON_KWARG])
 
-    def test_retry_cap_terminates_loop(self):
-        """When the LLM keeps producing off-menu recommendations, the loop stops
-        after MAX_RESPONSE_GUARDRAIL_RETRIES corrections have been issued — the
-        last offending AIMessage remains in state rather than looping forever."""
+    def test_retry_cap_publishes_canned_fallback(self):
+        """When the LLM keeps producing off-menu recommendations after
+        MAX_RESPONSE_GUARDRAIL_RETRIES corrections, the response_gateway must
+        replace the still-offending AIMessage with a canned fallback AIMessage
+        rather than let the rejected content reach the customer. The fallback
+        AIMessage is stamped with CORRECTION_KWARG so the dashboard runner
+        surfaces the rejection and the stream downgrade filter treats the
+        prior AI attempt as rejected.
+        """
         bad_responses = [
             AIMessage(content=f"Try our caramel macchiato #{i}", id=f"ai-{i}")
             for i in range(MAX_RESPONSE_GUARDRAIL_RETRIES + 3)
@@ -188,6 +193,23 @@ class TestResponseGateway(unittest.TestCase):
         self.assertEqual(llm.call_count, MAX_RESPONSE_GUARDRAIL_RETRIES + 1)
         corrections = [m for m in result["messages"] if _is_correction_message(m)]
         self.assertEqual(len(corrections), MAX_RESPONSE_GUARDRAIL_RETRIES)
+
+        ai_contents = [
+            m.content for m in result["messages"] if isinstance(m, AIMessage)
+        ]
+        self.assertNotIn(
+            f"Try our caramel macchiato #{MAX_RESPONSE_GUARDRAIL_RETRIES}",
+            ai_contents,
+            "The final off-menu recommendation must not reach the transcript",
+        )
+        from src.control_plane.subgraph import CAP_EXHAUSTED_FALLBACK
+        self.assertIn(CAP_EXHAUSTED_FALLBACK, ai_contents)
+
+        fallback = next(
+            m for m in result["messages"]
+            if isinstance(m, AIMessage) and m.content == CAP_EXHAUSTED_FALLBACK
+        )
+        self.assertTrue((fallback.additional_kwargs or {}).get(CORRECTION_KWARG))
 
 
 if __name__ == "__main__":

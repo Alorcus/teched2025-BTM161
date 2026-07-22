@@ -79,6 +79,39 @@ class TestExtractMessagesRejection(unittest.TestCase):
         self.assertFalse(by_content["Try our hazelnut latte!"].is_agent_reply)
         self.assertTrue(by_content["Would you like a latte?"].is_agent_reply)
 
+    def test_id_based_pairing_survives_duplicate_content(self):
+        """When two agents produce identical short text ('Sure!') and only one
+        is rejected, id-based pairing must downgrade the correct message.
+        The correction stamps REJECTED_MESSAGE_ID_KWARG so the extractor can
+        match on id rather than falling back to content."""
+        from src.control_plane.subgraph import REJECTED_MESSAGE_ID_KWARG
+
+        first_sure = AIMessage(content="Sure!", name="order_agent", id="ai-first")
+        second_sure = AIMessage(content="Sure!", name="order_agent", id="ai-second")
+        # A correction that identifies second_sure by id.
+        correction = HumanMessage(
+            content="policy violation",
+            additional_kwargs={
+                CORRECTION_KWARG: True,
+                REJECTED_MESSAGE_ID_KWARG: "ai-second",
+                REJECTED_CONTENT_KWARG: "Sure!",
+            },
+        )
+        # Note: the second AIMessage will not add a new StreamMessage because
+        # extract_messages dedupes by (content, name). So the pending buffer
+        # remains the first "Sure!" — id-match against "ai-second" must NOT
+        # downgrade it.
+        stream = _fake_stream([
+            ("order_agent", {"llm": {"messages": [first_sure]}}),
+            ("order_agent", {"llm": {"messages": [second_sure]}}),
+            ("order_agent", {"response_gateway": {"messages": [correction]}}),
+        ])
+        results = list(extract_messages(stream))
+        # The first "Sure!" must remain a valid agent reply — id mismatch
+        # prevents the correction from downgrading a different message.
+        self.assertEqual(len(results), 1)
+        self.assertTrue(results[0].is_agent_reply)
+
     def test_last_agent_reply_semantics_customer_never_sees_rejected(self):
         """Simulates the ConversationEngine.send_message behavior: keep the
         last StreamMessage where is_agent_reply is True.
@@ -106,20 +139,47 @@ class TestExtractMessagesRejection(unittest.TestCase):
 
         self.assertEqual(last_reply, "How about a cappuccino?")
 
-    def test_retry_cap_rejected_still_not_delivered(self):
-        """If retry cap is hit and the LAST attempt is still off-menu, the
-        customer must not receive it either."""
+    def test_retry_cap_replaces_offending_with_fallback(self):
+        """When the retry cap is hit, the response_gateway must emit a
+        canned-fallback AIMessage stamped as a correction. The stream extractor
+        pairs the fallback's rejected-message-id with the offending AIMessage
+        and downgrades it; the customer then sees only the fallback, never the
+        rejected content.
+        """
+        from src.control_plane.subgraph import (
+            CAP_EXHAUSTED_FALLBACK,
+            REJECTED_MESSAGE_ID_KWARG,
+        )
+
         bad1 = AIMessage(content="Hazelnut latte?", name="order_agent", id="ai-1")
         correction1 = HumanMessage(
             content="fix",
-            additional_kwargs={CORRECTION_KWARG: True, REJECTED_CONTENT_KWARG: "Hazelnut latte?"},
+            additional_kwargs={
+                CORRECTION_KWARG: True,
+                REJECTED_MESSAGE_ID_KWARG: "ai-1",
+                REJECTED_CONTENT_KWARG: "Hazelnut latte?",
+            },
         )
         bad2 = AIMessage(content="Caramel macchiato?", name="order_agent", id="ai-2")
         correction2 = HumanMessage(
             content="fix",
-            additional_kwargs={CORRECTION_KWARG: True, REJECTED_CONTENT_KWARG: "Caramel macchiato?"},
+            additional_kwargs={
+                CORRECTION_KWARG: True,
+                REJECTED_MESSAGE_ID_KWARG: "ai-2",
+                REJECTED_CONTENT_KWARG: "Caramel macchiato?",
+            },
         )
         bad3 = AIMessage(content="Vanilla frappe?", name="order_agent", id="ai-3")
+        fallback = AIMessage(
+            content=CAP_EXHAUSTED_FALLBACK,
+            name="order_agent",
+            id="ai-fallback",
+            additional_kwargs={
+                CORRECTION_KWARG: True,
+                REJECTED_MESSAGE_ID_KWARG: "ai-3",
+                REJECTED_CONTENT_KWARG: "Vanilla frappe?",
+            },
+        )
 
         stream = _fake_stream([
             ("order_agent", {"llm": {"messages": [bad1]}}),
@@ -127,6 +187,7 @@ class TestExtractMessagesRejection(unittest.TestCase):
             ("order_agent", {"llm": {"messages": [bad2]}}),
             ("order_agent", {"response_gateway": {"messages": [correction2]}}),
             ("order_agent", {"llm": {"messages": [bad3]}}),
+            ("order_agent", {"response_gateway": {"messages": [fallback]}}),
         ])
 
         last_reply = None
@@ -134,10 +195,7 @@ class TestExtractMessagesRejection(unittest.TestCase):
             if sm.is_agent_reply:
                 last_reply = sm.content
 
-        # bad3 was NOT rejected (retry cap hit) — the current implementation
-        # allows the final attempt through. This is intentional: the loop must
-        # terminate. Verified so we notice if behaviour changes.
-        self.assertEqual(last_reply, "Vanilla frappe?")
+        self.assertEqual(last_reply, CAP_EXHAUSTED_FALLBACK)
 
 
 if __name__ == "__main__":

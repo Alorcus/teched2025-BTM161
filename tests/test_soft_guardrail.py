@@ -112,6 +112,85 @@ class TestSoftGuardrailFailureModes(unittest.TestCase):
         verdict = guardrail.eval(_ctx("hi"))
         self.assertEqual(verdict.effect, Effect.ALLOW)
 
+    def test_prose_containing_deny_does_not_trip_keyword_sniff(self):
+        """Historic regression guard: a judge that returns free-form prose
+        containing the word "deny" (e.g. "I don't deny lattes are popular")
+        must NOT be treated as a deny verdict — that would leak the entire
+        raw judge output back to the agent as an injection payload."""
+        def invoker(_s: str, _u: str) -> str:
+            return "I really don't deny that lattes are popular here!"
+
+        guardrail = SoftGuardrail(name="g", effect=Effect.DENY, judge_invoker=invoker)
+        self.assertEqual(guardrail.eval(_ctx("hi")).effect, Effect.ALLOW)
+
+
+class TestSoftGuardrailEffectSemantics(unittest.TestCase):
+    def test_effect_allow_soft_guardrail_stays_allow_on_deny_verdict(self):
+        """A guardrail configured as `effect: allow` (observability-only) must
+        NOT block even when the judge returns deny."""
+        def invoker(_s: str, _u: str) -> str:
+            return json.dumps({"decision": "deny", "reason": "off menu"})
+
+        guardrail = SoftGuardrail(
+            name="observability_only",
+            effect=Effect.ALLOW,
+            judge_invoker=invoker,
+        )
+        verdict = guardrail.eval(_ctx("Try our hazelnut latte!"))
+        self.assertEqual(verdict.effect, Effect.ALLOW)
+
+    def test_effect_flag_stays_flag_on_deny_verdict(self):
+        def invoker(_s: str, _u: str) -> str:
+            return json.dumps({"decision": "deny", "reason": "off menu"})
+
+        guardrail = SoftGuardrail(
+            name="flag_only",
+            effect=Effect.FLAG,
+            judge_invoker=invoker,
+        )
+        verdict = guardrail.eval(_ctx("Try our hazelnut latte!"))
+        self.assertEqual(verdict.effect, Effect.FLAG)
+
+
+class TestSoftGuardrailBounding(unittest.TestCase):
+    def test_oversized_message_is_truncated_before_judge_call(self):
+        """A malicious or accidental oversized reply must not be forwarded
+        verbatim to the judge — it could cause a context-length error and
+        fail-open the guardrail. The message is capped at
+        MAX_JUDGE_MESSAGE_LENGTH before templating."""
+        from src.control_plane.guardrails import MAX_JUDGE_MESSAGE_LENGTH
+
+        captured = {}
+
+        def invoker(_s: str, user: str) -> str:
+            captured["user"] = user
+            return json.dumps({"decision": "allow", "reason": ""})
+
+        guardrail = SoftGuardrail(
+            name="g",
+            effect=Effect.DENY,
+            judge_invoker=invoker,
+            user_template="{message}",
+        )
+        oversized = "a" * (MAX_JUDGE_MESSAGE_LENGTH * 2)
+        guardrail.eval(_ctx(oversized))
+        self.assertLessEqual(len(captured["user"]), MAX_JUDGE_MESSAGE_LENGTH)
+
+    def test_oversized_reason_bounded_in_verdict(self):
+        """A judge that returns an oversized `reason` cannot inject a large
+        payload into the agent's next-turn correction prompt."""
+        from src.control_plane.guardrails import MAX_JUDGE_REASON_LENGTH
+
+        long_reason = "b" * (MAX_JUDGE_REASON_LENGTH * 3)
+
+        def invoker(_s: str, _u: str) -> str:
+            return json.dumps({"decision": "deny", "reason": long_reason})
+
+        guardrail = SoftGuardrail(name="g", effect=Effect.DENY, judge_invoker=invoker)
+        verdict = guardrail.eval(_ctx("Try our hazelnut latte!"))
+        self.assertEqual(verdict.effect, Effect.DENY)
+        self.assertLessEqual(len(verdict.reason_for_llm), MAX_JUDGE_REASON_LENGTH)
+
 
 class TestJudgeInvokerContract(unittest.TestCase):
     def test_menu_and_extras_substituted_into_prompt(self):

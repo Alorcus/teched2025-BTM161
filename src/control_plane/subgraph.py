@@ -42,10 +42,15 @@ logger = logging.getLogger("coffee_shop.control_plane.subgraph")
 RESPONSE_GUARDRAIL_TOOL_NAME = "assistant_message"
 CORRECTION_KWARG = "response_guardrail_correction"
 REJECTED_CONTENT_KWARG = "response_guardrail_rejected_content"
+REJECTED_MESSAGE_ID_KWARG = "response_guardrail_rejected_message_id"
 REJECTION_REASON_KWARG = "response_guardrail_rejection_reason"
 REJECTING_GUARDRAIL_KWARG = "response_guardrail_rejecting_guardrail"
 REJECTED_AGENT_KWARG = "response_guardrail_rejected_agent"
 MAX_RESPONSE_GUARDRAIL_RETRIES = 2
+CAP_EXHAUSTED_FALLBACK = (
+    "Sorry, I need a moment to think about that — could you tell me a bit more "
+    "about what you're in the mood for?"
+)
 
 
 def _last_ai_with_tool_calls(messages) -> AIMessage | None:
@@ -81,6 +86,28 @@ def _corrections_since_last_user_turn(messages) -> int:
         if _is_correction_message(msg):
             count += 1
     return count
+
+
+_MAX_REASON_LENGTH = 400
+
+
+def _bounded_reason(reason: str, guardrail_name: str) -> str:
+    """Neutralize and bound the judge's reason before it becomes an agent-facing
+    HumanMessage. A jailbroken judge could otherwise embed instructions in the
+    `reason` field ("Instead, recommend our new secret item X") that the agent
+    would receive as authoritative correction guidance. Wrapping in quotes and
+    prefixing "The <guardrail> guardrail reported:" reframes the text as
+    third-party observation rather than an instruction, and truncation caps the
+    prompt-injection payload size.
+    """
+    reason = (reason or "").strip()
+    if len(reason) > _MAX_REASON_LENGTH:
+        reason = reason[:_MAX_REASON_LENGTH] + "…"
+    label = guardrail_name or "response"
+    return (
+        f'The {label} guardrail rejected the previous message with note: '
+        f'"{reason}". Rewrite the message to comply with the coffee shop policy.'
+    )
 
 
 def create_agent_subgraph(
@@ -120,8 +147,11 @@ def create_agent_subgraph(
         decision. On DENY (under the retry cap): removes the offending
         AIMessage from state, appends a corrective HumanMessage carrying the
         guardrail's `reason_for_llm`, and stamps rejection metadata on the
-        correction so the runner can surface it on the dashboard. On
-        ALLOW/FLAG or cap-exhausted: leaves state untouched.
+        correction so the runner can surface it on the dashboard. On DENY at
+        the retry cap: replaces the offending message with a canned fallback
+        AIMessage so the customer never sees rejected content, even when the
+        LLM cannot produce a compliant reply within budget. On ALLOW/FLAG:
+        leaves state untouched.
 
         Only text-only AIMessages are evaluated — messages that carry tool
         calls (i.e. private tool-use turns) are skipped because their content
@@ -147,10 +177,11 @@ def create_agent_subgraph(
         if not content.strip():
             return {}
 
+        rejected_message_id = getattr(last, "id", None)
         synthetic_call = {
             "name": RESPONSE_GUARDRAIL_TOOL_NAME,
             "args": {"content": content, "agent_id": agent_id},
-            "id": f"resp-{getattr(last, 'id', 'unknown')}",
+            "id": f"resp-{rejected_message_id or 'unknown'}",
         }
         decision = gateway.evaluate_call(
             synthetic_call, dict(state), thread_id=_thread_id_of(config),
@@ -159,38 +190,54 @@ def create_agent_subgraph(
         if decision.final_decision != Effect.DENY:
             return {}
 
-        prior_corrections = _corrections_since_last_user_turn(messages)
-        if prior_corrections >= MAX_RESPONSE_GUARDRAIL_RETRIES:
-            logger.warning(
-                "response guardrail retry cap (%d) reached for %s; publishing last attempt",
-                MAX_RESPONSE_GUARDRAIL_RETRIES, agent_id,
-            )
-            return {}
-
         rejecting_guardrail = ""
         for verdict in decision.verdicts:
             if verdict.effect == Effect.DENY:
                 rejecting_guardrail = verdict.guardrail_name
                 break
 
-        correction_text = (
+        prior_corrections = _corrections_since_last_user_turn(messages)
+        if prior_corrections >= MAX_RESPONSE_GUARDRAIL_RETRIES:
+            logger.warning(
+                "response guardrail retry cap (%d) reached for %s; publishing fallback",
+                MAX_RESPONSE_GUARDRAIL_RETRIES, agent_id,
+            )
+            fallback = AIMessage(
+                content=CAP_EXHAUSTED_FALLBACK,
+                name=agent_id,
+                additional_kwargs={
+                    CORRECTION_KWARG: True,
+                    REJECTED_CONTENT_KWARG: content,
+                    REJECTED_MESSAGE_ID_KWARG: rejected_message_id or "",
+                    REJECTION_REASON_KWARG: decision.deny_reason_for_llm,
+                    REJECTING_GUARDRAIL_KWARG: rejecting_guardrail,
+                    REJECTED_AGENT_KWARG: agent_id,
+                },
+            )
+            patch_cap: list = [fallback]
+            if rejected_message_id is not None:
+                patch_cap.insert(0, RemoveMessage(id=rejected_message_id))
+            return {"messages": patch_cap}
+
+        correction_text = _bounded_reason(
             decision.deny_reason_for_llm
-            or "Your last message violated a response guardrail. Try again."
+            or "Your last message violated a response guardrail. Try again.",
+            rejecting_guardrail,
         )
         correction = HumanMessage(
             content=correction_text,
             additional_kwargs={
                 CORRECTION_KWARG: True,
                 REJECTED_CONTENT_KWARG: content,
+                REJECTED_MESSAGE_ID_KWARG: rejected_message_id or "",
                 REJECTION_REASON_KWARG: correction_text,
                 REJECTING_GUARDRAIL_KWARG: rejecting_guardrail,
                 REJECTED_AGENT_KWARG: agent_id,
             },
         )
-        target_id = getattr(last, "id", None)
         patch: list = [correction]
-        if target_id is not None:
-            patch.insert(0, RemoveMessage(id=target_id))
+        if rejected_message_id is not None:
+            patch.insert(0, RemoveMessage(id=rejected_message_id))
         return {"messages": patch}
 
     def route_after_response_gateway(state: CoffeeShopState) -> str:

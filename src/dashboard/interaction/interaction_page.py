@@ -791,15 +791,6 @@ def _dispatch_event(
         take_tray_button.disabled = True
         tray_panel.clear()
 
-    elif event.event_type == EventType.TRAY_READY:
-        current_tray_order["id"] = event.content
-        take_tray_button.disabled = False
-
-    elif event.event_type == EventType.TRAY_TAKEN:
-        current_tray_order["id"] = None
-        take_tray_button.disabled = True
-        tray_panel.clear()
-
 
 def _log(entries: list[str], pane, html_line: str):
     ts = time.strftime("%H:%M:%S")

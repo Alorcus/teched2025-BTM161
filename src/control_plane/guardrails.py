@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Callable
@@ -8,6 +9,9 @@ from typing import Any, Callable
 from .types import Effect, GuardrailContext, Verdict
 
 logger = logging.getLogger("coffee_shop.control_plane.guardrails")
+
+MAX_JUDGE_MESSAGE_LENGTH = 8000
+MAX_JUDGE_REASON_LENGTH = 400
 
 
 @dataclass
@@ -89,6 +93,9 @@ class SoftGuardrail(Guardrail):
                 reason_for_llm="",
             )
 
+        if len(message) > MAX_JUDGE_MESSAGE_LENGTH:
+            message = message[:MAX_JUDGE_MESSAGE_LENGTH]
+
         variables = self._template_vars(context, message)
         system_prompt = _safe_format(self.judge_prompt, variables)
         user_prompt = _safe_format(self.user_template, variables)
@@ -109,25 +116,27 @@ class SoftGuardrail(Guardrail):
                 reason_for_llm="",
             )
 
-        decision, reason = _parse_judge_response(raw)
+        raw_truncated = raw[:MAX_JUDGE_MESSAGE_LENGTH]
+        decision, reason = _parse_judge_response(raw_truncated)
         if decision == "deny":
+            bounded_reason = (reason or "")[:MAX_JUDGE_REASON_LENGTH]
             reason_for_llm = (
-                reason
+                bounded_reason
                 or "Your message referenced items not available on our menu. "
                 "Only recommend items from the menu."
             )
             return Verdict(
-                effect=self.effect if self.effect != Effect.ALLOW else Effect.DENY,
+                effect=self.effect,
                 guardrail_name=self.name,
                 guardrail_type=self.type,
-                reason_internal=raw.strip(),
+                reason_internal=raw_truncated.strip(),
                 reason_for_llm=reason_for_llm,
             )
         return Verdict(
             effect=Effect.ALLOW,
             guardrail_name=self.name,
             guardrail_type=self.type,
-            reason_internal=raw.strip(),
+            reason_internal=raw_truncated.strip(),
             reason_for_llm="",
         )
 
@@ -192,49 +201,58 @@ def _parse_judge_response(raw: str) -> tuple[str, str]:
     """Extract (decision, reason) from a judge's raw text response.
 
     Accepts a JSON object anywhere in the text (LLMs often wrap output in prose
-    or code fences). Falls back to keyword sniffing when JSON is not present.
-    Unknown / ambiguous responses return ('allow', '') so a broken judge never
-    silently blocks conversations.
+    or code fences). Unknown / ambiguous responses return ('allow', '') so a
+    broken judge never silently blocks conversations — matching the fail-open
+    policy in `SoftGuardrail.eval`. No keyword sniffing: any recovery from
+    non-JSON output would be a footgun (any judge output containing the word
+    "deny" — even in a benign context — would otherwise trip a rejection with
+    the full raw output as the reason, feeding an unbounded prompt-injection
+    payload back into the agent).
     """
     if not raw:
         return "allow", ""
 
     match = _JSON_OBJECT_PATTERN.search(raw)
-    if match:
-        try:
-            parsed = json.loads(match.group(0))
-        except (json.JSONDecodeError, ValueError):
-            parsed = None
-        if isinstance(parsed, dict):
-            decision = str(parsed.get("decision", "")).lower().strip()
-            reason = str(parsed.get("reason", "")).strip()
-            if decision in ("allow", "deny"):
-                return decision, reason
-
-    lowered = raw.lower()
-    if "\"decision\": \"deny\"" in lowered or "decision: deny" in lowered:
-        return "deny", raw.strip()
-    if "deny" in lowered and "allow" not in lowered:
-        return "deny", raw.strip()
+    if not match:
+        return "allow", ""
+    try:
+        parsed = json.loads(match.group(0))
+    except (json.JSONDecodeError, ValueError):
+        return "allow", ""
+    if not isinstance(parsed, dict):
+        return "allow", ""
+    decision = str(parsed.get("decision", "")).lower().strip()
+    reason = str(parsed.get("reason", "")).strip()
+    if decision in ("allow", "deny"):
+        return decision, reason
     return "allow", ""
 
 
 _DEFAULT_LLM = None
+_DEFAULT_LLM_LOCK = threading.Lock()
 
 
 def _default_invoker(system_prompt: str, user_prompt: str) -> str:
     """Lazily construct a chat LLM from the project factory and invoke it.
 
-    Cached at module scope so we don't rebuild the client per call.
+    Cached at module scope so we don't rebuild the client per call. Double-
+    checked locking so two threads racing on first use don't both call
+    `create_chat_llm()`; the LangChain chat clients themselves are documented
+    as safe for concurrent `.invoke()`, so no per-call lock is needed.
     """
     global _DEFAULT_LLM
     if _DEFAULT_LLM is None:
-        from src.llm import create_chat_llm, normalize_content  # local import: avoid cycle at module import time
+        with _DEFAULT_LLM_LOCK:
+            if _DEFAULT_LLM is None:
+                from src.llm import create_chat_llm
 
-        _DEFAULT_LLM = (create_chat_llm(), normalize_content)
+                _DEFAULT_LLM = create_chat_llm()
 
-    llm, normalize = _DEFAULT_LLM
     from langchain_core.messages import HumanMessage, SystemMessage
+    from src.llm import normalize_content
 
-    response = llm.invoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)])
-    return normalize(getattr(response, "content", ""))
+    response = _DEFAULT_LLM.invoke([
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=user_prompt),
+    ])
+    return normalize_content(getattr(response, "content", ""))
