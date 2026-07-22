@@ -94,9 +94,20 @@ _MAX_REASON_LENGTH = 400
 def _sanitize_reason(reason: str) -> str:
     """Prepare a judge- or predicate-supplied reason for embedding in a prompt.
 
-    Truncates to `_MAX_REASON_LENGTH`, collapses newlines to spaces, and
-    replaces ASCII double quotes with single quotes so quoted-context framing
-    (e.g. `"..."`) cannot be closed early by an injected quote.
+    Applies the minimum neutralization needed so a jailbroken judge cannot
+    trivially break out of the quoted framing span:
+      * strips leading/trailing whitespace,
+      * collapses `\\n` to spaces so multiline injected prose can't visually
+        separate itself from the framing,
+      * replaces ASCII double quotes with single quotes so `"..."` framing
+        cannot be closed early by an injected `"`,
+      * truncates to `_MAX_REASON_LENGTH` characters.
+
+    Not stripped: other control chars (`\\r`, `\\t`, bidi overrides), smart
+    quotes, and backticks. A determined adversary can still degrade the
+    framing via those — but the size cap plus the "third-party observation"
+    prose framing still meaningfully lowers the authority the LLM assigns to
+    the injected text. Broadening this sanitizer is deferred as a follow-up.
     """
     reason = (reason or "").strip().replace("\n", " ").replace('"', "'")
     if len(reason) > _MAX_REASON_LENGTH:

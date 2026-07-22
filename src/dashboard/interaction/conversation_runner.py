@@ -509,11 +509,12 @@ class ConversationRunner:
                         )
                     )
             elif msg.content:
+                text = _extract_text(msg.content) or ""
                 self.event_bus.publish(
                     DashboardEvent(
                         event_type=EventType.AGENT_MESSAGE,
                         agent_name=agent_name,
-                        content=msg.content,
+                        content=text,
                     )
                 )
         elif isinstance(msg, ToolMessage):
