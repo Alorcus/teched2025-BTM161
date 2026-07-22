@@ -91,6 +91,19 @@ def _corrections_since_last_user_turn(messages) -> int:
 _MAX_REASON_LENGTH = 400
 
 
+def _sanitize_reason(reason: str) -> str:
+    """Prepare a judge- or predicate-supplied reason for embedding in a prompt.
+
+    Truncates to `_MAX_REASON_LENGTH`, collapses newlines to spaces, and
+    replaces ASCII double quotes with single quotes so quoted-context framing
+    (e.g. `"..."`) cannot be closed early by an injected quote.
+    """
+    reason = (reason or "").strip().replace("\n", " ").replace('"', "'")
+    if len(reason) > _MAX_REASON_LENGTH:
+        reason = reason[:_MAX_REASON_LENGTH] + "…"
+    return reason
+
+
 def _bounded_reason(reason: str, guardrail_name: str) -> str:
     """Neutralize and bound the judge's reason before it becomes an agent-facing
     HumanMessage. A jailbroken judge could otherwise embed instructions in the
@@ -100,13 +113,24 @@ def _bounded_reason(reason: str, guardrail_name: str) -> str:
     third-party observation rather than an instruction, and truncation caps the
     prompt-injection payload size.
     """
-    reason = (reason or "").strip()
-    if len(reason) > _MAX_REASON_LENGTH:
-        reason = reason[:_MAX_REASON_LENGTH] + "…"
+    safe = _sanitize_reason(reason)
     label = guardrail_name or "response"
     return (
         f'The {label} guardrail rejected the previous message with note: '
-        f'"{reason}". Rewrite the message to comply with the coffee shop policy.'
+        f'"{safe}". Rewrite the message to comply with the coffee shop policy.'
+    )
+
+
+def _bounded_tool_reason(reason: str, guardrail_name: str, tool_name: str) -> str:
+    """Same neutralization as `_bounded_reason` but framed for a tool-call
+    denial (the reason lands in a `ToolMessage` with `status="error"`).
+    """
+    safe = _sanitize_reason(reason)
+    label = guardrail_name or "response"
+    return (
+        f'The {label} guardrail rejected the tool call {tool_name!r} with '
+        f'note: "{safe}". Choose a different action that complies with the '
+        f'coffee shop policy.'
     )
 
 
@@ -197,6 +221,10 @@ def create_agent_subgraph(
                 break
 
         prior_corrections = _corrections_since_last_user_turn(messages)
+        raw_reason = _sanitize_reason(
+            decision.deny_reason_for_llm
+            or "Your last message violated a response guardrail."
+        )
         if prior_corrections >= MAX_RESPONSE_GUARDRAIL_RETRIES:
             logger.warning(
                 "response guardrail retry cap (%d) reached for %s; publishing fallback",
@@ -209,34 +237,30 @@ def create_agent_subgraph(
                     CORRECTION_KWARG: True,
                     REJECTED_CONTENT_KWARG: content,
                     REJECTED_MESSAGE_ID_KWARG: rejected_message_id or "",
-                    REJECTION_REASON_KWARG: decision.deny_reason_for_llm,
+                    REJECTION_REASON_KWARG: raw_reason,
                     REJECTING_GUARDRAIL_KWARG: rejecting_guardrail,
                     REJECTED_AGENT_KWARG: agent_id,
                 },
             )
             patch_cap: list = [fallback]
-            if rejected_message_id is not None:
+            if rejected_message_id:
                 patch_cap.insert(0, RemoveMessage(id=rejected_message_id))
             return {"messages": patch_cap}
 
-        correction_text = _bounded_reason(
-            decision.deny_reason_for_llm
-            or "Your last message violated a response guardrail. Try again.",
-            rejecting_guardrail,
-        )
+        correction_text = _bounded_reason(raw_reason, rejecting_guardrail)
         correction = HumanMessage(
             content=correction_text,
             additional_kwargs={
                 CORRECTION_KWARG: True,
                 REJECTED_CONTENT_KWARG: content,
                 REJECTED_MESSAGE_ID_KWARG: rejected_message_id or "",
-                REJECTION_REASON_KWARG: correction_text,
+                REJECTION_REASON_KWARG: raw_reason,
                 REJECTING_GUARDRAIL_KWARG: rejecting_guardrail,
                 REJECTED_AGENT_KWARG: agent_id,
             },
         )
         patch: list = [correction]
-        if rejected_message_id is not None:
+        if rejected_message_id:
             patch.insert(0, RemoveMessage(id=rejected_message_id))
         return {"messages": patch}
 
@@ -262,14 +286,23 @@ def create_agent_subgraph(
             return {}
 
         # Batch denied: one synthetic ToolMessage per tool_call_id.
-        sibling_reasons = [
-            d.deny_reason_for_llm for d in decisions if d.final_decision == Effect.DENY
-        ]
-        sibling_blurb = "; ".join(sibling_reasons)
+        deny_reasons: list[str] = []
+        for d in decisions:
+            if d.final_decision != Effect.DENY:
+                continue
+            denying = next(
+                (v.guardrail_name for v in d.verdicts if v.effect == Effect.DENY),
+                "response",
+            )
+            deny_reasons.append(
+                _bounded_tool_reason(d.deny_reason_for_llm, denying, d.tool_name)
+            )
+        sibling_blurb = "; ".join(deny_reasons)
         synth: list[ToolMessage] = []
+        deny_iter = iter(deny_reasons)
         for d in decisions:
             if d.final_decision == Effect.DENY:
-                content = d.deny_reason_for_llm or "Tool call denied by guardrail."
+                content = next(deny_iter, "Tool call denied by guardrail.")
             else:
                 content = (
                     f"Tool call {d.tool_name!r} was not executed because a sibling tool "

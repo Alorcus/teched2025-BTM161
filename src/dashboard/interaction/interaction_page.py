@@ -699,11 +699,22 @@ def _dispatch_event(
         )
         _replace_last_log(log_entries, conversation_log, rejected_html)
         if panel:
-            panel.add_message(
-                "rejected",
-                f"[REJECTED by {event.rejecting_guardrail or 'guardrail'}] "
-                f"{event.content}\nReason: {event.rejection_reason}",
-            )
+            if not panel.mark_last_ai_message_rejected(event.content):
+                # The message was never added as a normal AI entry
+                # (edge case: rejection surfaced before AGENT_MESSAGE
+                # dispatch reached the panel). Fall back to appending a
+                # standalone rejected entry so audit is still visible.
+                panel.add_message(
+                    "rejected",
+                    f"[REJECTED by {event.rejecting_guardrail or 'guardrail'}] "
+                    f"{event.content}\nReason: {event.rejection_reason}",
+                )
+            else:
+                panel.add_message(
+                    "rejected",
+                    f"↑ rejected by {event.rejecting_guardrail or 'guardrail'} — "
+                    f"{event.rejection_reason}",
+                )
 
     elif event.event_type == EventType.TOOL_CALL:
         if panel:

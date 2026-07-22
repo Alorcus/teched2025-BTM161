@@ -189,6 +189,24 @@ class AgentPanel(param.Parameterized):
         self.messages = msgs
         self._render_messages()
 
+    def mark_last_ai_message_rejected(self, rejected_content: str) -> bool:
+        """Rewrite the most recent `"ai"` role message whose content matches
+        `rejected_content` to a `"rejected_ai"` role, so the per-agent panel
+        visually invalidates the message alongside the conversation-log
+        strike-through. Returns True iff a match was found and rewritten.
+        """
+        msgs = list(self.messages)
+        for i in range(len(msgs) - 1, -1, -1):
+            entry = msgs[i]
+            if entry.get("role") == "ai" and entry.get("content") == rejected_content:
+                entry = dict(entry)
+                entry["role"] = "rejected_ai"
+                msgs[i] = entry
+                self.messages = msgs
+                self._render_messages()
+                return True
+        return False
+
     def add_tool_call(self, name: str, args: dict | None):
         ts = time.strftime("%H:%M:%S")
         args_str = ""
@@ -281,6 +299,8 @@ class AgentPanel(param.Parameterized):
             ts = msg.get("ts", "")
             if role == "ai":
                 prefix = f'<span style="color:{self.color};font-weight:bold;">AI:</span>'
+            elif role == "rejected_ai":
+                prefix = f'<span style="color:{self.color};font-weight:bold;text-decoration:line-through;opacity:0.5;">AI:</span>'
             elif role == "user":
                 prefix = '<span style="color:#2E7D32;font-weight:bold;">User:</span>'
             elif role == "tool":
@@ -300,6 +320,8 @@ class AgentPanel(param.Parameterized):
                 body_style = "color:#555;font-style:italic;"
             elif role == "rejected":
                 body_style = "color:#B71C1C;font-weight:600;"
+            elif role == "rejected_ai":
+                body_style = "text-decoration:line-through;opacity:0.55;"
             tool_name = msg.get("tool_name") or ""
             suffix_html = ""
             if role == "thought" and tool_name:

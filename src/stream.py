@@ -64,7 +64,12 @@ def extract_messages(stream) -> Iterator[StreamMessage]:
     def _make_stream_message(message: BaseMessage) -> StreamMessage | None:
         content = getattr(message, "content", "")
         name = getattr(message, "name", "unknown")
-        msg_id = f"{content}_{name}"
+        mid = getattr(message, "id", "") or ""
+        # Include the message id in the dedup key when available so distinct
+        # AIMessages that happen to carry identical content (e.g. two "Sure!"
+        # replies, one rejected and one valid) both surface. Fall back to
+        # content-only for messages that arrive without an id.
+        msg_id = f"{mid}|{content}_{name}" if mid else f"{content}_{name}"
         if msg_id in seen:
             return None
         seen.add(msg_id)

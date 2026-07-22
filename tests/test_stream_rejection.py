@@ -79,16 +79,44 @@ class TestExtractMessagesRejection(unittest.TestCase):
         self.assertFalse(by_content["Try our hazelnut latte!"].is_agent_reply)
         self.assertTrue(by_content["Would you like a latte?"].is_agent_reply)
 
+    def test_first_rejected_second_identical_content_still_delivered(self):
+        """Regression: when the FIRST of two identical-content agent messages
+        is rejected and the SECOND is a valid retry with the same text (or a
+        distinct valid message with coincidentally identical text), the second
+        must not be silently dropped by the extractor's dedup. Dedup keys must
+        include the message id so distinct AIMessages survive."""
+        from src.control_plane.subgraph import REJECTED_MESSAGE_ID_KWARG
+
+        first = AIMessage(content="How about a latte?", name="order_agent", id="ai-1")
+        correction = HumanMessage(
+            content="policy",
+            additional_kwargs={
+                CORRECTION_KWARG: True,
+                REJECTED_MESSAGE_ID_KWARG: "ai-1",
+                REJECTED_CONTENT_KWARG: "How about a latte?",
+            },
+        )
+        second = AIMessage(content="How about a latte?", name="order_agent", id="ai-2")
+        stream = _fake_stream([
+            ("order_agent", {"llm": {"messages": [first]}}),
+            ("order_agent", {"response_gateway": {"messages": [correction]}}),
+            ("order_agent", {"llm": {"messages": [second]}}),
+        ])
+        results = list(extract_messages(stream))
+        self.assertEqual(len(results), 2)
+        by_id = {getattr(r.message, "id", None): r for r in results}
+        self.assertFalse(by_id["ai-1"].is_agent_reply)
+        self.assertTrue(by_id["ai-2"].is_agent_reply)
+
     def test_id_based_pairing_survives_duplicate_content(self):
         """When two agents produce identical short text ('Sure!') and only one
-        is rejected, id-based pairing must downgrade the correct message.
+        is rejected, id-based pairing must downgrade the correct message only.
         The correction stamps REJECTED_MESSAGE_ID_KWARG so the extractor can
         match on id rather than falling back to content."""
         from src.control_plane.subgraph import REJECTED_MESSAGE_ID_KWARG
 
         first_sure = AIMessage(content="Sure!", name="order_agent", id="ai-first")
         second_sure = AIMessage(content="Sure!", name="order_agent", id="ai-second")
-        # A correction that identifies second_sure by id.
         correction = HumanMessage(
             content="policy violation",
             additional_kwargs={
@@ -97,20 +125,19 @@ class TestExtractMessagesRejection(unittest.TestCase):
                 REJECTED_CONTENT_KWARG: "Sure!",
             },
         )
-        # Note: the second AIMessage will not add a new StreamMessage because
-        # extract_messages dedupes by (content, name). So the pending buffer
-        # remains the first "Sure!" — id-match against "ai-second" must NOT
-        # downgrade it.
         stream = _fake_stream([
             ("order_agent", {"llm": {"messages": [first_sure]}}),
             ("order_agent", {"llm": {"messages": [second_sure]}}),
             ("order_agent", {"response_gateway": {"messages": [correction]}}),
         ])
         results = list(extract_messages(stream))
-        # The first "Sure!" must remain a valid agent reply — id mismatch
-        # prevents the correction from downgrading a different message.
-        self.assertEqual(len(results), 1)
-        self.assertTrue(results[0].is_agent_reply)
+        # Both distinct AIMessages survive dedup (id-based key), and only
+        # ai-second is downgraded — id mismatch prevents the correction from
+        # touching ai-first.
+        self.assertEqual(len(results), 2)
+        by_id = {getattr(r.message, "id", None): r for r in results}
+        self.assertTrue(by_id["ai-first"].is_agent_reply)
+        self.assertFalse(by_id["ai-second"].is_agent_reply)
 
     def test_last_agent_reply_semantics_customer_never_sees_rejected(self):
         """Simulates the ConversationEngine.send_message behavior: keep the
