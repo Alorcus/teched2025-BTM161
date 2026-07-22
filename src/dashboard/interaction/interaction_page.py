@@ -142,6 +142,23 @@ def create_observatory_dashboard(setup_name: str):
     )
     log_entries: list[str] = []
 
+    customer_context_log = pn.pane.HTML(
+        CUSTOMER_CONTEXT_EMPTY_HTML,
+        sizing_mode="stretch_width",
+        styles={
+            "overflow-y": "auto",
+            "border": "1px solid #D7CCC8",
+            "border-radius": "6px",
+            "padding": "6px 8px",
+            "max-height": "220px",
+            "min-height": "120px",
+        },
+    )
+    # Mutable box so nested closures (poll_events, initialize_runtime, on_run)
+    # can reset the "last rendered history length" without a nonlocal
+    # declaration in every one.
+    _customer_context_len: list[int] = [0]
+
     def initialize_runtime(selected_setup: str):
         nonlocal shop, event_bus, runner, agent_registry, agent_panels
         if not selected_setup:
@@ -180,6 +197,8 @@ def create_observatory_dashboard(setup_name: str):
         conversation_log.object = (
             '<div style="font-size:12px;color:#999;">No conversation yet.</div>'
         )
+        customer_context_log.object = CUSTOMER_CONTEXT_EMPTY_HTML
+        _customer_context_len[0] = 0
         status_indicator.value = False
         export_button.disabled = True
         export_status.object = ""
@@ -335,6 +354,8 @@ def create_observatory_dashboard(setup_name: str):
             p.reset()
         log_entries.clear()
         conversation_log.object = ""
+        customer_context_log.object = CUSTOMER_CONTEXT_EMPTY_HTML
+        _customer_context_len[0] = 0
         status_indicator.value = True
         runner.start(
             scenario_index=scenario_select.value, custom_prompt=prompt_textarea.value
@@ -362,6 +383,17 @@ def create_observatory_dashboard(setup_name: str):
             status_indicator.value = False
         stock_panel.refresh()
         coffee_machine_panel.update_progress()
+
+        # The Customer Context pane is a strict mirror of CustomerAgent.history
+        # rather than an event-log consumer: history entries are written from
+        # multiple code paths (respond_to, inject_experience, get_initial_message),
+        # and re-deriving them from EventBus events would drift. Snapshot and
+        # re-render whenever the list grew.
+        if shop is not None and shop.customer_agent is not None:
+            history = shop.customer_agent.history
+            if len(history) != _customer_context_len[0]:
+                customer_context_log.object = _render_customer_context(history)
+                _customer_context_len[0] = len(history)
 
         if _export_done_flag:
             msg = _export_done_flag.pop(0)
@@ -436,6 +468,16 @@ def create_observatory_dashboard(setup_name: str):
             margin=(10, 0, 8, 0),
         ),
         conversation_log,
+        pn.pane.HTML(
+            '<label style="font-size:14px;font-weight:600;">Customer Context</label>'
+            '<div style="font-size:11px;color:#666;margin-top:2px;">'
+            "Exact contents of CustomerAgent.history — what the customer LLM "
+            "sees on its next turn."
+            "</div>",
+            sizing_mode="stretch_width",
+            margin=(14, 0, 8, 0),
+        ),
+        customer_context_log,
         sizing_mode="stretch_width",
     )
 
@@ -839,3 +881,51 @@ def _truncate(text: str, max_len: int = 150) -> str:
         short = html_mod.escape(text[:max_len]) + "..."
         return f'<span title="{full_escaped}">{short}</span>'
     return full_escaped
+
+
+CUSTOMER_CONTEXT_EMPTY_HTML = (
+    '<div style="font-size:12px;color:#999;">'
+    "No customer context yet."
+    "</div>"
+)
+
+
+def _render_customer_context(history: list[tuple[str, str]]) -> str:
+    """Render CustomerAgent.history verbatim as HTML rows.
+
+    This pane is a strict mirror of what the CustomerAgent sees on its next
+    turn: customer turns, staff turns (agent-agnostic — the customer does not
+    distinguish which swarm agent replied), and inject_experience() notes.
+    No truncation, no reordering, no filtering.
+    """
+    if not history:
+        return CUSTOMER_CONTEXT_EMPTY_HTML
+
+    rows = []
+    for role, content in history:
+        escaped = html_mod.escape(content).replace("\n", "<br>")
+        if role == "customer":
+            rows.append(
+                '<div style="padding:3px 0;border-bottom:1px solid #f0f0f0;font-size:12px;">'
+                '<span style="color:#424242;"><b>Customer</b></span>: '
+                f"{escaped}</div>"
+            )
+        elif role == "agent":
+            rows.append(
+                '<div style="padding:3px 0;border-bottom:1px solid #f0f0f0;font-size:12px;">'
+                '<span style="color:#795548;"><b>Staff</b></span>: '
+                f"{escaped}</div>"
+            )
+        elif role == "system_note":
+            rows.append(
+                '<div style="padding:3px 0;border-bottom:1px solid #f0f0f0;font-size:12px;'
+                'font-style:italic;color:#6D4C41;background:#EFEBE9;">'
+                "<b>[Experience]</b> "
+                f"{escaped}</div>"
+            )
+        else:
+            rows.append(
+                '<div style="padding:3px 0;border-bottom:1px solid #f0f0f0;font-size:12px;color:#999;">'
+                f"<b>{html_mod.escape(role)}</b>: {escaped}</div>"
+            )
+    return "\n".join(rows)
