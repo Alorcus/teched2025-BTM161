@@ -291,11 +291,15 @@ class AgentPanel(param.Parameterized):
                 prefix = '<span style="color:#666;">→</span>'
             elif role == "thought":
                 prefix = '<span style="color:#6b6478;">🧠</span>'
+            elif role == "rejected":
+                prefix = '<span style="background:#F44336;color:white;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:bold;">REJECTED</span>'
             else:
                 prefix = f'<span style="font-weight:bold;">{html_mod.escape(role)}:</span>'
             body_style = ""
             if role == "thought":
                 body_style = "color:#555;font-style:italic;"
+            elif role == "rejected":
+                body_style = "color:#B71C1C;font-weight:600;"
             tool_name = msg.get("tool_name") or ""
             suffix_html = ""
             if role == "thought" and tool_name:

@@ -1,11 +1,20 @@
 """Per-agent guarded subgraph that replaces `create_react_agent`.
 
 Topology:
-    START → llm → (cond)
-                  ├─ no tool_calls  → END
-                  └─ has tool_calls → gateway → (cond)
-                                                ├─ batch-denied → llm (loop, synthetic ToolMessages for every tool_call_id)
-                                                └─ batch-allowed → tools → llm (loop)
+    START → llm → response_gateway → (cond)
+                                     ├─ correction issued → llm (loop with corrective HumanMessage)
+                                     └─ passed          → (cond)
+                                                          ├─ no tool_calls   → END
+                                                          └─ has tool_calls  → gateway → (cond)
+                                                                                         ├─ batch-denied → llm (loop, synthetic ToolMessages for every tool_call_id)
+                                                                                         └─ batch-allowed → tools → llm (loop)
+
+The response_gateway inspects the LLM's assistant message text (before any
+tool_call routing) against response-scoped guardrails — the ones that declare
+themselves for the synthetic `assistant_message` "tool". A DENY verdict removes
+the offending AIMessage from state and appends a corrective HumanMessage
+carrying the guardrail's reason_for_llm, so the LLM can revise. A per-turn
+retry cap prevents infinite loops.
 
 Batch-verdict policy (all-or-nothing per LLM turn): per-call verdicts are still
 evaluated and logged individually, but if ANY call in the batch is denied the
@@ -16,19 +25,27 @@ proposed call is allowed (or flagged) does the batch reach `tools`.
 """
 import logging
 
-from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage, SystemMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
 
 from src.agents.context_isolation import create_context_isolation_hook
 from src.agents.shared_components import CoffeeShopState
-from src.llm import bind_tools_sequential
+from src.llm import bind_tools_sequential, normalize_content
 
 from .gateway import Gateway
 from .types import Effect
 
 logger = logging.getLogger("coffee_shop.control_plane.subgraph")
+
+RESPONSE_GUARDRAIL_TOOL_NAME = "assistant_message"
+CORRECTION_KWARG = "response_guardrail_correction"
+REJECTED_CONTENT_KWARG = "response_guardrail_rejected_content"
+REJECTION_REASON_KWARG = "response_guardrail_rejection_reason"
+REJECTING_GUARDRAIL_KWARG = "response_guardrail_rejecting_guardrail"
+REJECTED_AGENT_KWARG = "response_guardrail_rejected_agent"
+MAX_RESPONSE_GUARDRAIL_RETRIES = 2
 
 
 def _last_ai_with_tool_calls(messages) -> AIMessage | None:
@@ -42,6 +59,28 @@ def _thread_id_of(config: RunnableConfig | None) -> str | None:
     if not config:
         return None
     return (config.get("configurable") or {}).get("thread_id")
+
+
+def _is_correction_message(msg) -> bool:
+    return (
+        isinstance(msg, HumanMessage)
+        and (msg.additional_kwargs or {}).get(CORRECTION_KWARG) is True
+    )
+
+
+def _corrections_since_last_user_turn(messages) -> int:
+    """Count corrective HumanMessages appended after the most recent genuine user
+    HumanMessage. This is the retry-budget counter — a new user turn implicitly
+    resets it to zero because we only walk the tail up to the last non-correction
+    HumanMessage.
+    """
+    count = 0
+    for msg in reversed(messages):
+        if isinstance(msg, HumanMessage) and not _is_correction_message(msg):
+            break
+        if _is_correction_message(msg):
+            count += 1
+    return count
 
 
 def create_agent_subgraph(
@@ -71,6 +110,94 @@ def create_agent_subgraph(
         if isinstance(last, AIMessage) and getattr(last, "tool_calls", None):
             return "gateway"
         return END
+
+    def response_gateway_node(state: CoffeeShopState, config: RunnableConfig):
+        """Evaluate the outgoing AIMessage against response-scoped guardrails.
+
+        Synthesizes a pseudo tool call `assistant_message` whose args carry the
+        message content. Reuses `Gateway.evaluate_call` so the verdict, JSONL
+        log record, and OCEL projection are identical to any other guardrail
+        decision. On DENY (under the retry cap): removes the offending
+        AIMessage from state, appends a corrective HumanMessage carrying the
+        guardrail's `reason_for_llm`, and stamps rejection metadata on the
+        correction so the runner can surface it on the dashboard. On
+        ALLOW/FLAG or cap-exhausted: leaves state untouched.
+
+        Only text-only AIMessages are evaluated — messages that carry tool
+        calls (i.e. private tool-use turns) are skipped because their content
+        never reaches the customer.
+        """
+        messages = state.get("messages", [])
+        if not messages:
+            return {}
+        last = messages[-1]
+        if not isinstance(last, AIMessage):
+            return {}
+        if getattr(last, "tool_calls", None):
+            return {}
+
+        applicable = [
+            gr for gr in gateway.guardrails
+            if gr.applies_to(RESPONSE_GUARDRAIL_TOOL_NAME)
+        ]
+        if not applicable:
+            return {}
+
+        content = normalize_content(last.content)
+        if not content.strip():
+            return {}
+
+        synthetic_call = {
+            "name": RESPONSE_GUARDRAIL_TOOL_NAME,
+            "args": {"content": content, "agent_id": agent_id},
+            "id": f"resp-{getattr(last, 'id', 'unknown')}",
+        }
+        decision = gateway.evaluate_call(
+            synthetic_call, dict(state), thread_id=_thread_id_of(config),
+        )
+
+        if decision.final_decision != Effect.DENY:
+            return {}
+
+        prior_corrections = _corrections_since_last_user_turn(messages)
+        if prior_corrections >= MAX_RESPONSE_GUARDRAIL_RETRIES:
+            logger.warning(
+                "response guardrail retry cap (%d) reached for %s; publishing last attempt",
+                MAX_RESPONSE_GUARDRAIL_RETRIES, agent_id,
+            )
+            return {}
+
+        rejecting_guardrail = ""
+        for verdict in decision.verdicts:
+            if verdict.effect == Effect.DENY:
+                rejecting_guardrail = verdict.guardrail_name
+                break
+
+        correction_text = (
+            decision.deny_reason_for_llm
+            or "Your last message violated a response guardrail. Try again."
+        )
+        correction = HumanMessage(
+            content=correction_text,
+            additional_kwargs={
+                CORRECTION_KWARG: True,
+                REJECTED_CONTENT_KWARG: content,
+                REJECTION_REASON_KWARG: correction_text,
+                REJECTING_GUARDRAIL_KWARG: rejecting_guardrail,
+                REJECTED_AGENT_KWARG: agent_id,
+            },
+        )
+        target_id = getattr(last, "id", None)
+        patch: list = [correction]
+        if target_id is not None:
+            patch.insert(0, RemoveMessage(id=target_id))
+        return {"messages": patch}
+
+    def route_after_response_gateway(state: CoffeeShopState) -> str:
+        last = state["messages"][-1] if state.get("messages") else None
+        if _is_correction_message(last):
+            return "llm"
+        return route_after_llm(state)
 
     def gateway_node(state: CoffeeShopState, config: RunnableConfig):
         ai = _last_ai_with_tool_calls(state.get("messages", []))
@@ -124,10 +251,16 @@ def create_agent_subgraph(
 
     g = StateGraph(CoffeeShopState)
     g.add_node("llm", llm_node)
+    g.add_node("response_gateway", response_gateway_node)
     g.add_node("gateway", gateway_node)
     g.add_node("tools", tool_node)
     g.add_edge(START, "llm")
-    g.add_conditional_edges("llm", route_after_llm, {"gateway": "gateway", END: END})
+    g.add_edge("llm", "response_gateway")
+    g.add_conditional_edges(
+        "response_gateway",
+        route_after_response_gateway,
+        {"llm": "llm", "gateway": "gateway", END: END},
+    )
     g.add_conditional_edges("gateway", route_after_gateway, {"tools": "tools", "llm": "llm", END: END})
     g.add_edge("tools", "llm")
     return g.compile()

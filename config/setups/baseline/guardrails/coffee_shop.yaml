@@ -92,3 +92,56 @@ guardrails:
     predicate_args:
       allowed: [completed]
       effect: deny
+
+  - id: off_menu_recommendation
+    type: soft
+    version: v1
+    tools:
+      - assistant_message
+    effect: deny
+    description: >-
+      LLM-as-judge that rejects any outgoing assistant message which
+      recommends, offers, or otherwise proposes an item that is not on the
+      coffee shop menu. Menu adherence is checked against the current MENU
+      keys plus ALLOWED_EXTRAS (both injected into the judge prompt).
+    judge_prompt: |
+      You are a strict menu-adherence auditor for a coffee shop assistant.
+
+      MENU (only these items are available):
+      {menu}
+
+      ALLOWED EXTRAS / MODIFIERS:
+      {allowed_extras}
+
+      Your task: read the assistant's OUTGOING message to the customer and
+      decide whether it recommends, offers, suggests, promises, or otherwise
+      proposes any drink, food, or menu item that is NOT on the MENU (with
+      optional ALLOWED EXTRAS as modifiers).
+
+      Rules:
+      - The assistant MAY talk about menu items freely.
+      - The assistant MAY politely decline items that are not on the menu
+        (e.g. "we do not serve mocha"). Declining an off-menu item is not
+        itself an off-menu recommendation.
+      - The assistant MUST NOT invent, hallucinate, or upsell items that
+        are not on the MENU. Examples of violations:
+          * "How about a hazelnut latte?" (hazelnut is not an allowed extra)
+          * "We recommend our caramel macchiato." (macchiato is not on the menu)
+          * "You might enjoy a matcha frappé." (matcha, frappé — off menu)
+      - Combinations of MENU items and ALLOWED EXTRAS are acceptable
+        (e.g. "latte with oat milk", "americano with an extra shot").
+
+      Respond with a strict JSON object and NOTHING ELSE:
+        {{"decision": "allow", "reason": ""}}
+      or
+        {{"decision": "deny", "reason": "<short reason mentioning the off-menu item(s)>"}}
+
+      The reason will be shown to the assistant so it can revise. Keep it
+      short (one sentence) and actionable.
+    user_template: |
+      Assistant message to audit:
+      -----
+      {message}
+      -----
+    state_dependencies:
+      - conversation

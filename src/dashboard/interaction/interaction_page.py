@@ -686,6 +686,25 @@ def _dispatch_event(
             f"<b>{event.agent_name}</b></span>: {_truncate(event.content)}",
         )
 
+    elif event.event_type == EventType.AGENT_MESSAGE_REJECTED:
+        color = panel.color if panel else "#333"
+        rejected_html = (
+            f'<span style="color:{color};text-decoration:line-through;opacity:0.6;">'
+            f"<b>{event.agent_name}</b>: {_truncate(event.content)}</span>"
+            f' <span style="background:#F44336;color:white;padding:1px 6px;'
+            f'border-radius:4px;font-size:10px;margin-left:4px;">REJECTED</span>'
+            f' <span style="color:#B71C1C;font-size:11px;">'
+            f"Guardrail: {html_mod.escape(event.rejecting_guardrail or 'unknown')} — "
+            f"{_truncate(event.rejection_reason or '', 200)}</span>"
+        )
+        _replace_last_log(log_entries, conversation_log, rejected_html)
+        if panel:
+            panel.add_message(
+                "rejected",
+                f"[REJECTED by {event.rejecting_guardrail or 'guardrail'}] "
+                f"{event.content}\nReason: {event.rejection_reason}",
+            )
+
     elif event.event_type == EventType.TOOL_CALL:
         if panel:
             panel.set_status("executing_tool")
@@ -788,6 +807,26 @@ def _log(entries: list[str], pane, html_line: str):
         f'<div style="padding:2px 0;border-bottom:1px solid #f0f0f0;font-size:12px;">'
         f'<span style="color:#999;margin-right:6px;">{ts}</span>{html_line}</div>'
     )
+    pane.object = "\n".join(entries[-50:])
+
+
+def _replace_last_log(entries: list[str], pane, html_line: str):
+    """Rewrite the most recent conversation-log entry in place.
+
+    Used when a guardrail rejects an assistant message the runner has already
+    logged — we overwrite the AGENT_MESSAGE line with a struck-through REJECTED
+    version so the customer-facing log never appears to have shown the
+    offending text as valid output.
+    """
+    ts = time.strftime("%H:%M:%S")
+    replacement = (
+        f'<div style="padding:2px 0;border-bottom:1px solid #f0f0f0;font-size:12px;">'
+        f'<span style="color:#999;margin-right:6px;">{ts}</span>{html_line}</div>'
+    )
+    if entries:
+        entries[-1] = replacement
+    else:
+        entries.append(replacement)
     pane.object = "\n".join(entries[-50:])
 
 

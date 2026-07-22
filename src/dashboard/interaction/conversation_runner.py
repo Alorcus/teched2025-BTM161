@@ -4,13 +4,20 @@ import uuid
 import logging
 
 import mlflow
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from src.coffee_shop import CoffeeShop
 from src.agents import CUSTOMER_SCENARIOS
 from src.agents.tray import get_tray, clear_tray
 from src.agents.order_store import load_order, set_order_status
 from src.agents.shared_components import OrderStatus
+from src.control_plane.subgraph import (
+    CORRECTION_KWARG,
+    REJECTED_AGENT_KWARG,
+    REJECTED_CONTENT_KWARG,
+    REJECTING_GUARDRAIL_KWARG,
+    REJECTION_REASON_KWARG,
+)
 from src.conversation import _tag_trace
 from src.stream import SWARM_AGENTS
 from .event_bus import EventBus, DashboardEvent, EventType
@@ -406,6 +413,15 @@ class ConversationRunner:
                                 msg_agent = self._active_agent
                             self._publish_message(msg, msg_agent)
 
+                            if isinstance(msg, HumanMessage) and (
+                                (msg.additional_kwargs or {}).get(CORRECTION_KWARG) is True
+                            ):
+                                rejected_content = (msg.additional_kwargs or {}).get(
+                                    REJECTED_CONTENT_KWARG, ""
+                                )
+                                if last_agent_message == rejected_content:
+                                    last_agent_message = None
+
                             if (
                                 isinstance(msg, AIMessage)
                                 and msg.content
@@ -443,6 +459,20 @@ class ConversationRunner:
         return last_agent_message
 
     def _publish_message(self, msg, agent_name: str) -> None:
+        if isinstance(msg, HumanMessage):
+            kwargs = msg.additional_kwargs or {}
+            if kwargs.get(CORRECTION_KWARG) is True:
+                rejected_agent = kwargs.get(REJECTED_AGENT_KWARG) or agent_name
+                self.event_bus.publish(
+                    DashboardEvent(
+                        event_type=EventType.AGENT_MESSAGE_REJECTED,
+                        agent_name=rejected_agent,
+                        content=kwargs.get(REJECTED_CONTENT_KWARG, ""),
+                        rejection_reason=kwargs.get(REJECTION_REASON_KWARG, ""),
+                        rejecting_guardrail=kwargs.get(REJECTING_GUARDRAIL_KWARG, ""),
+                    )
+                )
+            return
         if isinstance(msg, AIMessage):
             if msg.tool_calls:
                 thought_text = _extract_text(msg.content).strip()
