@@ -8,7 +8,12 @@ import threading
 
 from src.coffee_shop import CoffeeShop
 from src.config import CoffeeShopConfig
-from src.agents import CUSTOMER_SCENARIOS, CUSTOMER_SCENARIO_LABELS, build_default_prompt, init_db
+from src.agents import (
+    CUSTOMER_SCENARIOS,
+    CUSTOMER_SCENARIO_LABELS,
+    build_default_prompt,
+    init_db,
+)
 from src.agents.barista_agent import start_coffee_machine, stop_coffee_machine
 from ..nav import header_nav
 from .event_bus import EventBus, EventType, DashboardEvent
@@ -17,7 +22,6 @@ from .conversation_runner import ConversationRunner
 from .stock_panel import StockPanel
 from .coffee_machine_panel import CoffeeMachinePanel
 from .tray_panel import TrayPanel
-from src.trace_processing.trace_processor import TraceProcessor
 from src.setups import list_setups
 
 logger = logging.getLogger("coffee_shop.dashboard")
@@ -131,14 +135,13 @@ def create_observatory_dashboard(setup_name: str):
     conversation_log = pn.pane.HTML(
         '<div style="font-size:12px;color:#999;">No conversation yet.</div>',
         sizing_mode="stretch_width",
-        styles={
-            "overflow-y": "auto",
-            "border": "1px solid #D7CCC8",
-            "border-radius": "6px",
-            "padding": "6px 8px",
-            "flex": "1 1 0",
-            "min-height": "150px",
-        },
+        # styles={
+        #     "border": "1px solid #D7CCC8",
+        #     "border-radius": "6px",
+        #     "padding": "6px 8px",
+        #     "flex": "1 1 0",
+        #     "min-height": "150px",
+        # },
     )
     log_entries: list[str] = []
 
@@ -336,14 +339,13 @@ def create_observatory_dashboard(setup_name: str):
     conversation_log = pn.pane.HTML(
         '<div style="font-size:12px;color:#999;">No conversation yet.</div>',
         sizing_mode="stretch_width",
-        styles={
-            "overflow-y": "auto",
-            "border": "1px solid #D7CCC8",
-            "border-radius": "6px",
-            "padding": "6px 8px",
-            "flex": "1 1 0",
-            "min-height": "150px",
-        },
+        # styles={
+        #     "border": "1px solid #D7CCC8",
+        #     "border-radius": "6px",
+        #     "padding": "6px 8px",
+        #     "flex": "1 1 0",
+        #     "min-height": "150px",
+        # },
     )
     log_entries: list[str] = []
 

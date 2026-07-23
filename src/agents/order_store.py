@@ -322,6 +322,14 @@ def get_alternatives_from_db(item_name: str) -> list[dict]:
         return [{"name": a.name, "price": a.price, "stock": a.stock} for a in alts]
 
 
+def is_item_in_order(order_id: str, item_name: str) -> bool:
+    """Check if a specific item is part of an order."""
+    order = load_order(order_id)
+    if not order:
+        return False
+    return any(item.name.lower() == item_name.lower() for item in order.items)
+
+
 # ---------------------------------------------------------------------------
 # Shared LangChain tool — all agents get this
 # ---------------------------------------------------------------------------

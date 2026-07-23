@@ -16,12 +16,12 @@ from .eventlog_helpers import (
     event_case_map,
     flat_event_table,
 )
-from .styling_helpers import COLOR_SCHEME, AGENT_COLORS, section_header, subsection_header
+from .styling_helpers import COLOR_SCHEME, AGENT_COLORS, subsection_header
 
 
 logger = logging.getLogger(__name__)
 
-_CASE_DFG_UNAVAILABLE = "Case-centric DFG unavailable."
+_CASE_DFG_UNAVAILABLE = "Conversation DFG unavailable."
 
 # Graph switcher: coffee-brown system from the dashboard palette
 _GRAPH_SWITCH_STYLESHEET = """
@@ -131,7 +131,7 @@ class VisualizationSection:
         return self._pane
 
     def _build(self) -> pn.Column:
-        column = section_header("Process Visualization")
+        column = pn.Column(sizing_mode="stretch_width")
         column.append(self._visualization_tabs())
         return column
 
@@ -229,10 +229,10 @@ class VisualizationSection:
             subset = df.filter(pl.col("case_feedback_class") == cls)
             label = f"{cls.title()} feedback" if cls != "unrated" else "Unrated"
             if subset.is_empty():
-                panels[label] = pn.pane.Alert(f"No {cls} cases.", alert_type="info")
+                panels[label] = pn.pane.Alert(f"No {cls} conversations.", alert_type="info")
                 continue
             svg = self._svg_from_df(subset, out_dir / f"{export_name}-case-dfg-{cls}.svg")
-            content = _wrap_svg(svg) if svg else pn.pane.Alert(f"DFG for {cls} cases unavailable.", alert_type="info")
+            content = _wrap_svg(svg) if svg else pn.pane.Alert(f"DFG for {cls} conversations unavailable.", alert_type="info")
             panels[label] = content
 
         return _button_switcher(
@@ -278,7 +278,7 @@ class VisualizationSection:
                 # Graph panels switched via primary buttons (Apply-filters
                 # style) instead of tabs; Event → Object Types is hidden.
                 panels = {
-                    "Case-Centric DFG": self._case_dfg_panel(export_name),
+                    "Conversation DFG": self._case_dfg_panel(export_name),
                     "Object-Centric DFG": _wrap_svg(ocdfg_svg),
                     "Object-Centric PN": _wrap_svg(ocpn_svg),
                 }

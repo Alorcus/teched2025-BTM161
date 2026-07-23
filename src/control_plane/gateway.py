@@ -51,6 +51,10 @@ class Gateway:
         tool_args = dict(tool_call.get("args", {}))
         tool_call_id = tool_call.get("id", "")
 
+        logger.debug(
+            f"Evaluating tool call: {tool_name} with args {tool_args} and id {tool_call_id}"
+        )
+
         context = GuardrailContext(
             agent_id=self.agent_id,
             tool_name=tool_name,
@@ -59,8 +63,16 @@ class Gateway:
             allowed_handovers=list(self.allowed_handovers),
         )
 
-        applicable = [guardrail for guardrail in self.guardrails if guardrail.applies_to(tool_name)]
+        applicable = [
+            guardrail
+            for guardrail in self.guardrails
+            if guardrail.applies_to(tool_name)
+        ]
         applicable.sort(key=lambda g: 0 if g.type == "hard" else 1)
+
+        logger.debug(
+            f"Applicable guardrails for {tool_name}: {[g.name for g in applicable]}"
+        )
 
         verdicts: list[Verdict] = []
         verdict_versions: list[str] = []
@@ -73,10 +85,15 @@ class Gateway:
             if verdict.effect == Effect.DENY and final != Effect.DENY:
                 final = Effect.DENY
                 deny_reason = verdict.reason_for_llm or verdict.reason_internal
+                logger.debug(f"Tool call denied by guardrail: {guardrail.name}")
                 break
             if verdict.effect == Effect.FLAG and final == Effect.ALLOW:
                 final = Effect.FLAG  # observability only; doesn't block
+                logger.debug(f"Tool call flagged by guardrail: {guardrail.name}")
 
+        logger.debug(
+            f"Final decision for tool call {tool_name}: {final.value}, reason: {deny_reason}"
+        )
         decision = CallDecision(
             tool_call_id=tool_call_id,
             tool_name=tool_name,
@@ -94,24 +111,26 @@ class Gateway:
         thread_id: str | None,
         verdict_versions: list[str],
     ) -> None:
-        self.log_sink.append({
-            "event_type": "gateway_decision",
-            "snapshot_id": self.snapshot_id,
-            "agent_id": self.agent_id,
-            "thread_id": thread_id,
-            "tool_name": decision.tool_name,
-            "tool_call_id": decision.tool_call_id,
-            "tool_args": decision.tool_args,
-            "final_decision": decision.final_decision.value,
-            "verdicts": [
-                {
-                    "guardrail_name": v.guardrail_name,
-                    "guardrail_version": ver,
-                    "guardrail_type": v.guardrail_type,
-                    "effect": v.effect.value,
-                    "reason_internal": v.reason_internal,
-                    "reason_for_llm": v.reason_for_llm,
-                }
-                for v, ver in zip(decision.verdicts, verdict_versions)
-            ],
-        })
+        self.log_sink.append(
+            {
+                "event_type": "gateway_decision",
+                "snapshot_id": self.snapshot_id,
+                "agent_id": self.agent_id,
+                "thread_id": thread_id,
+                "tool_name": decision.tool_name,
+                "tool_call_id": decision.tool_call_id,
+                "tool_args": decision.tool_args,
+                "final_decision": decision.final_decision.value,
+                "verdicts": [
+                    {
+                        "guardrail_name": v.guardrail_name,
+                        "guardrail_version": ver,
+                        "guardrail_type": v.guardrail_type,
+                        "effect": v.effect.value,
+                        "reason_internal": v.reason_internal,
+                        "reason_for_llm": v.reason_for_llm,
+                    }
+                    for v, ver in zip(decision.verdicts, verdict_versions)
+                ],
+            }
+        )

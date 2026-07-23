@@ -32,6 +32,7 @@ uv.lock
 *.db
 *.db-wal
 *.db-shm
+*.db.local-backup
 
 # Coffee machine service logs
 src/services/coffee-machine/logs/

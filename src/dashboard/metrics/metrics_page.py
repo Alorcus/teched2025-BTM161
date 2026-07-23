@@ -13,13 +13,13 @@ from src.trace_processing.eventlog_conversion import ObjectCentricEventlog
 
 from ..nav import header_nav
 from .complexity_section import ComplexitySection
+from .conversation_composition_section import ConversationCompositionSection
 from .feedback_section import FeedbackSection
 from .overview_section import OverviewSection
-from .system_metrics_section import SystemMetricsSection
-from .time_metrics_section import TimeMetricsSection
 from .guardrail_section import GuardrailSection
 from .trace_cache import CACHE_FILENAME, ensure_trace_cache
 from .visualization_section import VisualizationSection
+from .styling_helpers import section_header
 
 
 _TIMESTAMP_COL = "time:timestamp"
@@ -673,13 +673,13 @@ def _format_span_hint(
     if filtered.is_empty():
         return (
             '<div style="font-size:11px;color:#999;padding-top:2px;">'
-            "Selected cases: none.</div>"
+            "Selected conversations: none.</div>"
         )
     span_start = filtered["first_t"].min()
     span_end = filtered["last_t"].max()
     return (
         f'<div style="font-size:11px;color:#666;padding-top:2px;">'
-        f"Selected cases span "
+        f"Selected conversations span "
         f"<b>{span_start:%Y-%m-%d %H:%M:%S}</b> → "
         f"<b>{span_end:%Y-%m-%d %H:%M:%S}</b></div>"
     )
@@ -734,10 +734,9 @@ def _render_metrics_from_ocel(
     return pn.Column(
         range_label.panel(),
         OverviewSection(ocel, range_label.fake_path()).panel(),
-        FeedbackSection(ocel).panel(),
+        ConversationCompositionSection(ocel).panel(),
         ComplexitySection(ocel).panel(),
-        SystemMetricsSection(ocel).panel(),
-        TimeMetricsSection(ocel).panel(),
+        FeedbackSection(ocel).panel(),
         GuardrailSection(ocel).panel(),
         _lazy_visualization_panel(ocel),
         sizing_mode="stretch_width",
@@ -754,7 +753,7 @@ def _lazy_visualization_panel(ocel) -> pn.viewable.Viewable:
     slot = pn.Column(
         pn.pane.HTML(
             '<div style="font-size:12px;color:#666;padding:4px 0;">'
-            "Process visualization (Case DFG, OC-DFG, OC-PN) is "
+            "Process visualization (Conversation DFG, OC-DFG, OC-PN) is "
             "generated on demand — it takes a few seconds.</div>",
             sizing_mode="stretch_width",
         ),
@@ -784,7 +783,11 @@ def _lazy_visualization_panel(ocel) -> pn.viewable.Viewable:
 
     button.on_click(_on_click)
     slot.append(button)
-    return slot
+    return pn.Column(
+        section_header("Process Visualization"),
+        slot,
+        sizing_mode="stretch_width",
+    )
 
 
 class _RangeLabel:

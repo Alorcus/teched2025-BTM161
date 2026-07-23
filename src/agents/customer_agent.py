@@ -141,7 +141,7 @@ Guidelines:
             }
 
         return {
-            "feedback_score": 0.5,
+            "feedback_score": None,
             "feedback_reason": "Fallback used because the model response was invalid.",
             "raw_feedback_response": raw,
             "valid": False,
