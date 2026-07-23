@@ -13,6 +13,13 @@ logger = logging.getLogger("coffee_shop.control_plane.guardrails")
 MAX_JUDGE_MESSAGE_LENGTH = 8000
 MAX_JUDGE_REASON_LENGTH = 400
 
+# Kept in sync with subgraph.RESPONSE_GUARDRAIL_TOOL_NAME. Duplicated here (not
+# imported) to avoid a circular dependency: subgraph.py already imports from
+# this module. The identity check in `_extract_message` picks a payload shape
+# per tool kind — outgoing free text for response guardrails, JSON-serialized
+# args for every real tool call.
+RESPONSE_GUARDRAIL_TOOL_NAME = "assistant_message"
+
 
 @dataclass
 class Guardrail(ABC):
@@ -145,7 +152,21 @@ class SoftGuardrail(Guardrail):
         return "soft"
 
     def _extract_message(self, context: GuardrailContext) -> str:
+        """Pick the payload the judge should audit.
+
+        For response guardrails (`assistant_message`) the payload is the
+        outgoing text (`content` / `message` / `text` key), and an empty
+        string legitimately means "nothing to say" — the caller then
+        short-circuits to ALLOW without calling the judge. For every other
+        tool the payload is the tool_args serialized as JSON so state-gate
+        judges receive the full call metadata (order_id, target_agent, ...)
+        even when the args carry no free-form text.
+        """
         args = context.tool_args or {}
+        if context.tool_name != RESPONSE_GUARDRAIL_TOOL_NAME:
+            if isinstance(args, dict) and args:
+                return json.dumps(args, ensure_ascii=False, sort_keys=True, default=str)
+            return ""
         message_keys = ("content", "message", "text")
         for key in message_keys:
             value = args.get(key)
@@ -154,7 +175,7 @@ class SoftGuardrail(Guardrail):
         if any(key in args for key in message_keys):
             return ""
         if isinstance(args, dict) and args:
-            return json.dumps(args, ensure_ascii=False, sort_keys=True)
+            return json.dumps(args, ensure_ascii=False, sort_keys=True, default=str)
         return ""
 
     def _template_vars(self, context: GuardrailContext, message: str) -> dict[str, Any]:
@@ -164,14 +185,62 @@ class SoftGuardrail(Guardrail):
             f"- {item.name} (${item.price:.2f}) — {item.category}"
             for item in MENU.values()
         ]
+        tool_args = context.tool_args or {}
+        order_id = str(tool_args.get("order_id", "") or "")
+        order_status = ""
+        if order_id and self._references_order_status():
+            order_status = _resolve_order_status(order_id)
+        try:
+            tool_args_json = json.dumps(tool_args, ensure_ascii=False, sort_keys=True, default=str)
+        except (TypeError, ValueError):
+            tool_args_json = str(tool_args)
         return {
             "message": message,
             "agent_id": context.agent_id,
             "tool_name": context.tool_name,
+            "tool_args_json": tool_args_json,
+            "allowed_handovers": ", ".join(context.allowed_handovers) or "(none)",
+            "order_id": order_id,
+            "order_status": order_status,
             "menu": "\n".join(menu_lines),
             "menu_items": ", ".join(sorted(MENU.keys())),
             "allowed_extras": ", ".join(sorted(ALLOWED_EXTRAS)),
         }
+
+    def _references_order_status(self) -> bool:
+        """Cheap check: does this guardrail's templated prompt actually need
+        the order status? Skips the DB round-trip when it doesn't."""
+        marker = "{order_status}"
+        return marker in (self.judge_prompt or "") or marker in (self.user_template or "")
+
+
+def _resolve_order_status(order_id: str) -> str:
+    """Best-effort lookup of an order's current status for soft-judge templating.
+
+    Returns the status value as a string, or an empty string if the order id
+    is empty, unparseable, or the store cannot be read. A soft judge that
+    depends on order status should treat "" as "unknown" and refuse the call
+    to keep parity with the hard `require_order_status` predicate, which
+    denies unresolvable ids. Real DB / store failures are logged so a broken
+    store surfaces in the operator log instead of silently degrading every
+    order-lifecycle soft judge to universal ALLOW.
+    """
+    if not order_id:
+        return ""
+    try:
+        from sqlalchemy.exc import SQLAlchemyError
+
+        from src.agents.order_store import load_order
+
+        order = load_order(order_id)
+    except (SQLAlchemyError, LookupError, AttributeError) as exc:
+        logger.warning(
+            "order status lookup failed for %r: %s — treating as unknown", order_id, exc,
+        )
+        return ""
+    if order is None:
+        return ""
+    return order.status.value
 
 
 def _safe_format(template: str, variables: dict[str, Any]) -> str:

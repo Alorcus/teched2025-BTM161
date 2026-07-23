@@ -24,6 +24,7 @@ def _make_mock_shop():
     shop = MagicMock()
     shop._get_config.return_value = {"configurable": {"thread_id": "test"}}
     shop.customer_agent = MagicMock()
+    shop.customer_agent.last_terminating_message = None
     return shop
 
 

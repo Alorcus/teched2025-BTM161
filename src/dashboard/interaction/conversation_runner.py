@@ -190,6 +190,14 @@ class ConversationRunner:
                         content=message,
                     )
                 )
+            elif self.shop.customer_agent.last_terminating_message:
+                self.event_bus.publish(
+                    DashboardEvent(
+                        event_type=EventType.CUSTOMER_MESSAGE,
+                        agent_name="customer",
+                        content=self.shop.customer_agent.last_terminating_message,
+                    )
+                )
 
         if self._current_order_id:
             self.event_bus.publish(
