@@ -36,6 +36,15 @@ TOOL_REGISTRY: dict[str, BaseTool] = {
 
 
 def resolve_tools(names: list[str]) -> list[BaseTool]:
+    from .subgraph import RESPONSE_GUARDRAIL_TOOL_NAME
+
+    reserved = [n for n in names if n == RESPONSE_GUARDRAIL_TOOL_NAME]
+    if reserved:
+        raise ValueError(
+            f"Tool name {RESPONSE_GUARDRAIL_TOOL_NAME!r} is reserved for the "
+            f"response guardrail's synthetic pseudo-call and cannot be used as "
+            f"a real tool. Rename the tool in AgentDefinition."
+        )
     missing = [n for n in names if n not in TOOL_REGISTRY]
     if missing:
         raise KeyError(f"Unknown tool names in AgentDefinition: {missing}")

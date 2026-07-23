@@ -96,6 +96,8 @@ class ConversationEngine:
             message = customer_agent.respond_to(agent_reply)
             if on_message and message:
                 on_message("customer", message)
+            elif on_message and customer_agent.last_terminating_message:
+                on_message("customer", customer_agent.last_terminating_message)
 
         self._consume_tray(customer_agent)
 

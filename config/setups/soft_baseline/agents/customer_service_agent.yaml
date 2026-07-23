@@ -23,6 +23,8 @@ guardrails:
   - allowed_handover_targets
   - gate_offer_refund
   - off_menu_recommendation
+  - soft_allowed_handover_targets
+  - soft_gate_offer_refund
 guidelines:
   - handoff_etiquette
 allowed_handovers:
