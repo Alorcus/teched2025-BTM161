@@ -25,6 +25,9 @@ guardrails:
   - refund_zero
 guidelines:
   - handoff_etiquette
+  - include_order_id_in_handoff
+  - no_refund_without_order_id
+  - new_order_without_order_id
 allowed_handovers:
   - order_agent
   - inventory_agent

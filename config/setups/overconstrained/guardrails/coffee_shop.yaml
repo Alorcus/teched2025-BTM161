@@ -100,3 +100,20 @@ guardrails:
     description: offer_refund may only run on a completed order.
     predicate: require_order_status
     predicate_args: {allowed: [completed], effect: deny}
+
+  - id: place_on_tray_item_in_order
+    type: hard
+    version: v1
+    tools: [place_on_tray]
+    effect: deny
+    description: place_on_tray may only run for items that are part of the order.
+    predicate: item_in_order
+
+  - id: gate_place_on_tray
+    type: hard
+    version: v1
+    tools: [place_on_tray]
+    effect: deny
+    description: place_on_tray may only run after stock is updated.
+    predicate: require_order_status
+    predicate_args: {allowed: [inventory_confirmed, in_preparation], effect: deny}

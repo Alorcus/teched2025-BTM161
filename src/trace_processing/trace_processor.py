@@ -539,15 +539,20 @@ class TraceProcessor:
             feedback_ts = (
                 datetime.strptime(last_ts, "%Y-%m-%dT%H:%M:%S.%f") + timedelta(milliseconds=1)
             ).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
+            score_display = (
+                f"{fb['feedback_score']:.2f}"
+                if fb.get("valid") and fb["feedback_score"] is not None
+                else "n/a (invalid)"
+            )
             feedback_rows.append({
                 "case_id": case_id,
                 "identity:id": str(uuid.uuid4()),
                 "time:timestamp": feedback_ts,
                 "time_finished": feedback_ts,
                 "concept:name": "user_feedback",
-                "concept:instance": f"user rates: {fb['feedback_score']}",
+                "concept:instance": f"user rates: {score_display}",
                 "org:resource": "user",
-                "message": str(fb["feedback_score"]),
+                "message": score_display,
                 "feedback_score": fb["feedback_score"],
                 "feedback_reason": fb["feedback_reason"],
                 "feedback_valid": fb["valid"],

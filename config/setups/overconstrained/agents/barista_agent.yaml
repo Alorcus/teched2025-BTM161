@@ -43,7 +43,10 @@ guardrails:
   - allowed_handover_targets
   - gate_start_preparation
   - gate_end_preparation
+  - gate_place_on_tray
+  - place_on_tray_item_in_order
 guidelines:
   - handoff_etiquette
+  - include_order_id_in_handoff
 allowed_handovers:
   - customer_service_agent

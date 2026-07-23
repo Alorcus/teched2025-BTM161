@@ -49,10 +49,17 @@ class Size(str, Enum):
 
 
 ALLOWED_EXTRAS: set[str] = {
-    "soy milk", "oat milk", "almond milk",
-    "extra shot", "decaf",
-    "whipped cream", "vanilla syrup", "caramel syrup",
-    "hot", "cold", "iced",
+    "soy milk",
+    "oat milk",
+    "almond milk",
+    "extra shot",
+    "decaf",
+    "whipped cream",
+    "vanilla syrup",
+    "caramel syrup",
+    "hot",
+    "cold",
+    "iced",
 }
 
 
@@ -63,7 +70,9 @@ class MenuItem(SQLModel, table=True):
     price: float
     stock: int
     category: str
-    last_modified: datetime = SQLField(default_factory=lambda: datetime.now(timezone.utc))
+    last_modified: datetime = SQLField(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
 
 
 class OrderItem(SQLModel, table=True):
@@ -76,8 +85,9 @@ class OrderItem(SQLModel, table=True):
     price: float
     size: Size | None = SQLField(
         default=None,
-        sa_column=Column(SAEnum(Size, values_callable=lambda e: [m.value for m in e]),
-                         nullable=True),
+        sa_column=Column(
+            SAEnum(Size, values_callable=lambda e: [m.value for m in e]), nullable=True
+        ),
     )
     extras: list[str] = SQLField(default_factory=list, sa_column=Column(JSON))
 
@@ -91,12 +101,16 @@ class Order(SQLModel, table=True):
     customer: str
     status: OrderStatus = SQLField(
         default=OrderStatus.PENDING,
-        sa_column=Column(SAEnum(OrderStatus, values_callable=lambda e: [m.value for m in e]),
-                         nullable=False),
+        sa_column=Column(
+            SAEnum(OrderStatus, values_callable=lambda e: [m.value for m in e]),
+            nullable=False,
+        ),
     )
     total: float = 0.0
     created_at: datetime = SQLField(default_factory=lambda: datetime.now(timezone.utc))
-    last_modified: datetime = SQLField(default_factory=lambda: datetime.now(timezone.utc))
+    last_modified: datetime = SQLField(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
 
     items: List[OrderItem] = Relationship(
         back_populates="order",
@@ -136,14 +150,18 @@ class OrderIdSchema(BaseModel):
 @tool
 def transfer_to_agent(
     target_agent: Annotated[str, "The agent to transfer to (e.g. 'inventory_agent')"],
-    context_summary: Annotated[str, "Summary of what you know so far that is relevant for the next agent"],
+    context_summary: Annotated[
+        str, "Summary of what you know so far that is relevant for the next agent"
+    ],
     expectation: Annotated[str, "What you expect the next agent to accomplish"],
     state: Annotated[Any, InjectedState],
     tool_call_id: Annotated[str, InjectedToolCallId],
 ) -> Command:
     """Generic transfer tool that can be used to transfer to any agent."""
     from_agent = _resolve_from_agent(state)
-    logger.debug("handoff to %s from %s | summary=%s", target_agent, from_agent, str(context_summary)[:80])
+    logger.debug(
+        f"handoff to {target_agent} from {from_agent} | summary: {context_summary}"
+    )
     tool_message = ToolMessage(
         content=f"Successfully transferred to {target_agent}. Context: {context_summary}. Expectation: {expectation}",
         name="transfer_to_agent",
