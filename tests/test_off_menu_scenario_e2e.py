@@ -1,4 +1,4 @@
-"""End-to-end simulation of scenario 4 with the soft `off_menu_recommendation`
+"""End-to-end simulation of scenario 4 with the soft `assistant_message:on_menu_only`
 guardrail active in `baseline`.
 
 This test actually invokes the local Hyperspace AI LLM proxy (per project
@@ -8,14 +8,14 @@ order_agent hallucinate off-menu items (Hazelnut Latte, Caramel Macchiato,
 etc.), so it is where the soft guardrail earns its keep.
 
 The subprocess writes gateway decisions to `guardrail_log/events.jsonl`. After
-the simulation, we look for at least one `off_menu_recommendation` verdict —
+the simulation, we look for at least one `assistant_message:on_menu_only` verdict —
 either a DENY (guardrail actually caught a hallucination) or an ALLOW (the
 model happened to stay on-menu but the guardrail still evaluated the turn).
 Either outcome proves the guard is wired into the graph. What we assert:
 
   * The subprocess exits cleanly.
   * The JSONL contains at least one gateway_decision entry for the
-    `off_menu_recommendation` guardrail on `assistant_message`.
+    `assistant_message:on_menu_only` guardrail on `assistant_message`.
 
 The subprocess must reach `localhost:6655`, so the bash tool invoking pytest
 must disable the sandbox. Skipped automatically if `LLM_PROVIDER` is not set to
@@ -147,14 +147,14 @@ class TestOffMenuScenario4E2E(unittest.TestCase):
                 if entry.get("event_type") == "gateway_decision"
                 and entry.get("tool_name") == "assistant_message"
                 and any(
-                    verdict.get("guardrail_name") == "off_menu_recommendation"
+                    verdict.get("guardrail_name") == "assistant_message:on_menu_only"
                     for verdict in entry.get("verdicts", [])
                 )
             ]
             self.assertGreater(
                 len(off_menu_decisions),
                 0,
-                f"expected at least one off_menu_recommendation gateway decision "
+                f"expected at least one assistant_message:on_menu_only gateway decision "
                 f"during scenario 4; got 0 out of {len(entries)} entries.\n"
                 f"stdout tail:\n{result.stdout[-2000:]}",
             )

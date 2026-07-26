@@ -1,5 +1,5 @@
 guardrails:
-  - id: allowed_handover_targets
+  - id: handover:allowed_targets
     type: hard
     version: v1
     tools:
@@ -8,7 +8,7 @@ guardrails:
     description: Handover target must be in the calling agent's allowed_handovers list.
     predicate: allowed_handover_targets
 
-  - id: discount_within_30pct
+  - id: calculate_total:discount_within_limit
     type: hard
     version: v1
     tools:
@@ -19,21 +19,10 @@ guardrails:
     predicate_args:
       max_pct: 30
 
-  - id: handover_appropriateness_soft_stub
-    type: soft
-    version: v1
-    tools:
-      - transfer_to_agent
-    effect: allow
-    description: Stub soft guardrail asking 'is this handover appropriate?' (always allow for MVP).
-    judge_prompt: Is the proposed handover appropriate given conversation state and guidelines?
-    state_dependencies:
-      - conversation
-
   # Order lifecycle — each state-changing tool may only be called from the order
   # statuses listed in `allowed`. This replaces the former OrderStateMachine; the
   # transition graph is implicit in these per-tool source preconditions.
-  - id: gate_check_inventory
+  - id: check_inventory:order_status
     type: hard
     version: v1
     tools:
@@ -45,7 +34,7 @@ guardrails:
       allowed: [pending]
       effect: deny
 
-  - id: gate_update_stock
+  - id: update_stock:order_status
     type: hard
     version: v1
     tools:
@@ -57,7 +46,7 @@ guardrails:
       allowed: [inventory_confirmed]
       effect: deny
 
-  - id: gate_start_preparation
+  - id: start_preparation:order_status
     type: hard
     version: v1
     tools:
@@ -69,7 +58,7 @@ guardrails:
       allowed: [inventory_confirmed, in_preparation, preparation_error]
       effect: deny
 
-  - id: gate_end_preparation
+  - id: end_preparation:order_status
     type: hard
     version: v1
     tools:
@@ -81,7 +70,7 @@ guardrails:
       allowed: [in_preparation]
       effect: deny
 
-  - id: gate_offer_refund
+  - id: offer_refund:order_status
     type: hard
     version: v1
     tools:
@@ -93,7 +82,7 @@ guardrails:
       allowed: [completed]
       effect: deny
 
-  - id: off_menu_recommendation
+  - id: assistant_message:on_menu_only
     type: soft
     version: v1
     tools:

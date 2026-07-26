@@ -1,6 +1,6 @@
 import re
 
-from src.agents.order_store import is_item_in_order, load_order
+from src.agents.order_store import load_order
 
 from .types import Effect, GuardrailContext, Verdict
 
@@ -307,40 +307,6 @@ def order_total_within_limit_predicate(max_total: float, effect: str = "deny"):
     return _eval
 
 
-def item_in_order_predicate(context: GuardrailContext) -> Verdict:
-
-    order_id = str(context.tool_args.get("order_id", ""))
-    item_name = str(context.tool_args.get("item_name", ""))
-
-    if not order_id or not item_name:
-        return Verdict(
-            effect=Effect.DENY,
-            guardrail_name="",
-            guardrail_type="",
-            reason_internal="missing order_id or item_name; cannot evaluate",
-            reason_for_llm=(
-                "The context is missing either the order_id or the item_name. Both are required to check if the item is part of the order."
-            ),
-        )
-
-    if is_item_in_order(order_id, item_name):
-        return Verdict(
-            effect=Effect.ALLOW,
-            guardrail_name="",
-            guardrail_type="",
-            reason_internal=f"item {item_name} is in order {order_id}",
-        )
-    return Verdict(
-        effect=Effect.DENY,
-        guardrail_name="",
-        guardrail_type="",
-        reason_internal=f"item {item_name} is not in order {order_id}",
-        reason_for_llm=(
-            f"Item '{item_name}' could not be matched with any item in order {order_id}. Only include the item name, dont include size or extras. You cannot place items on the tray that were not part of the order."
-        ),
-    )
-
-
 PREDICATE_REGISTRY = {
     "allowed_handover_targets": allowed_handover_targets_predicate,
     "discount_within_limit": discount_within_limit_predicate,
@@ -350,5 +316,4 @@ PREDICATE_REGISTRY = {
     "refund_within_limit": refund_within_limit_predicate,
     "order_total_within_limit": order_total_within_limit_predicate,
     "max_tool_calls": max_tool_calls_predicate,
-    "item_in_order": item_in_order_predicate,
 }

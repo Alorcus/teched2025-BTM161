@@ -56,7 +56,7 @@ guardrails:
     def test_hard_guardrail_without_args(self):
         yaml_text = """\
 guardrails:
-  - id: allowed_handover_targets
+  - id: handover:allowed_targets
     type: hard
     tools: [transfer_to_agent]
     effect: deny
@@ -65,7 +65,7 @@ guardrails:
         with tempfile.TemporaryDirectory() as d:
             setup = _write_setup(Path(d), yaml_text)
             catalog = Catalog(setup)
-            [gr] = catalog.guardrails(["allowed_handover_targets"])
+            [gr] = catalog.guardrails(["handover:allowed_targets"])
 
             self.assertIsInstance(gr, HardGuardrail)
             self.assertIsNone(gr.predicate_args)
@@ -73,7 +73,7 @@ guardrails:
     def test_soft_guardrail(self):
         yaml_text = """\
 guardrails:
-  - id: handover_appropriateness_soft_stub
+  - id: handover:appropriateness
     type: soft
     tools: [transfer_to_agent]
     effect: allow
@@ -83,7 +83,7 @@ guardrails:
         with tempfile.TemporaryDirectory() as d:
             setup = _write_setup(Path(d), yaml_text)
             catalog = Catalog(setup)
-            [gr] = catalog.guardrails(["handover_appropriateness_soft_stub"])
+            [gr] = catalog.guardrails(["handover:appropriateness"])
 
             self.assertIsInstance(gr, SoftGuardrail)
             self.assertEqual(gr.judge_prompt, "Is the proposed handover appropriate?")

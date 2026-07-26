@@ -1,4 +1,4 @@
-"""Integration test: soft `off_menu_recommendation` guardrail wired end-to-end.
+"""Integration test: soft `assistant_message:on_menu_only` guardrail wired end-to-end.
 
 Exercises the full baseline setup (catalog → gateway → subgraph → stream) with
 a stub LLM plus a stub judge, verifying that:
@@ -6,7 +6,7 @@ a stub LLM plus a stub judge, verifying that:
   1. When the order_agent proposes an off-menu drink, the response guardrail
      denies it and the customer never receives the rejected text.
   2. The gateway_decision log records the DENY verdict for
-     `off_menu_recommendation` on `assistant_message`.
+     `assistant_message:on_menu_only` on `assistant_message`.
 
 This test is intentionally offline: the real LLM is replaced with a stubbed
 sequence and the soft guardrail's judge_invoker is overridden via monkeypatch
@@ -76,7 +76,7 @@ class TestOffMenuGuardrailIntegration(unittest.TestCase):
         self._catalog = Catalog(Path("config/setups/baseline"))
         self._log_sink = JsonlLogSink(self._log_path, setup_name="baseline")
 
-        for guardrail in self._catalog.guardrails(["off_menu_recommendation"]):
+        for guardrail in self._catalog.guardrails(["assistant_message:on_menu_only"]):
             guardrail.judge_invoker = _stub_judge
 
     def tearDown(self):
@@ -93,7 +93,7 @@ class TestOffMenuGuardrailIntegration(unittest.TestCase):
         )
         return subgraph
 
-    def test_off_menu_recommendation_denied_and_retried(self):
+    def test_assistant_message_on_menu_only_denied_and_retried(self):
         bad = AIMessage(
             content="I recommend our house special: a hazelnut latte!",
             name="order_agent", id="ai-bad",
@@ -155,7 +155,7 @@ class TestOffMenuGuardrailIntegration(unittest.TestCase):
             if e.get("event_type") == "gateway_decision"
             and e.get("final_decision") == "deny"
             and any(
-                v.get("guardrail_name") == "off_menu_recommendation"
+                v.get("guardrail_name") == "assistant_message:on_menu_only"
                 and v.get("effect") == "deny"
                 for v in e.get("verdicts", [])
             )

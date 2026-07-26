@@ -85,7 +85,7 @@ python3 -c "from src.trace_processing import TraceProcessor; TraceProcessor().pr
 Every LangGraph trace (one MLflow trace per `app.stream(...)` call) is tagged
 with two attributes the Metrics Dashboard filters against:
 
-- `setup` — the active setup name (`baseline`, `all_handovers`, `unconstrained`)
+- `setup` — the active setup name (`baseline`, `baseline_soft`, `strict_flow`, `unconstrained`, …)
 - `scenario_index` — the customer scenario played (`0`–`3` for a preset, `-1`
   for a custom prompt where no scenario applies)
 

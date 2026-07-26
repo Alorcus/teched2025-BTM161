@@ -27,11 +27,14 @@ tools:
   - get_order
   - transfer_to_agent
 guardrails:
-  - allowed_handover_targets
-  - discount_within_30pct
-  - handover_appropriateness_soft_stub
+  - handover:allowed_targets
+  - calculate_total:discount_within_limit
 guidelines:
-  - handoff_etiquette
+  - provide_handoff_context
+  - summarize_before_handoff
+  - offer_alternatives_when_blocked
+  - confirm_before_committing
+  - ask_one_question_at_a_time
 allowed_handovers:
   - inventory_agent
   - customer_service_agent

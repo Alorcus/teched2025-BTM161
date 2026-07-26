@@ -1,5 +1,5 @@
 guardrails:
-  - id: allowed_handover_targets
+  - id: handover:allowed_targets
     type: hard
     version: v1
     tools: [transfer_to_agent]
@@ -7,17 +7,8 @@ guardrails:
     description: Handover target must be in the calling agent's allowed_handovers list.
     predicate: allowed_handover_targets
 
-  - id: handover_appropriateness_soft_stub
-    type: soft
-    version: v1
-    tools: [transfer_to_agent]
-    effect: allow
-    description: Stub soft guardrail asking 'is this handover appropriate?' (always allow for MVP).
-    judge_prompt: Is the proposed handover appropriate given conversation state and guidelines?
-    state_dependencies: [conversation]
-
   # Sensible range governance (deny): normal orders pass, only outliers are blocked.
-  - id: order_size_max6
+  - id: create_order:size_within_range
     type: hard
     version: v1
     tools: [process_order]
@@ -26,7 +17,7 @@ guardrails:
     predicate: order_size_within_range
     predicate_args: {min_units: 1, max_units: 6, effect: deny}
 
-  - id: order_total_max20
+  - id: create_order:total_within_limit
     type: hard
     version: v1
     tools: [calculate_total]
@@ -35,7 +26,7 @@ guardrails:
     predicate: order_total_within_limit
     predicate_args: {max_total: 20, effect: deny}
 
-  - id: discount_within_30pct
+  - id: calculate_total:discount_within_limit
     type: hard
     version: v1
     tools: [calculate_total]
@@ -44,7 +35,7 @@ guardrails:
     predicate: discount_within_limit
     predicate_args: {max_pct: 30, effect: deny}
 
-  - id: refund_max50
+  - id: offer_refund:within_limit
     type: hard
     version: v1
     tools: [offer_partial_refund]
@@ -54,7 +45,7 @@ guardrails:
     predicate_args: {max_pct: 50, effect: deny}
 
   # Order lifecycle (deny) — normal source preconditions, as in baseline.
-  - id: gate_check_inventory
+  - id: check_inventory:order_status
     type: hard
     version: v1
     tools: [check_inventory]
@@ -63,7 +54,7 @@ guardrails:
     predicate: require_order_status
     predicate_args: {allowed: [pending], effect: deny}
 
-  - id: gate_update_stock
+  - id: update_stock:order_status
     type: hard
     version: v1
     tools: [update_stock]
@@ -72,7 +63,7 @@ guardrails:
     predicate: require_order_status
     predicate_args: {allowed: [inventory_confirmed], effect: deny}
 
-  - id: gate_start_preparation
+  - id: start_preparation:order_status
     type: hard
     version: v1
     tools: [start_preparation]
@@ -81,7 +72,7 @@ guardrails:
     predicate: require_order_status
     predicate_args: {allowed: [inventory_confirmed, in_preparation, preparation_error], effect: deny}
 
-  - id: gate_end_preparation
+  - id: end_preparation:order_status
     type: hard
     version: v1
     tools: [end_preparation]
@@ -90,7 +81,7 @@ guardrails:
     predicate: require_order_status
     predicate_args: {allowed: [in_preparation], effect: deny}
 
-  - id: gate_offer_refund
+  - id: offer_refund:order_status
     type: hard
     version: v1
     tools: [offer_refund]

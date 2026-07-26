@@ -29,7 +29,7 @@ class TestSoftGuardrailAllow(unittest.TestCase):
             return json.dumps({"decision": "allow", "reason": "on menu"})
 
         guardrail = SoftGuardrail(
-            name="off_menu_recommendation",
+            name="assistant_message:on_menu_only",
             effect=Effect.DENY,
             tools=["assistant_message"],
             judge_prompt="Judge this",
@@ -37,7 +37,7 @@ class TestSoftGuardrailAllow(unittest.TestCase):
         )
         verdict = guardrail.eval(_ctx("Would you like a latte?"))
         self.assertEqual(verdict.effect, Effect.ALLOW)
-        self.assertEqual(verdict.guardrail_name, "off_menu_recommendation")
+        self.assertEqual(verdict.guardrail_name, "assistant_message:on_menu_only")
         self.assertEqual(verdict.guardrail_type, "soft")
         self.assertEqual(verdict.reason_for_llm, "")
 
@@ -61,7 +61,7 @@ class TestSoftGuardrailDeny(unittest.TestCase):
             })
 
         guardrail = SoftGuardrail(
-            name="off_menu_recommendation",
+            name="assistant_message:on_menu_only",
             effect=Effect.DENY,
             tools=["assistant_message"],
             judge_prompt="Judge",

@@ -128,7 +128,7 @@ class TestRequireOrderStatusViaCatalog(unittest.TestCase):
     def _catalog(self, effect: str) -> Catalog:
         yaml_text = f"""\
 guardrails:
-  - id: gate_offer_refund
+  - id: offer_refund:order_status
     type: hard
     tools: [offer_refund]
     effect: {effect}
@@ -147,14 +147,14 @@ guardrails:
         return Catalog(setup)
 
     def test_deny_path(self):
-        [gr] = self._catalog("deny").guardrails(["gate_offer_refund"])
+        [gr] = self._catalog("deny").guardrails(["offer_refund:order_status"])
         completed = _order_with_status(OrderStatus.COMPLETED)
         pending = _order_with_status(OrderStatus.PENDING)
         self.assertEqual(gr.eval(_ctx(completed)).effect, Effect.ALLOW)
         self.assertEqual(gr.eval(_ctx(pending)).effect, Effect.DENY)
 
     def test_flag_path(self):
-        [gr] = self._catalog("flag").guardrails(["gate_offer_refund"])
+        [gr] = self._catalog("flag").guardrails(["offer_refund:order_status"])
         pending = _order_with_status(OrderStatus.PENDING)
         self.assertEqual(gr.eval(_ctx(pending)).effect, Effect.FLAG)
 

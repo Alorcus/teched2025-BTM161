@@ -35,9 +35,9 @@ class TagTraceTests(unittest.TestCase):
 
     def test_int_scenario_stringified(self):
         with patch("src.conversation.mlflow.set_trace_tag") as m:
-            _tag_trace("tr-1", "all_handovers", 3)
+            _tag_trace("tr-1", "strict_flow", 3)
         m.assert_has_calls([
-            call("tr-1", "setup", "all_handovers"),
+            call("tr-1", "setup", "strict_flow"),
             call("tr-1", "scenario_index", "3"),
         ])
 

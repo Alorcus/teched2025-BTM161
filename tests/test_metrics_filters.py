@@ -59,7 +59,7 @@ class CaseMetadataBuildTests(unittest.TestCase):
         events = _make_eventlog([
             _row("A", t0, "baseline", 0),
             _row("A", t0 + timedelta(seconds=30), "baseline", 0),
-            _row("B", t0 + timedelta(minutes=5), "all_handovers", 1),
+            _row("B", t0 + timedelta(minutes=5), "strict_flow", 1),
         ])
         cm = _build_case_metadata(events)
         self.assertEqual(cm.height, 2)
@@ -116,7 +116,7 @@ class ApplyFiltersTests(unittest.TestCase):
         cases = [
             ("c0", "baseline", 0, 0, 60),
             ("c1", "baseline", 1, 5, 60),
-            ("c2", "all_handovers", 0, 10, 60),
+            ("c2", "strict_flow", 0, 10, 60),
             ("c3", "unconstrained", 3, 15, 60),
             ("c4", None, -1, 20, 60),  # untagged trace -> (unknown) bucket
         ]

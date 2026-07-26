@@ -20,10 +20,14 @@ tools:
   - get_order
   - transfer_to_agent
 guardrails:
-  - allowed_handover_targets
-  - gate_offer_refund
+  - handover:allowed_targets
+  - offer_refund:order_status
 guidelines:
-  - handoff_etiquette
+  - provide_handoff_context
+  - summarize_before_handoff
+  - offer_alternatives_when_blocked
+  - confirm_before_committing
+  - ask_one_question_at_a_time
 allowed_handovers:
   - order_agent
   - inventory_agent

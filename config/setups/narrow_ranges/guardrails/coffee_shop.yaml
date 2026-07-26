@@ -1,0 +1,93 @@
+guardrails:
+  - id: handover:allowed_targets
+    type: hard
+    version: v1
+    tools: [transfer_to_agent]
+    effect: deny
+    description: Handover target must be in the calling agent's allowed_handovers list.
+    predicate: allowed_handover_targets
+
+  # Narrow ranges (deny): same rule ids as sensible_ranges, but the numeric
+  # bounds are cranked so tight that most normal orders cannot proceed. Only
+  # a single sub-$3 coffee gets through; no discounts, no partial refunds.
+  - id: create_order:size_within_range
+    type: hard
+    version: v1
+    tools: [process_order]
+    effect: deny
+    description: At most ONE unit per order.
+    predicate: order_size_within_range
+    predicate_args: {min_units: 1, max_units: 1, effect: deny}
+
+  - id: create_order:total_within_limit
+    type: hard
+    version: v1
+    tools: [calculate_total]
+    effect: deny
+    description: Order total must not exceed $3.
+    predicate: order_total_within_limit
+    predicate_args: {max_total: 3.0, effect: deny}
+
+  - id: calculate_total:discount_within_limit
+    type: hard
+    version: v1
+    tools: [calculate_total]
+    effect: deny
+    description: No discounts allowed at all.
+    predicate: discount_within_limit
+    predicate_args: {max_pct: 0, effect: deny}
+
+  - id: offer_refund:within_limit
+    type: hard
+    version: v1
+    tools: [offer_partial_refund]
+    effect: deny
+    description: No partial refunds allowed at all.
+    predicate: refund_within_limit
+    predicate_args: {max_pct: 0, effect: deny}
+
+  # Order lifecycle (deny) — normal source preconditions, as in baseline.
+  - id: check_inventory:order_status
+    type: hard
+    version: v1
+    tools: [check_inventory]
+    effect: deny
+    description: check_inventory may only run while the order is pending.
+    predicate: require_order_status
+    predicate_args: {allowed: [pending], effect: deny}
+
+  - id: update_stock:order_status
+    type: hard
+    version: v1
+    tools: [update_stock]
+    effect: deny
+    description: update_stock may only run once inventory is confirmed.
+    predicate: require_order_status
+    predicate_args: {allowed: [inventory_confirmed], effect: deny}
+
+  - id: start_preparation:order_status
+    type: hard
+    version: v1
+    tools: [start_preparation]
+    effect: deny
+    description: start_preparation needs a confirmed order (or a prior prep to retry).
+    predicate: require_order_status
+    predicate_args: {allowed: [inventory_confirmed, in_preparation, preparation_error], effect: deny}
+
+  - id: end_preparation:order_status
+    type: hard
+    version: v1
+    tools: [end_preparation]
+    effect: deny
+    description: end_preparation may only run while a coffee is in preparation.
+    predicate: require_order_status
+    predicate_args: {allowed: [in_preparation], effect: deny}
+
+  - id: offer_refund:order_status
+    type: hard
+    version: v1
+    tools: [offer_refund]
+    effect: deny
+    description: offer_refund may only run on a completed order.
+    predicate: require_order_status
+    predicate_args: {allowed: [completed], effect: deny}
