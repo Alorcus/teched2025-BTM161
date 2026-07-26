@@ -31,10 +31,15 @@ guardrails:
   - soft_handover:allowed_targets
   - soft_check_inventory:order_status
   - soft_update_stock:order_status
+  - transfer:context_summary_nonempty
+  - soft_transfer:context_summary_nonempty
+  - handover:reason_matches_target
+  - assistant_message:no_price_promises
 guidelines:
   - provide_handoff_context
   - summarize_before_handoff
   - offer_alternatives_when_blocked
+  - include_order_id_in_handoff
 allowed_handovers:
   - barista_agent
   - customer_service_agent

@@ -83,3 +83,50 @@ guardrails:
     predicate_args:
       allowed: [completed]
       effect: flag
+
+  # New "reasonable defaults" rules mirrored from baseline as flag-only.
+  - id: process_order:items_on_menu
+    type: hard
+    version: v1
+    tools:
+      - process_order
+    effect: flag
+    description: Deterministic menu-adherence check on process_order.
+    predicate: process_order_items_on_menu
+    predicate_args:
+      effect: flag
+
+  - id: offer_partial_refund:below_order_total
+    type: hard
+    version: v1
+    tools:
+      - offer_partial_refund
+    effect: flag
+    description: Sanity gate — partial refund percent must not exceed 100.
+    predicate: refund_within_limit
+    predicate_args:
+      max_pct: 100
+      effect: flag
+
+  - id: transfer:context_summary_nonempty
+    type: hard
+    version: v1
+    tools:
+      - transfer_to_agent
+    effect: flag
+    description: Handovers must carry a non-trivial context_summary (>= 20 chars after strip).
+    predicate: transfer_context_summary_nonempty
+    predicate_args:
+      min_chars: 20
+      effect: flag
+
+  - id: clean_machine:only_after_error
+    type: hard
+    version: v1
+    tools:
+      - clean_machine
+    effect: flag
+    description: clean_machine only allowed when the most-recent order is in preparation_error or the last brew was contaminated.
+    predicate: clean_machine_only_after_error
+    predicate_args:
+      effect: flag

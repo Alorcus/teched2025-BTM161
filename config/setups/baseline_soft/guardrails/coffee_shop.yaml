@@ -386,3 +386,240 @@ guardrails:
       -----
     state_dependencies:
       - order
+
+  # -----------------------------------------------------------------------
+  # New "reasonable defaults" — hard flag shadows + soft_* deny counterparts,
+  # plus the two new baseline soft rules verbatim.
+  # -----------------------------------------------------------------------
+  - id: process_order:items_on_menu
+    type: hard
+    version: v1
+    tools:
+      - process_order
+    effect: flag
+    description: Baseline shadow — flag only. Enforcement moves to soft_process_order:items_on_menu.
+    predicate: process_order_items_on_menu
+    predicate_args:
+      effect: flag
+
+  - id: offer_partial_refund:below_order_total
+    type: hard
+    version: v1
+    tools:
+      - offer_partial_refund
+    effect: flag
+    description: Baseline shadow — flag only. Enforcement moves to soft_offer_partial_refund:below_order_total.
+    predicate: refund_within_limit
+    predicate_args:
+      max_pct: 100
+      effect: flag
+
+  - id: transfer:context_summary_nonempty
+    type: hard
+    version: v1
+    tools:
+      - transfer_to_agent
+    effect: flag
+    description: Baseline shadow — flag only. Enforcement moves to soft_transfer:context_summary_nonempty.
+    predicate: transfer_context_summary_nonempty
+    predicate_args:
+      min_chars: 20
+      effect: flag
+
+  - id: clean_machine:only_after_error
+    type: hard
+    version: v1
+    tools:
+      - clean_machine
+    effect: flag
+    description: Baseline shadow — flag only. Enforcement moves to soft_clean_machine:only_after_error.
+    predicate: clean_machine_only_after_error
+    predicate_args:
+      effect: flag
+
+  - id: soft_process_order:items_on_menu
+    type: soft
+    version: v1
+    tools:
+      - process_order
+    effect: deny
+    description: LLM-as-judge counterpart to process_order:items_on_menu.
+    judge_prompt: |
+      You are auditing a process_order tool call in a coffee shop.
+
+      MENU (only these items are on offer, keys shown lowercased):
+      {menu}
+
+      Rule: every item's `name` in `tool_args.order` must resolve (after
+      lowercasing and trimming) to a MENU key. If ANY item is off-menu,
+      DENY. If the order list is missing or malformed, ALLOW (the tool
+      itself validates the payload).
+
+      Respond with a strict JSON object and NOTHING ELSE:
+        {{"decision": "allow", "reason": ""}}
+      or
+        {{"decision": "deny", "reason": "<short reason naming the off-menu item(s)>"}}
+    user_template: |
+      process_order tool call:
+      -----
+      tool_args: {tool_args_json}
+      -----
+    state_dependencies:
+      - conversation
+
+  - id: soft_offer_partial_refund:below_order_total
+    type: soft
+    version: v1
+    tools:
+      - offer_partial_refund
+    effect: deny
+    description: LLM-as-judge counterpart to offer_partial_refund:below_order_total.
+    judge_prompt: |
+      You are auditing a partial-refund tool call in a coffee shop.
+
+      Rule: the `refund_percent` field must not exceed 100. A partial
+      refund cannot exceed the order total. If `refund_percent` > 100 (or
+      is negative), DENY.
+
+      Respond with a strict JSON object and NOTHING ELSE:
+        {{"decision": "allow", "reason": ""}}
+      or
+        {{"decision": "deny", "reason": "<short reason quoting the refund_percent value>"}}
+    user_template: |
+      offer_partial_refund tool call:
+      -----
+      tool_args: {tool_args_json}
+      -----
+    state_dependencies:
+      - conversation
+
+  - id: soft_transfer:context_summary_nonempty
+    type: soft
+    version: v1
+    tools:
+      - transfer_to_agent
+    effect: deny
+    description: LLM-as-judge counterpart to transfer:context_summary_nonempty.
+    judge_prompt: |
+      You are auditing a proposed agent-to-agent handover in a coffee shop.
+
+      Rule: `context_summary` must be non-empty and carry at least a full
+      sentence of substance (a rough guide: 20+ characters after trimming,
+      or a real short sentence describing what the next agent should do).
+      DENY when it's empty, whitespace, or a bare filler like "handoff",
+      "see conversation", "please help".
+
+      Respond with a strict JSON object and NOTHING ELSE:
+        {{"decision": "allow", "reason": ""}}
+      or
+        {{"decision": "deny", "reason": "<short reason quoting the trivial context_summary>"}}
+    user_template: |
+      Proposed handover:
+      -----
+      tool_name: {tool_name}
+      tool_args: {tool_args_json}
+      -----
+    state_dependencies:
+      - conversation
+
+  - id: soft_clean_machine:only_after_error
+    type: soft
+    version: v1
+    tools:
+      - clean_machine
+    effect: deny
+    description: LLM-as-judge counterpart to clean_machine:only_after_error.
+    judge_prompt: |
+      You are auditing a clean_machine tool call in a coffee shop.
+
+      Rule: `clean_machine` may ONLY be called when the current order's
+      status is exactly "preparation_error" (i.e. the last brew failed and
+      the machine needs cleaning before a retry). Any other status
+      (including empty / unknown / missing) means the call MUST be denied.
+
+      Current order status: "{order_status}"
+
+      Respond with a strict JSON object and NOTHING ELSE:
+        {{"decision": "allow", "reason": ""}}
+      or
+        {{"decision": "deny", "reason": "<short reason quoting the current status>"}}
+    user_template: |
+      clean_machine tool call:
+      -----
+      tool_args: {tool_args_json}
+      -----
+    state_dependencies:
+      - order
+
+  - id: handover:reason_matches_target
+    type: soft
+    version: v1
+    tools:
+      - transfer_to_agent
+    effect: deny
+    description: LLM-as-judge — the handover's context_summary must justify the chosen target_agent's scope.
+    judge_prompt: |
+      You are auditing a proposed agent-to-agent handover in a coffee-shop
+      multi-agent system. Each specialist has a scope:
+        - order_agent: takes new orders, prices them, calls process_order
+        - inventory_agent: checks stock, updates stock, places food on tray
+        - barista_agent: brews coffee (start/end_preparation, clean_machine)
+        - customer_service_agent: handles complaints and refunds
+
+      Calling agent: {agent_id}
+      Proposed target: read from `target_agent` in tool_args below.
+
+      Rule: DENY when the `context_summary` describes work that clearly does
+      NOT belong to the target's scope (e.g. refund reason → barista_agent,
+      brew failure → order_agent, new-order request → barista_agent).
+      Ambiguous / mixed / procedural reasons: ALLOW.
+
+      Respond with a strict JSON object and NOTHING ELSE:
+        {{"decision": "allow", "reason": ""}}
+      or
+        {{"decision": "deny", "reason": "<one sentence naming the mismatch>"}}
+    user_template: |
+      Proposed handover:
+      -----
+      tool_name: {tool_name}
+      tool_args: {tool_args_json}
+      -----
+    state_dependencies:
+      - conversation
+
+  - id: assistant_message:no_price_promises
+    type: soft
+    version: v1
+    tools:
+      - assistant_message
+    effect: deny
+    description: LLM-as-judge — block messages that quote a specific dollar price without a preceding calculate_total / process_order result.
+    judge_prompt: |
+      You are auditing an outgoing assistant message in a coffee shop.
+
+      Rule: the assistant may only quote a specific dollar amount (a price
+      for a single item, or a total for an order) when that amount was
+      produced by an earlier `calculate_total` or `process_order` tool
+      result in this conversation. If the message quotes a specific dollar
+      figure without such a tool call visible, DENY.
+
+      Menu prices are shown below only for context — do NOT accept them as
+      substitutes for a real tool call. The agent must actually run the
+      tool before promising a number:
+      {menu}
+
+      Vague statements ("around five dollars", "roughly the same as a
+      latte", "a couple of dollars each") are ALLOWED. So are non-price
+      factual statements about the order.
+
+      Respond with a strict JSON object and NOTHING ELSE:
+        {{"decision": "allow", "reason": ""}}
+      or
+        {{"decision": "deny", "reason": "<one sentence quoting the promised price>"}}
+    user_template: |
+      Assistant message to audit:
+      -----
+      {message}
+      -----
+    state_dependencies:
+      - conversation

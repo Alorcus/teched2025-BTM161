@@ -46,9 +46,16 @@ guardrails:
   - soft_handover:allowed_targets
   - soft_start_preparation:order_status
   - soft_end_preparation:order_status
+  - transfer:context_summary_nonempty
+  - soft_transfer:context_summary_nonempty
+  - clean_machine:only_after_error
+  - soft_clean_machine:only_after_error
+  - handover:reason_matches_target
+  - assistant_message:no_price_promises
 guidelines:
   - provide_handoff_context
   - summarize_before_handoff
   - offer_alternatives_when_blocked
+  - include_order_id_in_handoff
 allowed_handovers:
   - customer_service_agent

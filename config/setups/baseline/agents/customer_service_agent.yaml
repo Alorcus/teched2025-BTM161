@@ -23,12 +23,18 @@ guardrails:
   - handover:allowed_targets
   - offer_refund:order_status
   - assistant_message:on_menu_only
+  - offer_partial_refund:below_order_total
+  - transfer:context_summary_nonempty
+  - handover:reason_matches_target
+  - assistant_message:no_price_promises
 guidelines:
   - provide_handoff_context
   - summarize_before_handoff
   - offer_alternatives_when_blocked
   - confirm_before_committing
   - ask_one_question_at_a_time
+  - include_order_id_in_handoff
+  - state_refund_details
 allowed_handovers:
   - order_agent
   - inventory_agent

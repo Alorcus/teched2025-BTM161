@@ -29,12 +29,15 @@ tools:
 guardrails:
   - handover:allowed_targets
   - calculate_total:discount_within_limit
+  - process_order:items_on_menu
+  - transfer:context_summary_nonempty
 guidelines:
   - provide_handoff_context
   - summarize_before_handoff
   - offer_alternatives_when_blocked
   - confirm_before_committing
   - ask_one_question_at_a_time
+  - include_order_id_in_handoff
 allowed_handovers:
   - inventory_agent
   - customer_service_agent

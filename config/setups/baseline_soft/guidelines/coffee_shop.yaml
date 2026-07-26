@@ -39,3 +39,20 @@ guidelines:
       focused question and wait for their answer. Do not stack multiple
       questions in one message (size AND milk AND food) — that overwhelms
       the customer and produces partial answers you then have to untangle.
+
+  - id: include_order_id_in_handoff
+    version: v1
+    prompt: |
+      If an order has been placed, always include the order ID in the handoff
+      context_summary. The next agent will need this to look up the order.
+      If a concrete order ID was at all part of the conversation, you MUST include it in the handoff context_summary.
+      If the order ID is not known, you MUST specify that there is no Order ID available.
+
+  - id: state_refund_details
+    version: v1
+    prompt: |
+      When you issue a refund (full or partial), your customer-facing message
+      must state three things: the exact amount refunded, the original order
+      total, and any remaining balance the customer still owes or is owed.
+      "Refund processed" on its own is not enough — the customer should be
+      able to reconcile the numbers from your message alone.
