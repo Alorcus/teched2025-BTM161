@@ -14,10 +14,10 @@ still validating:
   configured so),
 - and that an allow verdict is passed through cleanly.
 
-The baseline_soft setup keeps every baseline hard rule as a `flag`-only
-shadow; the soft counterparts are the actual enforcers — every
-`soft_*` guardrail denies when the judge returns deny, matching the
-enforcement intent of baseline's deny rules.
+The baseline_soft setup contains ONLY soft (LLM-judge) guardrails: the three
+native soft rules from `baseline` (verbatim) plus a `soft_*`-prefixed
+counterpart for each of `baseline`'s eleven hard rules. No hard predicates
+run in this setup — enforcement is entirely LLM-driven.
 """
 from __future__ import annotations
 
@@ -85,8 +85,11 @@ class SoftBaselineCatalogWiringTest(unittest.TestCase):
             self.assertIsInstance(gr, SoftGuardrail, f"{name} must be soft")
             self.assertTrue(gr.tools, f"{name} must declare tools")
 
-    def test_hard_shadows_still_flag_only(self):
-        """Every baseline hard rule survives in baseline_soft as a flag-only shadow."""
+    def test_no_hard_rules_present(self):
+        """baseline_soft is pure LLM-judge: none of baseline's hard rule ids exist here.
+
+        The policy concepts still exist under their `soft_*` counterparts (covered by
+        `test_all_soft_counterparts_load`), but the deterministic hard rules are gone."""
         catalog = _catalog()
         for hard_id in (
             "handover:allowed_targets",
@@ -96,13 +99,13 @@ class SoftBaselineCatalogWiringTest(unittest.TestCase):
             "start_preparation:order_status",
             "end_preparation:order_status",
             "offer_refund:order_status",
+            "process_order:items_on_menu",
+            "offer_partial_refund:below_order_total",
+            "transfer:context_summary_nonempty",
+            "clean_machine:only_after_error",
         ):
-            [gr] = catalog.guardrails([hard_id])
-            self.assertEqual(
-                gr.effect, Effect.FLAG,
-                f"{hard_id} must be flag-only in baseline_soft; got {gr.effect}",
-            )
-            self.assertEqual(gr.type, "hard")
+            with self.assertRaises(KeyError, msg=f"{hard_id} should not exist in baseline_soft"):
+                catalog.guardrails([hard_id])
 
 
 class SoftAllowedHandoverTargetsTest(unittest.TestCase):
