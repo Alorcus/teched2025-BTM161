@@ -6,27 +6,6 @@ guidelines:
       and an explicit expectation. The next agent only sees a synthetic briefing
       built from these two fields plus the messages after the handoff boundary.
 
-  - id: include_order_id_in_handoff
-    version: v1
-    prompt: |
-      If an order has been placed, always include the order ID in the handoff
-      context_summary. The next agent will need this to look up the order.
-      If a concrete order ID was at all part of the conversation, you MUST include it in the handoff context_summary.
-      If the order ID is not known, you MUST specify that there is no Order ID available.
-
-  - id: refuse_refund_without_order_id
-    version: v1
-    prompt: |
-      If the customer requests a refund, you MUST ask for the order ID if it is not already known.
-      If the customer does not know the order ID you cannot process a refund. Convince the customer to provide the order ID or to end the conversation.
-
-  - id: omit_order_id_on_new_order
-    version: v1
-    prompt: |
-      If the customer wants to place a new order, let the order agent know specifically that they need to process a new order.
-      The order agent should then follow the normal order-taking workflow.
-      Do not include an order ID in the handoff context_summary, since this is a new order.
-
   - id: summarize_before_handoff
     version: v1
     prompt: |
@@ -60,3 +39,20 @@ guidelines:
       focused question and wait for their answer. Do not stack multiple
       questions in one message (size AND milk AND food) — that overwhelms
       the customer and produces partial answers you then have to untangle.
+
+  - id: include_order_id_in_handoff
+    version: v1
+    prompt: |
+      If an order has been placed, always include the order ID in the handoff
+      context_summary. The next agent will need this to look up the order.
+      If a concrete order ID was at all part of the conversation, you MUST include it in the handoff context_summary.
+      If the order ID is not known, you MUST specify that there is no Order ID available.
+
+  - id: state_refund_details
+    version: v1
+    prompt: |
+      When you issue a refund (full or partial), your customer-facing message
+      must state three things: the exact amount refunded, the original order
+      total, and any remaining balance the customer still owes or is owed.
+      "Refund processed" on its own is not enough — the customer should be
+      able to reconcile the numbers from your message alone.

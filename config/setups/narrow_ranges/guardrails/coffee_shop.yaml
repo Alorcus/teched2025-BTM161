@@ -37,7 +37,7 @@ guardrails:
     predicate: discount_within_limit
     predicate_args: {max_pct: 0, effect: deny}
 
-  - id: offer_refund:within_limit
+  - id: offer_partial_refund:within_limit
     type: hard
     version: v1
     tools: [offer_partial_refund]
@@ -45,6 +45,69 @@ guardrails:
     description: No partial refunds allowed at all.
     predicate: refund_within_limit
     predicate_args: {max_pct: 0, effect: deny}
+
+  - id: offer_refund:within_limit
+    type: hard
+    version: v1
+    tools: [offer_refund]
+    effect: deny
+    description: No full refunds allowed at all.
+    predicate: refund_within_limit
+    predicate_args: {max_pct: 0, effect: deny}
+
+  - id: process_order:max_calls
+    type: hard
+    version: v1
+    tools: [process_order]
+    effect: deny
+    description: process_order may be called at most once per conversation.
+    predicate: max_tool_calls
+    predicate_args: {tool_name: process_order, max_calls: 1, effect: deny}
+
+  - id: calculate_total:max_calls
+    type: hard
+    version: v1
+    tools: [calculate_total]
+    effect: deny
+    description: calculate_total may be called at most twice per conversation.
+    predicate: max_tool_calls
+    predicate_args: {tool_name: calculate_total, max_calls: 2, effect: deny}
+
+  - id: offer_refund:max_calls
+    type: hard
+    version: v1
+    tools: [offer_refund]
+    effect: deny
+    description: offer_refund may be called at most once per conversation.
+    predicate: max_tool_calls
+    predicate_args: {tool_name: offer_refund, max_calls: 1, effect: deny}
+
+  - id: offer_partial_refund:max_calls
+    type: hard
+    version: v1
+    tools: [offer_partial_refund]
+    effect: deny
+    description: offer_partial_refund may be called at most once per conversation.
+    predicate: max_tool_calls
+    predicate_args: {tool_name: offer_partial_refund, max_calls: 1, effect: deny}
+
+  - id: clean_machine:max_calls
+    type: hard
+    version: v1
+    tools: [clean_machine]
+    effect: deny
+    description: clean_machine may be called at most once per conversation.
+    predicate: max_tool_calls
+    predicate_args: {tool_name: clean_machine, max_calls: 1, effect: deny}
+
+  - id: start_preparation:max_calls
+    type: hard
+    version: v1
+    tools: [start_preparation]
+    effect: deny
+    description: start_preparation may be called at most once per conversation.
+    predicate: max_tool_calls
+    predicate_args: {tool_name: start_preparation, max_calls: 1, effect: deny}
 
   # Order lifecycle (deny) — normal source preconditions, as in baseline.
   - id: check_inventory:order_status

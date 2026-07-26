@@ -43,9 +43,12 @@ guardrails:
   - handover:allowed_targets
   - start_preparation:order_status
   - end_preparation:order_status
+  - clean_machine:max_calls
+  - start_preparation:max_calls
 guidelines:
   - provide_handoff_context
   - summarize_before_handoff
   - offer_alternatives_when_blocked
+  - include_order_id_in_handoff
 allowed_handovers:
   - customer_service_agent

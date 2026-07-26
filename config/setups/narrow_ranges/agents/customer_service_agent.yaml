@@ -22,16 +22,18 @@ tools:
 guardrails:
   - handover:allowed_targets
   - offer_refund:order_status
+  - offer_partial_refund:within_limit
   - offer_refund:within_limit
+  - offer_refund:max_calls
+  - offer_partial_refund:max_calls
 guidelines:
   - provide_handoff_context
-  - include_order_id_in_handoff
-  - refuse_refund_without_order_id
-  - omit_order_id_on_new_order
   - summarize_before_handoff
   - offer_alternatives_when_blocked
   - confirm_before_committing
   - ask_one_question_at_a_time
+  - include_order_id_in_handoff
+  - state_refund_details
 allowed_handovers:
   - order_agent
   - inventory_agent
