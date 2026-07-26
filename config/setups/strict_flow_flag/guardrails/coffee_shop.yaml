@@ -149,13 +149,13 @@ guardrails:
     predicate_args:
       effect: flag
 
-  - id: offer_partial_refund:below_order_total
+  - id: offer_partial_refund:within_policy_cap
     type: hard
     version: v1
     tools:
       - offer_partial_refund
     effect: flag
-    description: Partial refund percent must not exceed 50% of the order total.
+    description: Policy cap — partial refund percent must not exceed 50% of the order total.
     predicate: refund_within_limit
     predicate_args:
       max_pct: 50

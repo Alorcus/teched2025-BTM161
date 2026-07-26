@@ -234,7 +234,7 @@ guardrails:
     predicate_args:
       effect: flag
 
-  - id: offer_partial_refund:below_order_total
+  - id: offer_partial_refund:within_policy_cap
     type: hard
     version: v1
     tools:
@@ -620,13 +620,13 @@ guardrails:
     state_dependencies:
       - conversation
 
-  - id: soft_offer_partial_refund:below_order_total
+  - id: soft_offer_partial_refund:within_policy_cap
     type: soft
     version: v1
     tools:
       - offer_partial_refund
     effect: deny
-    description: LLM-as-judge counterpart to offer_partial_refund:below_order_total (strict 50% cap).
+    description: LLM-as-judge counterpart to offer_partial_refund:within_policy_cap (strict 50% cap).
     judge_prompt: |
       You are auditing a partial-refund tool call in a coffee shop.
 

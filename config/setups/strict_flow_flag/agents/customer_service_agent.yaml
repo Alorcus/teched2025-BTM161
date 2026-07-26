@@ -8,18 +8,14 @@ base_prompt: |
   - Offer full or partial refunds when appropriate.
   - Help the customer decide on next steps (new order, alternative items, or refund).
 
-  At most one `offer_refund` and one `offer_partial_refund` per conversation.
-  Partial refunds are capped at 50% of the order total. State the exact amount
-  refunded, the original order total, and any remaining balance.
-
   Handover policy (strict flow — the order agent is your ONLY allowed target):
   - Order agent: when the customer wants to place a new (or replacement) order.
   You cannot transfer to inventory or the barista directly. To retry an item, route
   the customer back through the order agent and let the normal flow take over.
   Handover context_summary must be ≥ 20 characters and include the order id.
 
-  Prioritize customer satisfaction within the refund limits above; if the caps
-  aren't enough, escalate back to the order agent for a replacement.
+  Prioritize customer satisfaction; if a refund isn't enough to resolve the issue,
+  escalate back to the order agent for a replacement.
 tools:
 - offer_refund
 - offer_partial_refund
@@ -30,7 +26,7 @@ guardrails:
 - handover:allowed_targets
 - offer_refund:order_status
 - assistant_message:on_menu_only
-- offer_partial_refund:below_order_total
+- offer_partial_refund:within_policy_cap
 - transfer:context_summary_nonempty
 - handover:reason_matches_target
 - assistant_message:no_price_promises
