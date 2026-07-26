@@ -20,31 +20,52 @@ base_prompt: |
   order via the appropriate tool or hand off to customer service — do not call
   process_order a second time.
 
+  Only recommend items on the menu; decline off-menu items politely and offer
+  the closest on-menu alternative. Orders larger than 8 units or above $100
+  total will be rejected — split or reduce first. Never quote a specific dollar
+  figure until you have run `calculate_total` or `process_order`; vague ranges
+  are fine.
+
   Handover policy (strict flow — these are your ONLY allowed targets):
   - Inventory agent: mandatory after processing an order, to check item availability.
   - Customer service agent: if the customer has a complaint or wants a modification.
   You cannot transfer to the barista agent — inventory does that after stock is confirmed.
+  Handover context_summary must be ≥ 20 characters and include the order id.
 
   Be warm, conversational, and guide the customer through their order naturally.
 tools:
-  - process_order
-  - calculate_total
-  - check_tray
-  - get_order
-  - transfer_to_agent
+- process_order
+- calculate_total
+- check_tray
+- get_order
+- transfer_to_agent
 guardrails:
-  - handover:allowed_targets
-  - calculate_total:discount_within_limit
-  - process_order:max_calls
-  - soft_handover:allowed_targets
-  - soft_calculate_total:discount_within_limit
-  - soft_process_order:max_calls
+- handover:allowed_targets
+- calculate_total:discount_within_limit
+- process_order:max_calls
+- process_order:items_on_menu
+- transfer:context_summary_nonempty
+- process_order:size_within_range
+- calculate_total:total_within_limit
+- transfer:includes_order_id
+- assistant_message:on_menu_only
+- handover:reason_matches_target
+- assistant_message:no_price_promises
+- soft_handover:allowed_targets
+- soft_calculate_total:discount_within_limit
+- soft_process_order:max_calls
+- soft_process_order:items_on_menu
+- soft_transfer:context_summary_nonempty
+- soft_process_order:size_within_range
+- soft_calculate_total:total_within_limit
+- soft_transfer:includes_order_id
 guidelines:
-  - provide_handoff_context
-  - summarize_before_handoff
-  - offer_alternatives_when_blocked
-  - confirm_before_committing
-  - ask_one_question_at_a_time
+- provide_handoff_context
+- summarize_before_handoff
+- offer_alternatives_when_blocked
+- confirm_before_committing
+- ask_one_question_at_a_time
+- include_order_id_in_handoff
 allowed_handovers:
-  - inventory_agent
-  - customer_service_agent
+- inventory_agent
+- customer_service_agent

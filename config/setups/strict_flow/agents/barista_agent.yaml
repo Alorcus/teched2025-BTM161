@@ -27,6 +27,7 @@ base_prompt: |
   - After a successful brew, ALWAYS call place_on_tray to put the coffee on the tray before informing the customer.
   - Always call end_preparation after start_preparation to get the final result
   - After a brew failure, you MUST call clean_machine() before retrying. If you skip cleaning, the coffee will be contaminated.
+  - `clean_machine` may only be called up to twice per conversation. If two cleans haven't fixed the machine, stop retrying and apologize.
   - Be honest about failures and give customers clear choices
   - Don't call start_preparation without asking the customer if he wants to try
 
@@ -43,8 +44,15 @@ guardrails:
   - handover:allowed_targets
   - start_preparation:order_status
   - end_preparation:order_status
+  - transfer:context_summary_nonempty
+  - clean_machine:only_after_error
+  - handover:reason_matches_target
+  - assistant_message:no_price_promises
+  - clean_machine:max_calls
+  - transfer:includes_order_id
 guidelines:
   - provide_handoff_context
   - summarize_before_handoff
   - offer_alternatives_when_blocked
+  - include_order_id_in_handoff
 allowed_handovers: []

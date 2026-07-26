@@ -18,6 +18,7 @@ base_prompt: |
   You cannot transfer to customer service or back to the order agent. If items are
   unavailable, hand off to the barista anyway so the customer is served with what's
   available; do not try to escalate elsewhere.
+  Handover context_summary must be ≥ 20 characters and include the order id.
 tools:
   - check_inventory
   - update_stock
@@ -30,9 +31,14 @@ guardrails:
   - handover:allowed_targets
   - check_inventory:order_status
   - update_stock:order_status
+  - transfer:context_summary_nonempty
+  - handover:reason_matches_target
+  - assistant_message:no_price_promises
+  - transfer:includes_order_id
 guidelines:
   - provide_handoff_context
   - summarize_before_handoff
   - offer_alternatives_when_blocked
+  - include_order_id_in_handoff
 allowed_handovers:
   - barista_agent
