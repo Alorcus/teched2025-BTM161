@@ -1,11 +1,9 @@
 from .overview_section import OverviewSection
-from .system_metrics_section import SystemMetricsSection
-from .time_metrics_section import TimeMetricsSection
+from .conversation_composition_section import ConversationCompositionSection
 from .metrics_page import create_metrics_dashboard
 
 __all__ = [
     "OverviewSection",
-    "SystemMetricsSection",
-    "TimeMetricsSection",
+    "ConversationCompositionSection",
     "create_metrics_dashboard",
 ]

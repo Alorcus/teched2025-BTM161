@@ -22,12 +22,11 @@ tools:
 guardrails:
   - allowed_handover_targets
   - gate_offer_refund
-  - refund_zero
+  - off_menu_recommendation
+  - soft_allowed_handover_targets
+  - soft_gate_offer_refund
 guidelines:
   - handoff_etiquette
-  - include_order_id_in_handoff
-  - no_refund_without_order_id
-  - new_order_without_order_id
 allowed_handovers:
   - order_agent
   - inventory_agent

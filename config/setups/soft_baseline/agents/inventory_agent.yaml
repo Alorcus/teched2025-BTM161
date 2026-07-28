@@ -28,11 +28,11 @@ guardrails:
   - allowed_handover_targets
   - gate_check_inventory
   - gate_update_stock
-  - place_on_tray_item_in_order
-  - gate_place_on_tray
+  - soft_allowed_handover_targets
+  - soft_gate_check_inventory
+  - soft_gate_update_stock
 guidelines:
   - handoff_etiquette
-  - include_order_id_in_handoff
 allowed_handovers:
   - barista_agent
   - customer_service_agent

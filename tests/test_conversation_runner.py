@@ -24,6 +24,7 @@ def _make_mock_shop():
     shop = MagicMock()
     shop._get_config.return_value = {"configurable": {"thread_id": "test"}}
     shop.customer_agent = MagicMock()
+    shop.customer_agent.last_terminating_message = None
     return shop
 
 
@@ -768,6 +769,22 @@ class TestPublishMessageNormallyThoughtSalvage(unittest.TestCase):
         events = bus.drain()
         self.assertEqual([e.event_type for e in events], [EventType.AGENT_MESSAGE])
         self.assertEqual(events[0].content, "Your latte is ready.")
+
+    def test_text_only_list_content_flattened_before_publish(self):
+        """Regression guard: Anthropic occasionally returns a text-only turn
+        as a list of content blocks. The runner must flatten that to a plain
+        string before publishing so downstream consumers (dashboard rejection
+        matcher, log formatter) can compare content by string equality."""
+        runner, bus = self._make_runner()
+        msg = AIMessage(
+            content=[{"type": "text", "text": "Would you like a latte?"}],
+            tool_calls=[],
+        )
+        runner._publish_message(msg, "barista")
+        events = bus.drain()
+        self.assertEqual([e.event_type for e in events], [EventType.AGENT_MESSAGE])
+        self.assertIsInstance(events[0].content, str)
+        self.assertEqual(events[0].content, "Would you like a latte?")
 
 
 if __name__ == "__main__":

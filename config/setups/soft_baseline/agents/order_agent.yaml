@@ -31,6 +31,8 @@ guardrails:
   - discount_within_30pct
   - handover_appropriateness_soft_stub
   - off_menu_recommendation
+  - soft_allowed_handover_targets
+  - soft_discount_within_30pct
 guidelines:
   - handoff_etiquette
 allowed_handovers:

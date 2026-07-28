@@ -60,6 +60,7 @@ def _build_guardrail(entry: dict) -> Guardrail:
 
     return SoftGuardrail(
         judge_prompt=entry.get("judge_prompt", ""),
+        user_template=entry.get("user_template", "{message}"),
         state_dependencies=list(entry.get("state_dependencies", [])),
         **common,
     )

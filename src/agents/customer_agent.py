@@ -79,13 +79,15 @@ class CustomerAgent:
         self.history = []
         self.scenario = CUSTOMER_SCENARIOS[0]
         self.custom_prompt: str | None = None
-        self.max_turns = 15
+        self.max_turns = 150
         self.turn_count = 0
+        self.last_terminating_message: str | None = None
 
     def reset(self, scenario_index=None, custom_prompt=None):
         self.history = []
         self.turn_count = 0
         self.custom_prompt = custom_prompt
+        self.last_terminating_message = None
         if scenario_index is not None and 0 <= scenario_index < len(CUSTOMER_SCENARIOS):
             self.scenario = CUSTOMER_SCENARIOS[scenario_index]
             self.scenario_index = scenario_index
@@ -190,7 +192,7 @@ Guidelines:
             }
 
         return {
-            "feedback_score": 0.5,
+            "feedback_score": None,
             "feedback_reason": "Fallback used because the model response was invalid.",
             "raw_feedback_response": raw,
             "valid": False,
@@ -213,9 +215,14 @@ Guidelines:
         return text
 
     def respond_to(self, agent_message):
-        """Return the customer's next message, or None to end the conversation."""
+        """Return the customer's next message, or None to end the conversation.
+
+        When the conversation ends, the terminating text (if any) is stashed on
+        `self.last_terminating_message` so callers can surface it in transcripts.
+        """
         self.turn_count += 1
         if self.turn_count >= self.max_turns:
+            self.last_terminating_message = f"[max_turns={self.max_turns} reached]"
             return None
 
         self.history.append(("agent", agent_message))
@@ -233,6 +240,7 @@ Guidelines:
         text = normalize_content(response.content).strip()
 
         if text.upper() == "DONE" or (len(text) <= 10 and "DONE" in text.upper()):
+            self.last_terminating_message = text
             return None
 
         self.history.append(("customer", text))

@@ -10,25 +10,10 @@ from .eventlog_helpers import (
     event_case_map,
     flat_event_table,
 )
-from .feedback_section import _SCENARIO_NAMES
 from .styling_helpers import COLOR_SCHEME, section_header, subsection_header
 
 _WITH_COLOR = COLOR_SCHEME["orange"]
 _WITHOUT_COLOR = COLOR_SCHEME["beige"]
-# Assigned to scenarios by index; scenarios beyond the list fall back to gray.
-_SCENARIO_COLORS = [
-    "#B3541E",  # 0 Large latte & croissant
-    "#3E7CB1",  # 1 2 espressos (hurry)
-    "#8E3A6E",  # 2 Complaint & resolution
-    "#4E9A43",  # 3 Ask for recommendation
-    "#B08300",  # 4 Tea only (stubborn)
-    "#5A67D8",  # 5 Buy everything (rich)
-]
-_SCENARIO_COLOR_MAP = {
-    name: _SCENARIO_COLORS[i]
-    for i, name in _SCENARIO_NAMES.items()
-    if i < len(_SCENARIO_COLORS)
-} | {"Unknown scenario": "#8A8A8A"}
 
 _FLAG_LABELS = {
     "has_brew_failure": "Brew failure",
@@ -40,7 +25,8 @@ _MIN_CASES = 5
 # Rank correlation needs more points than an average to be meaningful.
 _MIN_CASES_FOR_CORR = 10
 # One bar per repeat count: 0 = tool-free cases, 1 = every activity at most
-# once.
+# once. The upper bucket is open-ended so high-repeat retry loops are never
+# silently dropped from the chart.
 _REPEAT_BUCKETS = [(n, n, str(n)) for n in range(5)] + [(5, 999, "5+")]
 
 
@@ -55,18 +41,17 @@ class ComplexitySection:
             return pn.pane.HTML(
                 '<div style="font-size:11px;color:#999;padding:4px 0;">'
                 "No feedback scores available — complexity correlation needs "
-                "cases with customer feedback.</div>",
+                "conversations with customer feedback.</div>",
                 sizing_mode="stretch_width",
             )
         return pn.Column(
-            section_header("Feedback × Process Complexity"),
+            section_header("Process Complexity"),
             pn.Row(
                 self._flag_impact_chart(),
                 self._repeats_impact_chart(),
                 sizing_mode="stretch_width",
             ),
             self._activity_impact_table(),
-            self._trace_length_scatter(),
             sizing_mode="stretch_width",
         )
 
@@ -74,7 +59,7 @@ class ComplexitySection:
     def _flag_impact_chart(self) -> pn.viewable.Viewable:
         rows = []
         for flag, label in _FLAG_LABELS.items():
-            for present, group in ((True, "Cases with event"), (False, "Cases without event")):
+            for present, group in ((True, "Conversations with event"), (False, "Conversations without event")):
                 sub = self._fb.filter(pl.col(flag) == present)
                 if sub.is_empty():
                     continue
@@ -92,8 +77,8 @@ class ComplexitySection:
             x="marker", y="avg", color="group",
             barmode="group", text="text",
             color_discrete_map={
-                "Cases with event": _WITH_COLOR,
-                "Cases without event": _WITHOUT_COLOR,
+                "Conversations with event": _WITH_COLOR,
+                "Conversations without event": _WITHOUT_COLOR,
             },
             labels={"marker": "", "avg": "Avg feedback score", "group": ""},
         )
@@ -108,11 +93,11 @@ class ComplexitySection:
         )
         return pn.Column(
             subsection_header(
-                f"Avg Feedback by Process Event (n={self._fb.height} cases)"
+                f"Avg Feedback by Process Event (n={self._fb.height} conversations)"
             ),
             pn.pane.HTML(
                 '<div style="font-size:10px;color:#999;margin-bottom:2px;">'
-                "Avg score in cases with vs without the event — "
+                "Avg score in conversations with vs without the event — "
                 "a wide gap flags the event as a sign of unhappy customers.</div>",
                 sizing_mode="stretch_width",
             ),
@@ -141,7 +126,7 @@ class ComplexitySection:
             x="bucket", y="avg", text="text",
             color_discrete_sequence=['#B3541E'],
             labels={
-                "bucket": "Max repeats of one activity in a case",
+                "bucket": "Max repeats of one activity in a conversation",
                 "avg": "Avg feedback score",
             },
         )
@@ -160,7 +145,7 @@ class ComplexitySection:
             pn.pane.HTML(
                 '<div style="font-size:10px;color:#999;margin-bottom:2px;">'
                 "How often the most-repeated single activity occurred within a "
-                "case — repeats &ge;3 usually mean agent retry loops.</div>",
+                "conversation — repeats &ge;3 usually mean agent retry loops.</div>",
                 sizing_mode="stretch_width",
             ),
             pn.pane.Plotly(fig, height=220, sizing_mode="stretch_width"),
@@ -219,7 +204,7 @@ class ComplexitySection:
         if stats.is_empty():
             return pn.pane.HTML(
                 '<div style="font-size:11px;color:#999;padding:4px 0;">'
-                f"No activity occurs in at least {_MIN_CASES} cases on both "
+                f"No activity occurs in at least {_MIN_CASES} conversations on both "
                 "sides — not enough data for activity impact.</div>",
                 sizing_mode="stretch_width",
             )
@@ -251,7 +236,7 @@ class ComplexitySection:
             '<table style="font-size:11px;border-collapse:collapse;color:#333;">'
             "<thead><tr style='color:#999;text-align:left;'>"
             '<th style="padding:3px 10px 3px 0;font-weight:600;">Activity</th>'
-            '<th style="padding:3px 10px;text-align:right;font-weight:600;">Cases</th>'
+            '<th style="padding:3px 10px;text-align:right;font-weight:600;">Conversations</th>'
             '<th style="padding:3px 10px;text-align:right;font-weight:600;">Avg with</th>'
             '<th style="padding:3px 10px;text-align:right;font-weight:600;">Avg without</th>'
             '<th style="padding:3px 10px;text-align:right;font-weight:600;">&Delta;</th>'
@@ -262,74 +247,15 @@ class ComplexitySection:
             subsection_header("Activity Impact on Feedback"),
             pn.pane.HTML(
                 '<div style="font-size:10px;color:#999;margin-bottom:4px;">'
-                "Avg feedback in cases where the activity occurs vs cases where it "
-                f"does not (activities present in &ge;{_MIN_CASES} cases on both sides). "
+                "Avg feedback in conversations where the activity occurs vs conversations where it "
+                f"does not (activities present in &ge;{_MIN_CASES} conversations on both sides). "
                 "Negative &Delta; marks activities associated with unhappy customers — "
                 "association, not causation. Repeat corr: rank correlation between "
-                "how often the activity repeats within a case and the feedback score "
-                f"(shown for &ge;{_MIN_CASES_FOR_CORR} cases with varying counts); "
+                "how often the activity repeats within a conversation and the feedback score "
+                f"(shown for &ge;{_MIN_CASES_FOR_CORR} conversations with varying counts); "
                 "negative means repeats hurt.</div>"
                 f'<div style="overflow-x:auto;">{table_html}</div>',
                 sizing_mode="stretch_width",
             ),
-            sizing_mode="stretch_width",
-        )
-
-    # Chart Feedback vs Trace Length
-    def _trace_length_scatter(self) -> pn.viewable.Viewable:
-        df = self._fb.with_columns(
-            scenario=pl.col("scenario_index")
-            .cast(pl.Int64, strict=False)
-            .map_elements(
-                lambda i: _SCENARIO_NAMES.get(i, f"Scenario {i}"),
-                return_dtype=pl.Utf8,
-            )
-            .fill_null("Unknown scenario")
-        ).to_pandas()
-
-        # Fall back to gray for scenario labels outside the fixed map
-        color_map = {
-            s: _SCENARIO_COLOR_MAP.get(s, "#8A8A8A")
-            for s in df["scenario"].unique()
-        }
-        fig = px.scatter(
-            df,
-            x="trace_length", y="feedback_score",
-            color="scenario",
-            color_discrete_map=color_map,
-            hover_data={
-                "case_id": True,
-                "max_activity_repeats": True,
-                "scenario": False,
-            },
-            labels={
-                "trace_length": "Events per case",
-                "feedback_score": "Feedback score",
-                "scenario": "",
-            },
-        )
-        # opacity makes exact-overlap stacks read darker than single points
-        fig.update_traces(
-            marker=dict(size=9, opacity=0.55, line=dict(width=1.5, color="white"))
-        )
-        fig.update_layout(
-            margin=dict(l=30, r=10, t=15, b=30),
-            height=260,
-            font=dict(size=10),
-            plot_bgcolor=COLOR_SCHEME["off-white"],
-            yaxis=dict(range=[-0.05, 1.05]),
-            legend=dict(orientation="h", yanchor="bottom", y=1.0, x=0),
-        )
-        return pn.Column(
-            subsection_header(
-                f"Feedback vs Trace Length (n={self._fb.height} cases)"
-            ),
-            pn.pane.HTML(
-                '<div style="font-size:10px;color:#999;margin-bottom:2px;">'
-                "Trace length largely reflects the scenario — compare points "
-                "within one color, not across colors.</div>",
-                sizing_mode="stretch_width",
-            ),
-            pn.pane.Plotly(fig, height=260, sizing_mode="stretch_width"),
             sizing_mode="stretch_width",
         )

@@ -6,25 +6,64 @@ import polars as pl
 
 from src.trace_processing.eventlog_conversion import ObjectCentricEventlog
 
-from .eventlog_helpers import flat_event_table
-from .styling_helpers import COLOR_SCHEME, kpi_card, kpi_row, subsection_header
+from .eventlog_helpers import agent_event_counts, flat_event_table, per_order_durations
+from .styling_helpers import (
+    AGENT_COLORS,
+    COLOR_SCHEME,
+    kpi_card,
+    kpi_row,
+    per_order_kpi_card,
+    subsection_header,
+)
+
+
+# Per-order KPI configuration (moved from the retired TimeMetricsSection).
+# (label, subtitle, column-in-per_order_durations, unit)
+_PER_ORDER_CARDS: list[tuple[str, str, str, str]] = [
+    (
+        "Total Order Time",
+        "From the customer's first message until the conversation ends.",
+        "full_duration_s",
+        "orders",
+    ),
+    (
+        "Fulfillment Time",
+        "From order placement until the last activity in the order.",
+        "pipeline_duration_s",
+        "orders",
+    ),
+    (
+        "Time to Tray",
+        "From order placement until every item is on the customer's tray.",
+        "confirm_to_tray_s",
+        "orders",
+    ),
+]
 
 
 class OverviewSection:
+    """Unheaded intro strip: log-level KPIs, per-order times, tokens, and
+    the agent workload chart. Reads as the 'at a glance' band above the
+    analytical sections."""
+
     def __init__(self, ocel: ObjectCentricEventlog, log_path: Path):
         self._ocel = ocel
         self._log_path = log_path
-        self._messages_per_conversation = self._compute_messages_per_conversation()
+        self._events_flat = flat_event_table(self._ocel)
         self._pane = pn.Column(
             self._build_header(),
-            self._build_kpi_row(),
-            subsection_header("Messages per Conversation"),
-            self._build_messages_distribution_chart(),
+            self._build_overview_kpi_row(),
+            self._build_time_kpi_row(),
+            self._build_tokens_kpi_row(),
+            subsection_header("Agent Workload", top_margin=10),
+            self._build_agent_workload_chart(),
             sizing_mode="stretch_width",
         )
 
     def panel(self) -> pn.viewable.Viewable:
         return self._pane
+
+    # ---- Log meta line ------------------------------------------------
 
     def _build_header(self) -> pn.pane.HTML:
         return pn.pane.HTML(
@@ -35,103 +74,98 @@ class OverviewSection:
             sizing_mode="stretch_width",
         )
 
-    def _build_kpi_row(self) -> pn.pane.HTML:
-        events_flat = flat_event_table(self._ocel)
-        is_handover = events_flat["ocel_type"].str.contains("_handover_")
-        non_handover = events_flat.filter(~is_handover)
-        handover = events_flat.filter(is_handover)
-        token_events = events_flat.filter(
-            pl.col("input_tokens").is_not_null() & pl.col("response_tokens").is_not_null()
-        )
-        input_tokens = int(token_events["input_tokens"].sum()) if token_events.height else 0
-        response_tokens = int(token_events["response_tokens"].sum()) if token_events.height else 0
-        avg_messages = (
-            float(self._messages_per_conversation.mean())
-            if self._messages_per_conversation.len()
-            else None
-        )
+    # ---- Overview KPI row (6 cards) -----------------------------------
+
+    def _build_overview_kpi_row(self) -> pn.pane.HTML:
+        is_handover = self._events_flat["ocel_type"].str.contains("_handover_")
+        non_handover = self._events_flat.filter(~is_handover)
+        handover = self._events_flat.filter(is_handover)
+
+        conversation_count = self._ocel.objects.filter(
+            pl.col("ocel_type") == "user"
+        ).height
+
+        # Avg messages per conversation: same computation the distribution
+        # chart in ConversationCompositionSection uses — we only need the
+        # mean here, so recomputing is cheap and keeps this class free of
+        # any dependency on the composition section.
+        avg_messages = self._avg_messages_per_conversation(conversation_count)
 
         cards = [
             ("Total Events", f"{self._ocel.events.height:,}"),
+            ("Number of Conversations", f"{conversation_count:,}"),
             ("Unique Event Types", f"{non_handover['ocel_type'].n_unique()}"),
             ("Agent Handovers", f"{handover.height:,}"),
             ("Avg Messages / Conversation",
              f"{avg_messages:.1f}" if avg_messages is not None else "—"),
-            ("Input Tokens", f"{input_tokens:,}" if input_tokens > 0 else "—"),
-            ("Response Tokens", f"{response_tokens:,}" if response_tokens > 0 else "—"),
         ]
         cards_html = "".join(kpi_card(title, value) for title, value in cards)
-        return kpi_row(cards_html, columns=6)
+        return kpi_row(cards_html, columns=5)
 
-    def _compute_messages_per_conversation(self) -> pl.Series:
-        """Message count per conversation (one row per user object).
-
-        A message is a tool call, handover, or agent reply to the user (i.e. any
-        event qualified by an agent object, excluding the internal `call_llm`
-        span). User prompts, user feedback, and coffee-machine events are
-        excluded by virtue of their non-agent qualifier. Conversations with
-        zero messages are included as zeros so the distribution reflects the
-        full sample.
-
-        Agent object ids follow the pattern ``<user-uuid>_<agent-name>``; the
-        user uuid is used as the conversation key.
-        """
+    def _avg_messages_per_conversation(self, conversation_count: int) -> float | None:
+        if conversation_count == 0:
+            return None
         agent_types = {"order_agent", "inventory_agent",
                        "barista_agent", "customer_service_agent"}
-        conversations = self._ocel.objects.filter(pl.col("ocel_type") == "user")
-        if conversations.is_empty():
-            return pl.Series("messages", [], dtype=pl.Int64)
-
-        events_flat = flat_event_table(self._ocel)
         agent_messages = (
             self._ocel.event_object
             .filter(pl.col("ocel_qualifier").is_in(agent_types))
-            .with_columns(
-                pl.col("ocel_object_id").str.split("_").list.first().alias("user_id")
-            )
-            .select("ocel_event_id", "user_id")
+            .select("ocel_event_id")
             .unique()
         )
-        counts = (
-            events_flat.filter(pl.col("ocel_type") != "call_llm")
+        message_events = (
+            self._events_flat.filter(pl.col("ocel_type") != "call_llm")
             .join(agent_messages, left_on="ocel_id", right_on="ocel_event_id", how="inner")
-            .group_by("user_id")
-            .agg(pl.len().alias("messages"))
         )
-        per_conv = (
-            conversations.select(pl.col("ocel_id").alias("user_id"))
-            .join(counts, on="user_id", how="left")
-            .with_columns(pl.col("messages").fill_null(0))
-        )
-        return per_conv["messages"]
+        return message_events.height / conversation_count
 
-    def _build_messages_distribution_chart(self) -> pn.viewable.Viewable:
-        counts = self._messages_per_conversation
-        n = counts.len()
-        if n == 0:
-            return pn.pane.Alert("No conversations in this log.", alert_type="info")
+    # ---- Time KPI row (3 cards) ---------------------------------------
 
-        fig = px.box(
-            counts.to_pandas().to_frame(name="messages"),
-            x="messages",
-            points="all",
-            hover_data={"messages": True},
+    def _build_time_kpi_row(self) -> pn.viewable.Viewable:
+        order_durations = per_order_durations(self._ocel)
+        if order_durations.is_empty():
+            return pn.pane.Alert("No per-order data in this log.", alert_type="info")
+
+        cards_html = "".join(
+            per_order_kpi_card(title, subtitle, order_durations[col], unit=unit)
+            for title, subtitle, col, unit in _PER_ORDER_CARDS
         )
-        fig.update_traces(
-            marker=dict(color=COLOR_SCHEME["orange"], size=6, opacity=0.75),
-            line=dict(color=COLOR_SCHEME["brown"]),
-            fillcolor=COLOR_SCHEME["beige"],
-            jitter=0.4,
-            pointpos=0,
+        return kpi_row(cards_html, columns=3, top_padding=8)
+
+    # ---- Tokens KPI row (2 cards) -------------------------------------
+
+    def _build_tokens_kpi_row(self) -> pn.pane.HTML:
+        token_events = self._events_flat.filter(
+            pl.col("input_tokens").is_not_null() & pl.col("response_tokens").is_not_null()
         )
-        median = int(counts.median()) if n else 0
+        input_tokens = int(token_events["input_tokens"].sum()) if token_events.height else 0
+        response_tokens = int(token_events["response_tokens"].sum()) if token_events.height else 0
+        cards_html = "".join([
+            kpi_card("Input Tokens", f"{input_tokens:,}" if input_tokens > 0 else "—"),
+            kpi_card("Response Tokens", f"{response_tokens:,}" if response_tokens > 0 else "—"),
+        ])
+        return kpi_row(cards_html, columns=2, top_padding=8)
+
+    # ---- Agent workload chart -----------------------------------------
+
+    def _build_agent_workload_chart(self) -> pn.viewable.Viewable:
+        agent_counts = agent_event_counts(self._ocel)
+        if not agent_counts.height:
+            return pn.pane.Alert(
+                "No agent–event relationships found in this log.",
+                alert_type="info",
+            )
+        fig = px.bar(
+            agent_counts.to_pandas(),
+            x="agent", y="event_count",
+            color="agent", color_discrete_map=AGENT_COLORS,
+            labels={"agent": "Agent", "event_count": "Events Handled"},
+        )
         fig.update_layout(
-            xaxis_title=f"Messages per conversation  ·  n={n}  ·  median={median}",
-            yaxis=dict(visible=False),
-            margin=dict(l=10, r=10, t=5, b=30),
-            height=140,
+            showlegend=False,
+            margin=dict(l=30, r=10, t=5, b=25),
+            height=180,
             font=dict(size=10),
             plot_bgcolor=COLOR_SCHEME["off-white"],
-            showlegend=False,
         )
-        return pn.pane.Plotly(fig, height=140, sizing_mode="stretch_width")
+        return pn.pane.Plotly(fig, height=180, sizing_mode="stretch_width")
