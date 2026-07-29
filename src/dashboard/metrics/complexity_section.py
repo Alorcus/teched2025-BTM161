@@ -24,12 +24,10 @@ _FLAG_LABELS = {
 _MIN_CASES = 5
 # Rank correlation needs more points than an average to be meaningful.
 _MIN_CASES_FOR_CORR = 10
-# Buckets 0 (tool-free cases) and 1 (each activity ran exactly once) are shown
-# separately because they represent very different conversation shapes. The
-# upper bucket is open-ended so high-repeat retry loops are never silently
-# dropped from the chart.
-# 2-3 are collapsed together since they have very similar score in test samples, and makes the chart cleaner
-_REPEAT_BUCKETS = [(0, 0, "0"), (1, 1, "1"), (2, 3, "2–3"), (4, 4, "4"), (5, 999, "5+")]
+# One bar per repeat count: 0 = tool-free cases, 1 = every activity at most
+# once. The upper bucket is open-ended so high-repeat retry loops are never
+# silently dropped from the chart.
+_REPEAT_BUCKETS = [(n, n, str(n)) for n in range(5)] + [(5, 999, "5+")]
 
 
 class ComplexitySection:
