@@ -17,8 +17,8 @@ guidelines:
   - id: offer_alternatives_when_blocked
     version: v1
     prompt: |
-      If a tool call is denied by a guardrail, do not simply apologize and
-      stop. Look at what the customer wanted and offer the closest allowed
+      If a tool call is blocked, do not just apologize and stop.
+      Look at what the customer wanted and offer the closest allowed
       alternative — a smaller order, a different item, a different action
       on your part. Only escalate or refuse outright if no alternative
       exists.

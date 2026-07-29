@@ -28,7 +28,7 @@ tools:
   - transfer_to_agent
 guardrails:
   - handover:allowed_targets
-  - calculate_total:discount_within_limit
+  - calculate_total:discount_within_limit_30pct
   - assistant_message:on_menu_only
   - process_order:items_on_menu
   - transfer:context_summary_nonempty

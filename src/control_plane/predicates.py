@@ -317,7 +317,7 @@ def process_order_items_on_menu_predicate(effect: str = "deny"):
     def _eval(context: GuardrailContext) -> Verdict:
         # Lazy import: mirrors _template_vars in guardrails.py; avoids agent-package
         # cold-import cost on control-plane load.
-        from src.agents.shared_components import MENU
+        from src.agents.shared_components import ALLOWED_EXTRAS, MENU
 
         order = context.tool_args.get("order")
         if not isinstance(order, list):
@@ -348,7 +348,9 @@ def process_order_items_on_menu_predicate(effect: str = "deny"):
             reason_internal=f"off-menu items in order: {bad}",
             reason_for_llm=(
                 f"Cannot place this order: item(s) {bad} are not on the menu. "
-                f"The menu is: {sorted(MENU.keys())}. Adjust the order to only include on-menu items."
+                f"The menu is: {sorted(MENU.keys())}. "
+                f"Allowed extras/modifiers (which are NOT standalone items): {sorted(ALLOWED_EXTRAS)}. "
+                f"Adjust the order to only include on-menu items."
             ),
         )
 

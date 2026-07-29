@@ -72,7 +72,7 @@ class SoftBaselineCatalogWiringTest(unittest.TestCase):
         catalog = _catalog()
         expected = [
             "soft_handover:allowed_targets",
-            "soft_calculate_total:discount_within_limit",
+            "soft_calculate_total:discount_within_limit_30pct",
             "soft_check_inventory:order_status",
             "soft_update_stock:order_status",
             "soft_start_preparation:order_status",
@@ -93,7 +93,7 @@ class SoftBaselineCatalogWiringTest(unittest.TestCase):
         catalog = _catalog()
         for hard_id in (
             "handover:allowed_targets",
-            "calculate_total:discount_within_limit",
+            "calculate_total:discount_within_limit_30pct",
             "check_inventory:order_status",
             "update_stock:order_status",
             "start_preparation:order_status",
@@ -194,13 +194,13 @@ class SoftAllowedHandoverTargetsTest(unittest.TestCase):
 
 
 class SoftDiscountWithinLimitTest(unittest.TestCase):
-    """LLM-as-judge counterpart to calculate_total:discount_within_limit — denies
+    """LLM-as-judge counterpart to calculate_total:discount_within_limit_30pct — denies
     when the judge finds a discount above the 30% cap (parallel hard rule stays
     as a flag-only observability shadow)."""
 
     def _eval(self, invoker, discount: int):
         catalog = _catalog()
-        gr = _install_stub(catalog, "soft_calculate_total:discount_within_limit", invoker)
+        gr = _install_stub(catalog, "soft_calculate_total:discount_within_limit_30pct", invoker)
         context = GuardrailContext(
             agent_id="order_agent",
             tool_name="calculate_total",
@@ -212,7 +212,7 @@ class SoftDiscountWithinLimitTest(unittest.TestCase):
 
     def test_wiring_deny(self):
         """Soft counterpart enforces (deny) while the parallel hard rule stays flag."""
-        [gr] = _catalog().guardrails(["soft_calculate_total:discount_within_limit"])
+        [gr] = _catalog().guardrails(["soft_calculate_total:discount_within_limit_30pct"])
         self.assertEqual(gr.effect, Effect.DENY)
         self.assertIn("calculate_total", gr.tools)
 

@@ -8,7 +8,7 @@ guardrails:
     description: Handover target must be in the calling agent's allowed_handovers list.
     predicate: allowed_handover_targets
 
-  - id: calculate_total:discount_within_limit
+  - id: calculate_total:discount_within_limit_30pct
     type: hard
     version: v1
     tools:
@@ -154,7 +154,7 @@ guardrails:
     tools:
       - offer_partial_refund
     effect: deny
-    description: Sanity gate — partial refund percent must not exceed 100. Tighter policy caps live in sensible_ranges / narrow_ranges.
+    description: Sanity gate — partial refund percent must not exceed 100.
     predicate: refund_within_limit
     predicate_args:
       max_pct: 100
@@ -193,9 +193,9 @@ guardrails:
     judge_prompt: |
       You are auditing a proposed agent-to-agent handover in a coffee-shop
       multi-agent system. Each specialist has a scope:
-        - order_agent: takes new orders, prices them, calls process_order
+        - order_agent: talk to customer for new orders, prices them, creates orders
         - inventory_agent: checks stock, updates stock, places food on tray
-        - barista_agent: brews coffee (start/end_preparation, clean_machine)
+        - barista_agent: brews coffee (start/end_preparation, clean_machine), places coffee on tray
         - customer_service_agent: handles complaints and refunds
 
       Calling agent: {agent_id}

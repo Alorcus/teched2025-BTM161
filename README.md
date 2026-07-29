@@ -50,7 +50,7 @@ A **setup** is a self-contained configuration of agents, guardrails, and guideli
 
 Every guardrail and guideline id follows one shape so the catalogue reads consistently:
 
-- **Guardrails**: `<tool_scope>:<what_is_checked>` — e.g. `handover:allowed_targets`, `check_inventory:order_status`, `calculate_total:discount_within_limit`. Numeric bounds live in `predicate_args`, never in the id — tightening a cap does not require renaming the guardrail.
+- **Guardrails**: `<tool_scope>:<what_is_checked>` — e.g. `handover:allowed_targets`, `check_inventory:order_status`, `calculate_total:discount_within_limit`. Numeric bounds live in `predicate_args`, never in the id — *unless* the same rule appears with different bounds across setups; in that case the bound is suffixed to the id (e.g. `calculate_total:discount_within_limit_30pct` vs. `_20pct` vs. `_0pct`) so the two variants stay distinguishable in cross-setup analysis.
 - **Soft (LLM-judge) counterparts** keep a `soft_` prefix on the hard id — e.g. `soft_check_inventory:order_status`.
 - **Guidelines**: `<verb>_<object>` — verb-first, describes the behavior the agent should perform. E.g. `provide_handoff_context`, `include_order_id_in_handoff`, `summarize_before_handoff`.
 

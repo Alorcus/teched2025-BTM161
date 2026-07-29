@@ -28,11 +28,16 @@ tools:
   - transfer_to_agent
 guardrails:
   - handover:allowed_targets
-  - calculate_total:discount_within_limit
+  - calculate_total:discount_within_limit_30pct
   - create_order:size_within_range
   - create_order:total_within_limit
   - process_order:max_calls
   - calculate_total:max_calls
+  - assistant_message:on_menu_only
+  - process_order:items_on_menu
+  - transfer:context_summary_nonempty
+  - handover:reason_matches_target
+  - assistant_message:no_price_promises
 guidelines:
   - provide_handoff_context
   - summarize_before_handoff

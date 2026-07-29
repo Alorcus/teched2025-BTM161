@@ -30,7 +30,7 @@ tools:
 - transfer_to_agent
 guardrails:
 - handover:allowed_targets
-- calculate_total:discount_within_limit
+- calculate_total:discount_within_limit_20pct
 - process_order:max_calls
 - process_order:items_on_menu
 - transfer:context_summary_nonempty
@@ -41,7 +41,7 @@ guardrails:
 - handover:reason_matches_target
 - assistant_message:no_price_promises
 - soft_handover:allowed_targets
-- soft_calculate_total:discount_within_limit
+- soft_calculate_total:discount_within_limit_20pct
 - soft_process_order:max_calls
 - soft_process_order:items_on_menu
 - soft_transfer:context_summary_nonempty
