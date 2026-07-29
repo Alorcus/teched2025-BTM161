@@ -130,34 +130,34 @@ class ApplyFiltersTests(unittest.TestCase):
         self.wide_end = t0 + timedelta(hours=2)
 
     def test_no_filters_passes_all(self):
-        got = _apply_filters(self.cm, self.wide_start, self.wide_end, [], [])
+        got = _apply_filters(self.cm, self.wide_start, self.wide_end, [], [], [])
         self.assertEqual(got.height, 5)
 
     def test_scenario_filter(self):
-        got = _apply_filters(self.cm, self.wide_start, self.wide_end, [0], [])
+        got = _apply_filters(self.cm, self.wide_start, self.wide_end, [0], [], [])
         self.assertEqual(set(got["case_id"].to_list()), {"c0", "c2"})
 
     def test_scenario_multi_select(self):
-        got = _apply_filters(self.cm, self.wide_start, self.wide_end, [0, 1], [])
+        got = _apply_filters(self.cm, self.wide_start, self.wide_end, [0, 1], [], [])
         self.assertEqual(set(got["case_id"].to_list()), {"c0", "c1", "c2"})
 
     def test_unspecified_scenario_bucket(self):
-        got = _apply_filters(self.cm, self.wide_start, self.wide_end, [-1], [])
+        got = _apply_filters(self.cm, self.wide_start, self.wide_end, [-1], [], [])
         self.assertEqual(set(got["case_id"].to_list()), {"c4"})
 
     def test_setup_filter(self):
-        got = _apply_filters(self.cm, self.wide_start, self.wide_end, [], ["baseline"])
+        got = _apply_filters(self.cm, self.wide_start, self.wide_end, [], ["baseline"], [])
         self.assertEqual(set(got["case_id"].to_list()), {"c0", "c1"})
 
     def test_unknown_setup_bucket(self):
         """None in the setups list is the '(unknown)' bucket — cases whose
         MLflow trace carried no `setup` tag."""
-        got = _apply_filters(self.cm, self.wide_start, self.wide_end, [], [None])
+        got = _apply_filters(self.cm, self.wide_start, self.wide_end, [], [None], [])
         self.assertEqual(set(got["case_id"].to_list()), {"c4"})
 
     def test_setup_or_unknown(self):
         got = _apply_filters(
-            self.cm, self.wide_start, self.wide_end, [], ["baseline", None]
+            self.cm, self.wide_start, self.wide_end, [], ["baseline", None], []
         )
         self.assertEqual(set(got["case_id"].to_list()), {"c0", "c1", "c4"})
 
@@ -166,7 +166,7 @@ class ApplyFiltersTests(unittest.TestCase):
         c2 has scenario 0 but different setup, c1 matches setup but different
         scenario."""
         got = _apply_filters(
-            self.cm, self.wide_start, self.wide_end, [0], ["baseline"]
+            self.cm, self.wide_start, self.wide_end, [0], ["baseline"], []
         )
         self.assertEqual(set(got["case_id"].to_list()), {"c0"})
 
@@ -179,13 +179,13 @@ class ApplyFiltersTests(unittest.TestCase):
             self.cm,
             t0 + timedelta(seconds=30),
             t0 + timedelta(seconds=70),
-            [], [],
+            [], [], [],
         )
         # c0's first_t = t0 is BEFORE start, so it's not contained.
         self.assertNotIn("c0", got["case_id"].to_list())
 
     def test_empty_metadata_returns_empty(self):
-        got = _apply_filters(pl.DataFrame(), self.wide_start, self.wide_end, [], [])
+        got = _apply_filters(pl.DataFrame(), self.wide_start, self.wide_end, [], [], [])
         self.assertEqual(got.height, 0)
 
 
@@ -210,7 +210,7 @@ class CaseCountsTests(unittest.TestCase):
             self.cm,
             self.t0,
             self.t0 + timedelta(minutes=5),
-            [], [],
+            [], [], [],
         )
         self.assertEqual((contained, partial), (1, 1))
 
@@ -221,7 +221,7 @@ class CaseCountsTests(unittest.TestCase):
             self.cm,
             self.t0,
             self.t0 + timedelta(minutes=5),
-            [1], [],
+            [1], [], [],
         )
         self.assertEqual((contained, partial), (0, 1))
 
@@ -231,21 +231,21 @@ class SameFilterTests(unittest.TestCase):
 
     def test_identical(self):
         t0 = datetime(2026, 7, 6, 10, 0, 0)
-        d = {"start": t0, "end": t0 + timedelta(hours=1), "scenarios": [1, 0], "setups": ["baseline"]}
+        d = {"start": t0, "end": t0 + timedelta(hours=1), "scenarios": [1, 0], "setups": ["baseline"], "models": []}
         # Note reordered scenarios in one copy — sorted() comparison must ignore order.
-        e = {"start": t0, "end": t0 + timedelta(hours=1), "scenarios": [0, 1], "setups": ["baseline"]}
+        e = {"start": t0, "end": t0 + timedelta(hours=1), "scenarios": [0, 1], "setups": ["baseline"], "models": []}
         self.assertTrue(_same_filter(d, e))
 
     def test_different_time(self):
         t0 = datetime(2026, 7, 6, 10, 0, 0)
-        d = {"start": t0, "end": t0 + timedelta(hours=1), "scenarios": [], "setups": []}
-        e = {"start": t0, "end": t0 + timedelta(hours=2), "scenarios": [], "setups": []}
+        d = {"start": t0, "end": t0 + timedelta(hours=1), "scenarios": [], "setups": [], "models": []}
+        e = {"start": t0, "end": t0 + timedelta(hours=2), "scenarios": [], "setups": [], "models": []}
         self.assertFalse(_same_filter(d, e))
 
     def test_none_in_setups_ordering(self):
         t0 = datetime(2026, 7, 6, 10, 0, 0)
-        d = {"start": t0, "end": t0, "scenarios": [], "setups": [None, "baseline"]}
-        e = {"start": t0, "end": t0, "scenarios": [], "setups": ["baseline", None]}
+        d = {"start": t0, "end": t0, "scenarios": [], "setups": [None, "baseline"], "models": []}
+        e = {"start": t0, "end": t0, "scenarios": [], "setups": ["baseline", None], "models": []}
         self.assertTrue(_same_filter(d, e))
 
 
