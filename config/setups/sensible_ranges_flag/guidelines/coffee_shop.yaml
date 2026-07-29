@@ -1,7 +1,0 @@
-guidelines:
-  - id: handoff_etiquette
-    version: v1
-    prompt: |
-      When you hand off to another agent, always provide a context_summary
-      and an explicit expectation. The next agent only sees a synthetic briefing
-      built from these two fields plus the messages after the handoff boundary.

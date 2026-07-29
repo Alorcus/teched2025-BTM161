@@ -1,6 +1,6 @@
 import re
 
-from src.agents.order_store import is_item_in_order, load_order
+from src.agents.order_store import load_order, load_recent_order
 
 from .types import Effect, GuardrailContext, Verdict
 
@@ -307,38 +307,142 @@ def order_total_within_limit_predicate(max_total: float, effect: str = "deny"):
     return _eval
 
 
-def item_in_order_predicate(context: GuardrailContext) -> Verdict:
+def process_order_items_on_menu_predicate(effect: str = "deny"):
+    """Factory: deterministic counterpart to the soft `assistant_message:on_menu_only`
+    judge. Blocks process_order when any item name (after lower/strip) is not in MENU.
+    Missing/malformed `order` → ALLOW; the tool itself validates payload shape.
+    """
+    violation_effect = Effect(effect)
 
-    order_id = str(context.tool_args.get("order_id", ""))
-    item_name = str(context.tool_args.get("item_name", ""))
+    def _eval(context: GuardrailContext) -> Verdict:
+        # Lazy import: mirrors _template_vars in guardrails.py; avoids agent-package
+        # cold-import cost on control-plane load.
+        from src.agents.shared_components import ALLOWED_EXTRAS, MENU
 
-    if not order_id or not item_name:
+        order = context.tool_args.get("order")
+        if not isinstance(order, list):
+            return Verdict(
+                effect=Effect.ALLOW,
+                guardrail_name="",
+                guardrail_type="",
+                reason_internal="no order list in tool_args; menu adherence not evaluated",
+            )
+        bad = []
+        for item in order:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name", "")).lower().strip()
+            if name and name not in MENU:
+                bad.append(name)
+        if not bad:
+            return Verdict(
+                effect=Effect.ALLOW,
+                guardrail_name="",
+                guardrail_type="",
+                reason_internal="all order items on MENU",
+            )
         return Verdict(
-            effect=Effect.DENY,
+            effect=violation_effect,
             guardrail_name="",
             guardrail_type="",
-            reason_internal="missing order_id or item_name; cannot evaluate",
+            reason_internal=f"off-menu items in order: {bad}",
             reason_for_llm=(
-                "The context is missing either the order_id or the item_name. Both are required to check if the item is part of the order."
+                f"Cannot place this order: item(s) {bad} are not on the menu. "
+                f"The menu is: {sorted(MENU.keys())}. "
+                f"Allowed extras/modifiers (which are NOT standalone items): {sorted(ALLOWED_EXTRAS)}. "
+                f"Adjust the order to only include on-menu items."
             ),
         )
 
-    if is_item_in_order(order_id, item_name):
+    return _eval
+
+
+def transfer_context_summary_nonempty_predicate(
+    min_chars: int = 20, effect: str = "deny"
+):
+    """Factory: deny transfer_to_agent when `context_summary` (after strip) is
+    shorter than `min_chars`. Catches empty strings and bare filler ("handoff").
+    """
+    violation_effect = Effect(effect)
+
+    def _eval(context: GuardrailContext) -> Verdict:
+        summary = str(context.tool_args.get("context_summary", "")).strip()
+        if len(summary) >= min_chars:
+            return Verdict(
+                effect=Effect.ALLOW,
+                guardrail_name="",
+                guardrail_type="",
+                reason_internal=f"context_summary length {len(summary)} >= min {min_chars}",
+            )
         return Verdict(
-            effect=Effect.ALLOW,
+            effect=violation_effect,
             guardrail_name="",
             guardrail_type="",
-            reason_internal=f"item {item_name} is in order {order_id}",
+            reason_internal=f"context_summary length {len(summary)} < min {min_chars}",
+            reason_for_llm=(
+                f"Cannot hand off: the context_summary is too short "
+                f"({len(summary)} chars; need at least {min_chars}). Provide a "
+                f"short sentence describing what the next agent should do, including "
+                f"the order id if one exists."
+            ),
         )
-    return Verdict(
-        effect=Effect.DENY,
-        guardrail_name="",
-        guardrail_type="",
-        reason_internal=f"item {item_name} is not in order {order_id}",
-        reason_for_llm=(
-            f"Item '{item_name}' could not be matched with any item in order {order_id}. Only include the item name, dont include size or extras. You cannot place items on the tray that were not part of the order."
-        ),
-    )
+
+    return _eval
+
+
+def clean_machine_only_after_error_predicate(effect: str = "deny"):
+    """Factory: allow clean_machine only when the most-recent order is in
+    `preparation_error` or when the barista cache flags the last brew as
+    contaminated. `clean_machine` has no `order_id` arg, so we fall back to
+    `load_recent_order()` — correct for the single-track swarm.
+    """
+    violation_effect = Effect(effect)
+
+    def _eval(context: GuardrailContext) -> Verdict:
+        order = load_recent_order()
+        if order is None:
+            # No recent order (fresh session / test harness) — nothing to gate.
+            return Verdict(
+                effect=Effect.ALLOW,
+                guardrail_name="",
+                guardrail_type="",
+                reason_internal="no recent order; clean_machine not gated",
+            )
+        status = order.status.value
+        contaminated = False
+        try:
+            from src.agents.barista_agent import ORDER_STATUS_CACHE
+
+            cache_entry = ORDER_STATUS_CACHE.get(str(order.id), {}) or ORDER_STATUS_CACHE.get(
+                f"ORD{int(order.id):04d}", {}
+            )
+            contaminated = bool(cache_entry.get("last_brew_contaminated"))
+        except Exception:
+            contaminated = False
+        if status == "preparation_error" or contaminated:
+            return Verdict(
+                effect=Effect.ALLOW,
+                guardrail_name="",
+                guardrail_type="",
+                reason_internal=(
+                    f"order {order.id} status={status} contaminated={contaminated}; clean allowed"
+                ),
+            )
+        return Verdict(
+            effect=violation_effect,
+            guardrail_name="",
+            guardrail_type="",
+            reason_internal=(
+                f"order {order.id} status={status} contaminated={contaminated}; clean_machine not needed"
+            ),
+            reason_for_llm=(
+                f"clean_machine is only needed after a brew failure or contamination. "
+                f"The current order is '{status}' and the last brew was clean — cleaning "
+                f"now will not help. Continue with the normal preparation flow."
+            ),
+        )
+
+    return _eval
 
 
 PREDICATE_REGISTRY = {
@@ -350,5 +454,7 @@ PREDICATE_REGISTRY = {
     "refund_within_limit": refund_within_limit_predicate,
     "order_total_within_limit": order_total_within_limit_predicate,
     "max_tool_calls": max_tool_calls_predicate,
-    "item_in_order": item_in_order_predicate,
+    "process_order_items_on_menu": process_order_items_on_menu_predicate,
+    "transfer_context_summary_nonempty": transfer_context_summary_nonempty_predicate,
+    "clean_machine_only_after_error": clean_machine_only_after_error_predicate,
 }

@@ -46,24 +46,38 @@ pre-commit install
 
 A **setup** is a self-contained configuration of agents, guardrails, and guidelines under `config/setups/<name>/` (subdirs: `agents/`, `guardrails/`, `guidelines/`). Both `simulate` and `dashboard` require a setup to be selected. Guardrail predicate *logic* lives in Python ([src/control_plane/predicates.py](src/control_plane/predicates.py)) and is referenced by name from the guardrail YAML — varying `predicate_args` (e.g. `max_pct: 10`) is a YAML-only change.
 
-**Available setups:**
+### Naming convention
 
-The catalogue is designed as a spectrum from *no rules* to *hostile rules*, so you can compare how the same swarm behaves under different control-plane pressure. The first three are the reference points; the remaining five dial specific knobs (range caps, lifecycle gates, effect mode) around them.
+Every guardrail and guideline id follows one shape so the catalogue reads consistently:
+
+- **Guardrails**: `<tool_scope>:<what_is_checked>` — e.g. `handover:allowed_targets`, `check_inventory:order_status`, `calculate_total:discount_within_limit`. Numeric bounds live in `predicate_args`, never in the id — *unless* the same rule appears with different bounds across setups; in that case the bound is suffixed to the id (e.g. `calculate_total:discount_within_limit_30pct` vs. `_20pct` vs. `_0pct`) so the two variants stay distinguishable in cross-setup analysis.
+- **Soft (LLM-judge) counterparts** keep a `soft_` prefix on the hard id — e.g. `soft_check_inventory:order_status`.
+- **Guidelines**: `<verb>_<object>` — verb-first, describes the behavior the agent should perform. E.g. `provide_handoff_context`, `include_order_id_in_handoff`, `summarize_before_handoff`.
+
+### Available setups
+
+The catalogue is designed as a spectrum from *no rules* to *hostile rules*, so you can compare how the same swarm behaves under different control-plane pressure. Every policy setup has three variants: the canonical `deny` posture, a `_flag` observability shadow, and a `_soft` LLM-judge shadow.
 
 Reference points:
 
 - `unconstrained` — every business agent can transfer to every other agent, with no guardrails and no guidelines — maximum agent freedom for observing emergent behavior.
-- `baseline` — the standard coffee shop: each agent can only hand off to the next role in the workflow, and `deny` lifecycle gates enforce the order state machine (`pending → inventory_confirmed → in_preparation → completed/preparation_error → refunded`).
-- `all_handovers` — every business agent can transfer to every other agent, and an `order_id_in_handoff` flag guardrail (plus matching `handoff_order_id` guideline) requires handoffs to carry an `ORDXXXX` once an order exists.
 
-Governance dials on top of `baseline`:
+Baseline policy family:
 
-- `sensible_ranges` — adds `deny` range caps that let normal orders through but block outliers: order size 1–6 units, total ≤ $20, discount ≤ 30 %, partial refund ≤ 50 %. Shows the "happy path still works, only outliers get stopped" regime.
-- `sensible_ranges_flag` — identical caps to `sensible_ranges`, but every range guardrail is `flag` (observe-only). Agents behave as if unconstrained on magnitudes while the guardrail log records every trip — useful for measuring how often a proposed cap *would* bite before you enforce it.
-- `overconstrained` — the same range guardrails cranked so far that normal business cannot happen: max one unit per order, total ≤ $3, zero discounts, zero partial refunds. Demonstrates the failure mode of over-tight governance — most orders never get created.
+- `baseline` — the standard coffee shop: each agent can only hand off to the next role in the workflow, and `deny` lifecycle gates enforce the order state machine (`pending → inventory_confirmed → in_preparation → completed/preparation_error → refunded`). A soft `assistant_message:on_menu_only` LLM-judge blocks off-menu recommendations.
 - `baseline_flag` — mirrors every guardrail in `baseline`, but each one runs in `flag` mode instead of `deny`. Handover targets, order-lifecycle preconditions, and refund gating are all observe-only; agents behave as if unconstrained while every violation is labeled in the guardrail log for comparison against the enforced baseline.
-- `anti_flow` — the lifecycle gates are deliberately **inverted** (each tool is only "allowed" from a status it can never legitimately be in), so every fulfillment step is denied from its real predecessor. Combined with a severed barista handover, orders get trapped mid-flow. Useful as a worst-case for showing how mis-configured guardrails cause deadlocks rather than safety.
-- `strict_flow` — constrains the handover graph to a linear pipeline: `order → {inventory, customer_service}`, `inventory → barista`, `customer_service → order`, `barista → (none)`. Adds a `process_order_once_per_conversation` guardrail (via the new `max_tool_calls` predicate) so the order agent cannot re-process the same conversation. Useful for observing how tight routing and single-shot ordering affect success rates and failure paths.
+- `baseline_soft` — every baseline hard rule is kept as a `flag`-only observability shadow, and reimplemented as a `soft_*` LLM-as-judge counterpart with `deny` effect. Lets you compare deterministic vs. LLM-judge decisions on identical traces.
+
+Strict-flow policy family:
+
+- `strict_flow` — constrains the handover graph to a linear pipeline: `order → {inventory, customer_service}`, `inventory → barista`, `customer_service → order`, `barista → (none)`. Adds a `process_order:max_calls` guardrail (via the `max_tool_calls` predicate) so the order agent cannot re-process the same conversation. Useful for observing how tight routing and single-shot ordering affect success rates and failure paths.
+- `strict_flow_flag` — same rules as `strict_flow` but every guardrail is `flag`-only (observe mode).
+- `strict_flow_soft` — hard rules flipped to `flag` shadows, each paired with a `soft_*` LLM-judge counterpart that actually denies. Same shape as `baseline_soft` extended with `soft_process_order:max_calls`.
+
+Range-cap governance:
+
+- `sensible_ranges` — adds `deny` range caps on top of baseline that let normal orders through but block outliers: order size 1–6 units, total ≤ $20, discount ≤ 30 %, partial refund ≤ 50 %. Shows the "happy path still works, only outliers get stopped" regime.
+- `narrow_ranges` — the same range guardrails cranked so far that normal business cannot happen: max one unit per order, total ≤ $3, zero discounts, zero partial refunds. Demonstrates the failure mode of over-tight governance — most orders never get created. Uses the same guardrail ids as `sensible_ranges`; only `predicate_args` differ.
 
 **Selecting a setup:**
 
@@ -74,7 +88,7 @@ poetry run simulate --list-setups          # show available setups
 ```
 
 Repeat `--setup` to run multiple setups sequentially in one `simulate` invocation
-(e.g. `--setup baseline --setup all_handovers`); each setup runs `--traces N` conversations.
+(e.g. `--setup baseline --setup strict_flow`); each setup runs `--traces N` conversations.
 
 **Adding a new setup** — copy `baseline` and edit the YAMLs:
 

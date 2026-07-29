@@ -25,11 +25,15 @@ tools:
   - get_order
   - transfer_to_agent
 guardrails:
-  - allowed_handover_targets
-  - gate_check_inventory
-  - gate_update_stock
+  - handover:allowed_targets
+  - check_inventory:order_status
+  - update_stock:order_status
+  - transfer:context_summary_nonempty
 guidelines:
-  - handoff_etiquette
+  - provide_handoff_context
+  - summarize_before_handoff
+  - offer_alternatives_when_blocked
+  - include_order_id_in_handoff
 allowed_handovers:
   - barista_agent
   - customer_service_agent

@@ -1,5 +1,5 @@
 """Range-constraint guardrail predicates: order size, refund %, order total, and the
-discount `effect` param. These back the sensibility-spectrum setups (overconstrained,
+discount `effect` param. These back the sensibility-spectrum setups (narrow_ranges,
 sensible_ranges[_flag]). Shape follows tests/test_require_order_status.py.
 """
 
@@ -180,14 +180,14 @@ class TestRangeGuardrailsViaCatalog(unittest.TestCase):
     def test_order_size_from_yaml(self):
         cat = self._catalog(
             "guardrails:\n"
-            "  - id: order_size_max1\n"
+            "  - id: create_order:size_within_range\n"
             "    type: hard\n"
             "    tools: [process_order]\n"
             "    effect: deny\n"
             "    predicate: order_size_within_range\n"
             "    predicate_args: {min_units: 1, max_units: 1, effect: deny}\n"
         )
-        [gr] = cat.guardrails(["order_size_max1"])
+        [gr] = cat.guardrails(["create_order:size_within_range"])
         ctx = _ctx("process_order", order=[{"name": "espresso", "quantity": 2}])
         self.assertEqual(gr.eval(ctx).effect, Effect.DENY)
 

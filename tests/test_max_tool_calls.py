@@ -103,7 +103,7 @@ class TestStrictFlowSetupWiring(unittest.TestCase):
 
     def test_catalog_builds_guardrail(self):
         catalog = Catalog(Path("config/setups/strict_flow"))
-        [guardrail] = catalog.guardrails(["process_order_once_per_conversation"])
+        [guardrail] = catalog.guardrails(["process_order:max_calls"])
         self.assertEqual(list(guardrail.tools), ["process_order"])
         history = [
             ToolMessage(content="{}", name="process_order", tool_call_id="tc1"),

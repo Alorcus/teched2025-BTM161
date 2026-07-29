@@ -5,7 +5,7 @@ from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
 from .shared_components import MENU, OrderStatus
-from .order_store import load_order, is_item_in_order
+from .order_store import load_order
 from . import tray as tray_store
 
 logger = logging.getLogger("coffee_shop.tray_tools")

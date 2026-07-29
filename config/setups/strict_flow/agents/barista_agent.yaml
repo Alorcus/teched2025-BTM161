@@ -40,9 +40,18 @@ tools:
   - check_tray
   - get_order
 guardrails:
-  - allowed_handover_targets
-  - gate_start_preparation
-  - gate_end_preparation
+  - handover:allowed_targets
+  - start_preparation:order_status
+  - end_preparation:order_status
+  - transfer:context_summary_nonempty
+  - clean_machine:only_after_error
+  - handover:reason_matches_target
+  - assistant_message:no_price_promises
+  - clean_machine:max_calls
+  - transfer:includes_order_id
 guidelines:
-  - handoff_etiquette
+  - provide_handoff_context
+  - summarize_before_handoff
+  - offer_alternatives_when_blocked
+  - include_order_id_in_handoff
 allowed_handovers: []

@@ -62,7 +62,7 @@ def _always_allow_judge(_s: str, _u: str) -> str:
 
 def _build_gateway(judge=_off_menu_judge) -> Gateway:
     guardrail = SoftGuardrail(
-        name="off_menu_recommendation",
+        name="assistant_message:on_menu_only",
         version="v1",
         tools=["assistant_message"],
         effect=Effect.DENY,
@@ -215,7 +215,7 @@ class TestResponseGateway(unittest.TestCase):
         self.assertEqual(len(corrections), 1)
         stamp = corrections[0].additional_kwargs
         self.assertEqual(stamp[REJECTED_CONTENT_KWARG], "Would you like a hazelnut latte?")
-        self.assertEqual(stamp[REJECTING_GUARDRAIL_KWARG], "off_menu_recommendation")
+        self.assertEqual(stamp[REJECTING_GUARDRAIL_KWARG], "assistant_message:on_menu_only")
         self.assertEqual(stamp[REJECTED_AGENT_KWARG], "order_agent")
         self.assertIn("not on our menu", stamp[REJECTION_REASON_KWARG])
 
