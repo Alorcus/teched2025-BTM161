@@ -1,9 +1,10 @@
 # baseline_soft: every rule in `baseline` is expressed here as a soft
 # (LLM-as-judge) guardrail with `effect: deny`. The 3 baseline rules that were
 # already soft are kept verbatim; each of the 11 baseline hard rules has a
-# `soft_*`-prefixed LLM-judge counterpart that enforces the same intent. No
-# hard predicates run in this setup — enforcement is entirely LLM-driven, so
-# the file can be compared head-to-head against `baseline` on the same traces.
+# `soft_*`-prefixed LLM-judge counterpart that enforces the same intent.
+# Enforcement is entirely LLM-driven: the 11 hard predicates are still
+# evaluated, but only in `flag` mode, so each judge decision can be compared
+# head-to-head against the deterministic verdict on the very same tool call.
 guardrails:
   # -----------------------------------------------------------------------
   # NATIVE SOFT RULES — kept verbatim from baseline.
@@ -24,6 +25,9 @@ guardrails:
 
       MENU (only these items are available):
       {menu}
+
+      Drinks can be ordered in "small", "medium" and "large". A size "normal" 
+      should be converted to a size "medium" instead.
 
       ALLOWED EXTRAS / MODIFIERS:
       {allowed_extras}
@@ -485,3 +489,137 @@ guardrails:
       -----
     state_dependencies:
       - order
+
+  # -----------------------------------------------------------------------
+  # HARD SHADOWS — baseline's deterministic rules in `flag` mode. They never
+  # block; they exist so every soft verdict above can be compared against the
+  # predicate verdict on the same tool call. Same shape as strict_flow_soft.
+  # -----------------------------------------------------------------------
+  - id: handover:allowed_targets
+    type: hard
+    version: v1
+    tools:
+      - transfer_to_agent
+    effect: flag
+    description: baseline shadow (flag only).
+    predicate: allowed_handover_targets
+    predicate_args:
+      effect: flag
+
+  - id: calculate_total:discount_within_limit_30pct
+    type: hard
+    version: v1
+    tools:
+      - calculate_total
+    effect: flag
+    description: baseline shadow (flag only).
+    predicate: discount_within_limit
+    predicate_args:
+      max_pct: 30
+      effect: flag
+
+  - id: check_inventory:order_status
+    type: hard
+    version: v1
+    tools:
+      - check_inventory
+    effect: flag
+    description: baseline shadow (flag only).
+    predicate: require_order_status
+    predicate_args:
+      allowed: [pending]
+      effect: flag
+
+  - id: update_stock:order_status
+    type: hard
+    version: v1
+    tools:
+      - update_stock
+    effect: flag
+    description: baseline shadow (flag only).
+    predicate: require_order_status
+    predicate_args:
+      allowed: [inventory_confirmed]
+      effect: flag
+
+  - id: start_preparation:order_status
+    type: hard
+    version: v1
+    tools:
+      - start_preparation
+    effect: flag
+    description: baseline shadow (flag only).
+    predicate: require_order_status
+    predicate_args:
+      allowed: [inventory_confirmed, in_preparation, preparation_error]
+      effect: flag
+
+  - id: end_preparation:order_status
+    type: hard
+    version: v1
+    tools:
+      - end_preparation
+    effect: flag
+    description: baseline shadow (flag only).
+    predicate: require_order_status
+    predicate_args:
+      allowed: [in_preparation]
+      effect: flag
+
+  - id: offer_refund:order_status
+    type: hard
+    version: v1
+    tools:
+      - offer_refund
+    effect: flag
+    description: baseline shadow (flag only).
+    predicate: require_order_status
+    predicate_args:
+      allowed: [completed]
+      effect: flag
+
+  - id: process_order:items_on_menu
+    type: hard
+    version: v1
+    tools:
+      - process_order
+    effect: flag
+    description: baseline shadow (flag only).
+    predicate: process_order_items_on_menu
+    predicate_args:
+      effect: flag
+
+  - id: offer_partial_refund:below_order_total
+    type: hard
+    version: v1
+    tools:
+      - offer_partial_refund
+    effect: flag
+    description: baseline shadow (flag only).
+    predicate: refund_within_limit
+    predicate_args:
+      max_pct: 100
+      effect: flag
+
+  - id: transfer:context_summary_nonempty
+    type: hard
+    version: v1
+    tools:
+      - transfer_to_agent
+    effect: flag
+    description: baseline shadow (flag only).
+    predicate: transfer_context_summary_nonempty
+    predicate_args:
+      min_chars: 20
+      effect: flag
+
+  - id: clean_machine:only_after_error
+    type: hard
+    version: v1
+    tools:
+      - clean_machine
+    effect: flag
+    description: baseline shadow (flag only).
+    predicate: clean_machine_only_after_error
+    predicate_args:
+      effect: flag

@@ -5,6 +5,26 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 logger = logging.getLogger("coffee_shop.context_isolation")
 
+MAX_AGENT_MESSAGES = 100
+
+
+class ContextOverflowError(RuntimeError):
+    """Raised when one agent's isolated context grows past MAX_AGENT_MESSAGES.
+
+    A swarm that keeps handing the same work back and forth never terminates on
+    its own, so the conversation has to be abandoned rather than left to burn
+    the run's time budget.
+    """
+
+    def __init__(self, agent_name: str, message_count: int):
+        self.agent_name = agent_name
+        self.message_count = message_count
+        super().__init__(
+            f"{agent_name} reached {message_count} own messages "
+            f"(limit {MAX_AGENT_MESSAGES})"
+        )
+
+
 AGENT_TO_HANDOFF_TOOL = {
     "order_agent": "transfer_to_agent",
     "inventory_agent": "transfer_to_agent",
@@ -18,7 +38,9 @@ def _find_boundary(messages: list, agent_name: str) -> int:
 
     Returns -1 if no boundary is found (entry agent case).
     """
-    handoff_tool_name = AGENT_TO_HANDOFF_TOOL.get(agent_name, f"transfer_to_{agent_name}")
+    handoff_tool_name = AGENT_TO_HANDOFF_TOOL.get(
+        agent_name, f"transfer_to_{agent_name}"
+    )
     for i in range(len(messages) - 1, -1, -1):
         msg = messages[i]
         if isinstance(msg, ToolMessage):
@@ -39,11 +61,13 @@ def _extract_current_turn_messages(messages: list, agent_name: str) -> list:
     """
     boundary_idx = _find_boundary(messages, agent_name)
     if boundary_idx >= 0:
-        return list(messages[boundary_idx + 1:])
+        return list(messages[boundary_idx + 1 :])
     return list(messages)
 
 
-def _extract_handoff_context_from_boundary(messages: list, agent_name: str) -> dict | None:
+def _extract_handoff_context_from_boundary(
+    messages: list, agent_name: str
+) -> dict | None:
     """Extract handoff context from the boundary ToolMessage content.
 
     The transfer tools write: "Successfully transferred to <agent>. Context: <summary>"
@@ -57,7 +81,9 @@ def _extract_handoff_context_from_boundary(messages: list, agent_name: str) -> d
     content = getattr(boundary_msg, "content", "") or ""
 
     # Extract the context from the tool message
-    match = re.search(r"Context:\s*(.+?)(?:\.\s*Expectation:\s*(.+))?$", content, re.DOTALL)
+    match = re.search(
+        r"Context:\s*(.+?)(?:\.\s*Expectation:\s*(.+))?$", content, re.DOTALL
+    )
     if match:
         context_summary = match.group(1).strip()
         expectation = (match.group(2) or "").strip()
@@ -118,21 +144,38 @@ def create_context_isolation_hook(agent_name: str):
 
     For the entry agent (no handoff), all messages are passed through directly.
     """
+
     def hook(state):
         messages = state.get("messages", [])
 
         own_messages = _extract_current_turn_messages(messages, agent_name)
         own_messages = _strip_orphaned_tool_messages(own_messages)
 
+        if len(own_messages) > MAX_AGENT_MESSAGES:
+            logger.error(
+                f"{agent_name}: {len(own_messages)} own messages exceeds "
+                f"{MAX_AGENT_MESSAGES} — abandoning the conversation"
+            )
+            raise ContextOverflowError(agent_name, len(own_messages))
+
         # Try state-level handoff_context first (works in tests),
         # fall back to extracting from boundary ToolMessage (works in runtime).
         handoff_context = state.get("handoff_context", None)
-        if not isinstance(handoff_context, dict) or not handoff_context.get("from_agent"):
-            handoff_context = _extract_handoff_context_from_boundary(messages, agent_name)
+        if not isinstance(handoff_context, dict) or not handoff_context.get(
+            "from_agent"
+        ):
+            handoff_context = _extract_handoff_context_from_boundary(
+                messages, agent_name
+            )
 
-        logger.debug("%s: %d own messages, handoff_context=%s",
-                     agent_name, len(own_messages),
-                     handoff_context.get("from_agent") if isinstance(handoff_context, dict) else None)
+        logger.debug(
+            "%s: %d own messages, handoff_context=%s",
+            agent_name,
+            len(own_messages),
+            handoff_context.get("from_agent")
+            if isinstance(handoff_context, dict)
+            else None,
+        )
 
         if isinstance(handoff_context, dict) and handoff_context.get("from_agent"):
             briefing_parts = [
@@ -147,7 +190,9 @@ def create_context_isolation_hook(agent_name: str):
         # Ensure non-empty: LangGraph falls back to raw state messages when
         # llm_input_messages is empty (falsy). Provide a minimal prompt.
         if not own_messages:
-            own_messages = [HumanMessage(content="You have been activated. Proceed with your task.")]
+            own_messages = [
+                HumanMessage(content="You have been activated. Proceed with your task.")
+            ]
 
         return {"llm_input_messages": own_messages}
 

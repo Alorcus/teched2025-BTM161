@@ -3,9 +3,12 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 from src.simulate import (
     Batch,
+    format_feedback,
+    main,
     parse_batch_triple,
     parse_batches_arg,
     parse_scenario_token,
@@ -17,9 +20,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 class TestParseBatchTriple(unittest.TestCase):
     def test_full_triple(self):
-        self.assertEqual(
-            parse_batch_triple("baseline:2:10"), Batch("baseline", 2, 10)
-        )
+        self.assertEqual(parse_batch_triple("baseline:2:10"), Batch("baseline", 2, 10))
 
     def test_omitted_count_defaults_to_1(self):
         self.assertEqual(parse_batch_triple("baseline:2"), Batch("baseline", 2, 1))
@@ -124,6 +125,7 @@ class TestResolveScenario(unittest.TestCase):
 
     def test_all_cycles_through_scenarios(self):
         from src.agents.customer_agent import CUSTOMER_SCENARIOS
+
         n = len(CUSTOMER_SCENARIOS)
         self.assertEqual(resolve_scenario("all", 0), 0)
         self.assertEqual(resolve_scenario("all", 1), 1 % n)
@@ -162,6 +164,45 @@ class TestCLIMutualExclusion(unittest.TestCase):
         result = self._run("--list-setups")
         self.assertEqual(result.returncode, 0)
         self.assertIn("baseline", result.stdout)
+
+
+class TestFormatFeedback(unittest.TestCase):
+    """A None score is what the judge LLM returns on unparseable JSON — it must
+    never reach a format spec, or a whole unattended run dies."""
+
+    def test_valid_score(self):
+        feedback = {"feedback_score": 0.856, "feedback_reason": "good", "valid": True}
+        self.assertEqual(format_feedback(feedback), "[0.86]: good")
+
+    def test_none_score(self):
+        feedback = {
+            "feedback_score": None,
+            "feedback_reason": "bad json",
+            "valid": False,
+        }
+        self.assertEqual(format_feedback(feedback), "[n/a (fallback)]: bad json")
+
+
+class TestOnError(unittest.TestCase):
+    def _run_main(self, on_error):
+        shop = MagicMock()
+        shop.run_conversation.side_effect = [RuntimeError("boom"), ["trace-2"]]
+        shop.get_last_feedback.return_value = None
+        argv = ["simulate", "--batches", "baseline:0:2", "--on-error", on_error]
+        with (
+            patch("src.simulate.CoffeeShop", return_value=shop),
+            patch.object(sys, "argv", argv),
+        ):
+            return main(), shop
+
+    def test_skip_continues_after_failure(self):
+        returncode, shop = self._run_main("skip")
+        self.assertEqual(returncode, 0)
+        self.assertEqual(shop.run_conversation.call_count, 2)
+
+    def test_abort_propagates(self):
+        with self.assertRaises(RuntimeError):
+            self._run_main("abort")
 
 
 if __name__ == "__main__":

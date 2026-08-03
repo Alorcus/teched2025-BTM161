@@ -39,6 +39,9 @@ COFFEE_MACHINE_URL = "http://127.0.0.1:8001"
 REQUEST_TIMEOUT = 5
 COFFEE_MACHINE_PATH = Path(__file__).resolve().parents[2]
 COFFEE_MACHINE_PORT = 8001
+COFFEE_MACHINE_LOG_PATH = (
+    COFFEE_MACHINE_PATH / "services" / "coffee_machine" / "logs" / "server.log"
+)
 COFFEE_MACHINE_PROCESS = None
 _MACHINE_LOCK = threading.Lock()
 
@@ -81,33 +84,38 @@ def start_coffee_machine() -> bool:
             return False
 
         try:
+            # Server output goes to a file, never to a pipe: nothing in this
+            # process drains the machine's stdout, so a PIPE would fill its
+            # 64 KB buffer after a few hundred access-log lines and wedge the
+            # machine mid-run.
+            COFFEE_MACHINE_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+
             # Run the server in its own process group / session so we can
             # signal the whole group on shutdown. We launch via `poetry run
             # uvicorn`, so a plain terminate() would only signal the poetry
             # wrapper and leave the uvicorn grandchild listening on the port.
-            popen_kwargs: dict = {
-                "cwd": str(COFFEE_MACHINE_PATH),
-                "stdout": subprocess.PIPE,
-                "stderr": subprocess.PIPE,
-            }
+            popen_kwargs: dict = {"cwd": str(COFFEE_MACHINE_PATH)}
             if sys.platform == "win32":
                 popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
             else:
                 popen_kwargs["start_new_session"] = True
 
-            COFFEE_MACHINE_PROCESS = subprocess.Popen(
-                [
-                    "poetry",
-                    "run",
-                    "uvicorn",
-                    "services.coffee_machine.main:app",
-                    "--port",
-                    str(COFFEE_MACHINE_PORT),
-                    "--host",
-                    "127.0.0.1",
-                ],
-                **popen_kwargs,
-            )
+            with open(COFFEE_MACHINE_LOG_PATH, "a") as log_handle:
+                COFFEE_MACHINE_PROCESS = subprocess.Popen(
+                    [
+                        "poetry",
+                        "run",
+                        "uvicorn",
+                        "services.coffee_machine.main:app",
+                        "--port",
+                        str(COFFEE_MACHINE_PORT),
+                        "--host",
+                        "127.0.0.1",
+                    ],
+                    stdout=log_handle,
+                    stderr=subprocess.STDOUT,
+                    **popen_kwargs,
+                )
 
             for _ in range(10):
                 time.sleep(1)

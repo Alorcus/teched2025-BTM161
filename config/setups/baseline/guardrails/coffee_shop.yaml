@@ -100,6 +100,9 @@ guardrails:
       MENU (only these items are available):
       {menu}
 
+      Drinks can be ordered in "small", "medium" and "large". A size "normal" 
+      should be converted to a size "medium" instead.
+
       ALLOWED EXTRAS / MODIFIERS:
       {allowed_extras}
 
@@ -234,6 +237,7 @@ guardrails:
       produced by an earlier `calculate_total` or `process_order` tool
       result in this conversation. If the message quotes a specific dollar
       figure without such a tool call visible, DENY.
+      If the message does not quote a specific dollar amount, ALLOW!
 
       Menu prices are shown below only for context — do NOT accept them as
       substitutes for a real tool call. The agent must actually run the

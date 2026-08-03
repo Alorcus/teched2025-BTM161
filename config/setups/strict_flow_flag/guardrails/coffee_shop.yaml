@@ -102,6 +102,8 @@ guardrails:
       MENU (only these items are available):
       {menu}
 
+      Drinks can be ordered in "small", "medium" and "large". A size "normal" 
+
       ALLOWED EXTRAS / MODIFIERS:
       {allowed_extras}
 
