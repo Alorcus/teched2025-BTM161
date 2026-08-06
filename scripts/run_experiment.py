@@ -12,7 +12,10 @@ experiment results and are deliberately never touched — they accumulate across
 the whole run and stay separable via the `setup` / `scenario_index` trace tags.
 
 Progress is journalled to `<run-dir>/ledger.json` after every cell, so an
-interrupted sweep can be continued with `--resume <run-dir>`.
+interrupted sweep can be continued with `--resume <run-dir>`. Resume tops cells
+up rather than restarting them: a cell that recorded 21 of 25 conversations runs
+4 more and moves on. A cell counts as done only once it holds its full quota —
+exiting 0 is not enough, since a cell whose conversations all failed exits 0 too.
 
     python scripts/run_experiment.py --dry-run
     python scripts/run_experiment.py --setups baseline --scenarios 1 --count 2
@@ -369,14 +372,21 @@ def load_ledger(run_dir: Path) -> dict:
     return json.loads(path.read_text())
 
 
-def run_cell(cell: Cell, log_path: Path, verbose: bool, log_level: str) -> int:
-    """Run one cell as its own `simulate` process, draining its output to a file."""
+def run_cell(
+    cell: Cell, log_path: Path, verbose: bool, log_level: str, count: int
+) -> int:
+    """Run `count` conversations of one cell as its own `simulate` process.
+
+    `count` is the number still owed, which is below `cell.count` whenever a
+    previous attempt got part of the way. The log is appended to, so a topped-up
+    cell keeps the record of every attempt.
+    """
     cmd = [
         sys.executable,
         "-m",
         "src.simulate",
         "--batches",
-        f"{cell.setup}:{cell.scenario}:{cell.count}",
+        f"{cell.setup}:{cell.scenario}:{count}",
         "--on-error",
         "skip",
         "--log-level",
@@ -391,7 +401,10 @@ def run_cell(cell: Cell, log_path: Path, verbose: bool, log_level: str) -> int:
         bufsize=1,
     )
     try:
-        with open(log_path, "w", buffering=1) as handle:
+        with open(log_path, "a", buffering=1) as handle:
+            handle.write(
+                f"\n===== {stamp()} | {cell.key} | {count} conversation(s) =====\n"
+            )
             for line in proc.stdout:
                 handle.write(line)
                 if verbose or CONSOLE_LINE_RE.match(line):
@@ -433,21 +446,39 @@ def print_plan(cells: list[Cell], log_level: str) -> None:
     )
 
 
+def outstanding(cell: Cell, entry: dict) -> int:
+    """Conversations still owed for `cell`, given its ledger entry.
+
+    `status: done` is authoritative and beats the arithmetic: it is how you
+    tell a resume you are satisfied with a cell that came up short, whether the
+    driver wrote it or you edited the ledger by hand.
+    """
+    if entry.get("status") == "done":
+        return 0
+    return max(0, cell.count - max(0, int(entry.get("conversations", 0))))
+
+
 def print_summary(cells: list[Cell], ledger: dict) -> None:
-    print(f"\n{'cell':<28}{'status':<12}{'conv':>6}{'traces':>8}{'duration':>12}")
-    print("-" * 66)
+    header = f"{'cell':<28}{'status':<12}{'conv':>9}{'traces':>8}{'tries':>7}{'duration':>12}"
+    print(f"\n{header}")
+    print("-" * len(header))
+    owed = 0
     for cell in cells:
         entry = ledger["cells"].get(cell.key)
         if entry is None:
-            print(f"{cell.key:<28}{'not run':<12}")
+            print(f"{cell.key:<28}{'not run':<12}{'0/' + str(cell.count):>9}")
+            owed += cell.count
             continue
         conversations = entry.get("conversations", 0)
-        shortfall = "" if conversations >= cell.count else f"  (< {cell.count})"
+        owed += outstanding(cell, entry)
         duration = entry.get("duration_s") or 0
         print(
-            f"{cell.key:<28}{entry['status']:<12}{conversations:>6}"
-            f"{entry.get('traces', 0):>8}{duration / 60:>10.1f}m{shortfall}"
+            f"{cell.key:<28}{entry['status']:<12}"
+            f"{f'{conversations}/{cell.count}':>9}{entry.get('traces', 0):>8}"
+            f"{entry.get('attempts', 1):>7}{duration / 60:>10.1f}m"
         )
+    if owed:
+        print(f"\n{owed} conversation(s) still owed — resume to run only those.")
 
 
 def parse_args() -> argparse.Namespace:
@@ -596,28 +627,38 @@ def main() -> int:
     (run_dir / "logs").mkdir(parents=True, exist_ok=True)
     save_ledger(run_dir, ledger)
 
-    total_conversations = sum(cell.count for cell in cells)
+    todo = sum(outstanding(cell, ledger["cells"].get(cell.key) or {}) for cell in cells)
     print(
-        f"Run directory: {run_dir}\n"
-        f"{len(cells)} cell(s), {total_conversations} conversation(s)\n"
+        f"Run directory: {run_dir}\n{len(cells)} cell(s), {todo} conversation(s) to run\n"
     )
 
     interrupted = False
     for cell in cells:
         if interrupted:
             break
-        entry = ledger["cells"].get(cell.key)
-        if entry and entry["status"] == "done":
+        entry = ledger["cells"].get(cell.key) or {}
+        done_before = max(0, int(entry.get("conversations", 0)))
+        remaining = outstanding(cell, entry)
+
+        if remaining == 0:
+            # Nothing owed: either the cell is already flagged done, or it
+            # reached its quota on an attempt that ended badly (interrupted, or
+            # a non-zero exit on the tail conversation).
+            if entry and entry.get("status") != "done":
+                entry["status"] = "done"
+                save_ledger(run_dir, ledger)
             print(
                 f"[{stamp()}] [{cell.index}/{len(cells)}] {cell.key} — "
-                "already done, skipping"
+                f"already done ({done_before}/{cell.count}), skipping"
             )
             continue
 
-        print(
-            f"\n[{stamp()}] [{cell.index}/{len(cells)}] {cell.key} — "
-            f"{cell.count} conversation(s)"
+        owed = (
+            f"{remaining} conversation(s)"
+            if not done_before
+            else f"{remaining} conversation(s) still owed ({done_before}/{cell.count} recorded)"
         )
+        print(f"\n[{stamp()}] [{cell.index}/{len(cells)}] {cell.key} — {owed}")
         try:
             wipe_coffee_shop_db()
             if not args.no_machine_restart:
@@ -632,13 +673,21 @@ def main() -> int:
         started = time.monotonic()
         status, returncode = "done", 0
         try:
-            returncode = run_cell(cell, log_path, args.verbose, args.log_level)
+            returncode = run_cell(
+                cell, log_path, args.verbose, args.log_level, remaining
+            )
             if returncode != 0:
                 status = "failed"
         except KeyboardInterrupt:
             status, interrupted = "interrupted", True
 
         traces_after, conversations_after = trace_stats()
+        conversations = done_before + (conversations_after - conversations_before)
+        # "done" means the cell holds its quota, not merely that the process
+        # exited 0: a cell whose conversations all died still exits 0, and
+        # calling that done would silently ship a short cell.
+        if status == "done" and conversations < cell.count:
+            status = "short"
         ledger["cells"][cell.key] = {
             "index": cell.index,
             "setup": cell.setup,
@@ -646,17 +695,19 @@ def main() -> int:
             "count": cell.count,
             "status": status,
             "returncode": returncode,
+            "attempts": int(entry.get("attempts", 0)) + 1,
             "finished_at": now_iso(),
-            "duration_s": round(time.monotonic() - started, 1),
-            "traces": traces_after - traces_before,
-            "conversations": conversations_after - conversations_before,
+            "duration_s": round(
+                float(entry.get("duration_s", 0.0)) + time.monotonic() - started, 1
+            ),
+            "traces": int(entry.get("traces", 0)) + (traces_after - traces_before),
+            "conversations": conversations,
             "log": str(log_path.relative_to(run_dir)),
         }
         save_ledger(run_dir, ledger)
         print(
-            f"[{stamp()}]     {status} in "
-            f"{ledger['cells'][cell.key]['duration_s'] / 60:.1f}m — "
-            f"{ledger['cells'][cell.key]['conversations']} conversation(s), log: {log_path}"
+            f"[{stamp()}]     {status} — {conversations}/{cell.count} conversation(s), "
+            f"{(time.monotonic() - started) / 60:.1f}m this attempt, log: {log_path}"
         )
 
         if interrupted:
