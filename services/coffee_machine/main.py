@@ -13,10 +13,17 @@ from .worker import run_worker
 # When run standalone (uvicorn) this handler makes logs visible; when imported by the
 # main program, the parent coffee_shop logger's handler takes precedence.
 _coffee_machine_logger = logging.getLogger("coffee_shop.coffee_machine")
-_coffee_machine_logger.setLevel(getattr(logging, os.environ.get("COFFEE_MACHINE_LOG_LEVEL", "INFO")))
+_coffee_machine_logger.setLevel(
+    getattr(logging, os.environ.get("COFFEE_MACHINE_LOG_LEVEL", "INFO"))
+)
 if not _coffee_machine_logger.handlers:
     _handler = logging.StreamHandler()
-    _handler.setFormatter(logging.Formatter("[%(levelname)s] %(name)s — %(message)s"))
+    _handler.setFormatter(
+        logging.Formatter(
+            "[%(asctime)s] [%(levelname)s] %(name)s — %(message)s",
+            datefmt="%Y-%m-%d:%H:%M",
+        )
+    )
     _coffee_machine_logger.addHandler(_handler)
 
 logger = _coffee_machine_logger
@@ -48,13 +55,12 @@ class CleanRequest(BaseModel):
 
 @app.post("/brew")
 def brew(req: BrewRequest):
-    logger.info("Brew requested: drink=%s, correlation_id=%s", req.drink, req.correlation_id)
+    logger.info(
+        "Brew requested: drink=%s, correlation_id=%s", req.drink, req.correlation_id
+    )
     job = create_job(req.drink, req.correlation_id)
 
-    return {
-        "job_id": job["job_id"],
-        "eta_seconds": job["duration"]
-    }
+    return {"job_id": job["job_id"], "eta_seconds": job["duration"]}
 
 
 @app.get("/jobs/{job_id}")

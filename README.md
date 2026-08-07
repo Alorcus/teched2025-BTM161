@@ -1,4 +1,4 @@
-# Agentic Coffee Shop
+ # Agentic Coffee Shop
 
 A multi-agent coffee shop for exploring LLM agent behavior. Five specialized agents (Order, Inventory, Barista, Customer Service, and a Customer that drives the conversation) collaborate in a LangGraph Swarm. Interactions are traced via MLflow and can be exported as event logs for process mining.
 
@@ -64,9 +64,11 @@ poetry run simulate --setup baseline --traces 5 --scenario 2    # specific scena
 poetry run simulate --setup baseline --traces 10 --export-logs  # also emit event log CSV
 ```
 
-Repeat `--setup` to run multiple setups in one invocation (`--setup baseline --setup all_handovers`).
-
 Other flags: `--quiet`, `--log-level {debug,info,warning,error}`.
+Run `poetry run simulate --help` for all options.
+
+
+Repeat `--setup` to run multiple setups in one invocation (`--setup baseline --setup all_handovers`).
 
 Scenarios (`0`–`6`, or `all` / `random`) are defined in `src/agents/customer_agent.py` (`CUSTOMER_SCENARIO_DEFS`) — the single source of truth for both label and prompt.
 
@@ -81,6 +83,38 @@ poetry run python -m scripts.run_batches --config batches.json                  
 ```
 
 Toggles: `--reset-inventory`, `--process-supervisor`, `--export-logs` (each with `--no-...` variants). JSON schema: `{"batches": [["baseline", 0, 50], ...], "reset_inventory": true, ...}`. Batches sharing a setup reuse the same `CoffeeShop` instance — keep same-setup entries consecutive.
+
+### Experiment sweeps
+
+`--batches` runs everything in one process, which is fine for a handful of traces but not for a full
+setup × scenario grid: the coffee-shop SQLite carries orders from cell to cell, and a single crash
+takes the whole run with it. `scripts/run_experiment.py` drives the grid as one isolated `simulate`
+process per (setup, scenario) cell:
+
+```bash
+poetry run python scripts/run_experiment.py --help                              # all options + explanations
+
+poetry run python scripts/run_experiment.py --dry-run                           # print the grid, run nothing
+poetry run python scripts/run_experiment.py --setups baseline --scenarios 1 --count 2   # pilot
+poetry run python scripts/run_experiment.py                                     # 6 setups x 4 scenarios x 50
+poetry run python scripts/run_experiment.py --resume experiment_runs/<dir>      # continue after an interrupt
+```
+
+Before every cell it deletes `coffee_shop.db` (plus `-wal`/`-shm`) and restarts the coffee-machine
+service, so cells share no order history, stock drift, or brew-failure RNG — every cell replays the
+same failure sequence from `--seed`. Inventory is already reset before each individual conversation
+by the simulator, so nothing extra is needed there. MLflow traces, `guardrail_log/events.jsonl` and
+`feedback_store.json` are never touched: they are the results, and stay separable via the `setup` and
+`scenario_index` trace tags.
+
+Two things to keep in mind while a sweep is running:
+
+- **Don't run the test suite.** `tests/__init__.py` deletes the repo-root `coffee_shop.db` at import
+  time regardless of `COFFEE_SHOP_DB`, which pulls the tables out from under the live run.
+- **Order IDs repeat across cells.** Wiping the DB restarts them at `ORD0001`, so join analyses on
+  `case_id` (the LangGraph thread id) or on `(case_setup, case_scenario_index, order_id)` rather than
+  on `order_id` alone.
+
 
 ## Dashboard
 

@@ -114,6 +114,19 @@ def resolve_scenario(scenario: ScenarioSpec, trace_number: int) -> int | None:
     return scenario
 
 
+def format_feedback(feedback: dict) -> str:
+    """Render a feedback entry as '[score(fallback)]: reason'.
+
+    `feedback_score` is None whenever the judge LLM returned unparseable JSON
+    (CustomerAgent.get_feedback), so the score must never be format-spec'd
+    directly — a TypeError here would abort a whole batch run.
+    """
+    score = feedback.get("feedback_score")
+    score_text = f"{score:.2f}" if isinstance(score, (int, float)) else "n/a"
+    marker = "" if feedback.get("valid") else " (fallback)"
+    return f"[{score_text}{marker}]: {feedback.get('feedback_reason')}"
+
+
 def make_on_message(quiet: bool, full_messages: bool) -> OnMessage | None:
     if quiet:
         return None
@@ -187,6 +200,17 @@ def main():
         help="Reset inventory before each trace (default: true).",
     )
     parser.add_argument(
+        "--on-error",
+        type=str,
+        default="abort",
+        choices=["abort", "skip"],
+        help=(
+            "What to do when a conversation raises: 'abort' stops the run "
+            "(default), 'skip' logs the failure and continues with the next "
+            "trace — use it for long unattended sweeps."
+        ),
+    )
+    parser.add_argument(
         "--quiet",
         action="store_true",
         help="Minimal output: only trace numbers, scenarios, and summary",
@@ -239,7 +263,9 @@ def main():
         except argparse.ArgumentTypeError as exc:
             parser.error(str(exc))
         traces = getattr(args, "traces", 1)
-        batches = [Batch(setup=name, scenario=scenario, count=traces) for name in setups]
+        batches = [
+            Batch(setup=name, scenario=scenario, count=traces) for name in setups
+        ]
 
     if args.quiet and args.full_messages:
         coffee_shop_logger.warning(
@@ -261,6 +287,8 @@ def main():
 
     all_trace_ids: list[str] = []
     trace_number = 0
+    failed_traces = 0
+    aborted_traces = 0
 
     # `groupby` merges consecutive same-setup batches so we open the shop once
     # per contiguous block; interleaved setups reopen the shop by design.
@@ -286,34 +314,44 @@ def main():
             for conv_number in range(1, batch.count + 1):
                 trace_number += 1
                 idx = resolve_scenario(batch.scenario, conv_number - 1)
-                scenario_desc = (
-                    CUSTOMER_SCENARIOS[idx] if idx is not None else "random"
-                )
+                scenario_desc = CUSTOMER_SCENARIOS[idx] if idx is not None else "random"
                 log_status(
                     f"--- Trace {trace_number}/{total_traces} "
                     f"(batch {batch_number}/{total_batches}, "
                     f"conv {conv_number}/{batch.count}) "
                     f"| Scenario {idx}: {scenario_desc[:60]} ---"
                 )
-                trace_ids = shop.run_conversation(
-                    scenario_index=idx,
-                    on_message=on_message,
-                    reset_inventory_first=args.reset_inventory,
-                )
+                try:
+                    trace_ids = shop.run_conversation(
+                        scenario_index=idx,
+                        on_message=on_message,
+                        reset_inventory_first=args.reset_inventory,
+                    )
+                except Exception as exc:
+                    if args.on_error == "abort":
+                        raise
+                    failed_traces += 1
+                    coffee_shop_logger.error(
+                        f"Trace {trace_number}/{total_traces} failed "
+                        f"({type(exc).__name__}: {exc}) — skipping to the next trace"
+                    )
+                    continue
                 all_trace_ids.extend(trace_ids)
                 coffee_shop_logger.info(f"Trace IDs: {trace_ids}")
 
                 feedback = shop.get_last_feedback()
                 if feedback:
-                    marker = "" if feedback["valid"] else " (fallback)"
+                    if feedback.get("aborted"):
+                        aborted_traces += 1
                     coffee_shop_logger.info(
-                        f"Customer feedback [{feedback['feedback_score']:.2f}"
-                        f"{marker}]: {feedback['feedback_reason']}"
+                        f"Customer feedback {format_feedback(feedback)}"
                     )
 
-    coffee_shop_logger.info(
+    log_status(
         f"=== Simulation complete: {total_batches} batch(es), "
-        f"{len(all_trace_ids)} trace(s) generated ==="
+        f"{len(all_trace_ids)} trace(s) generated, "
+        f"{failed_traces} conversation(s) failed, "
+        f"{aborted_traces} aborted (context overflow) ==="
     )
     for batch in batches:
         coffee_shop_logger.info(

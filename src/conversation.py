@@ -8,6 +8,7 @@ from typing import Callable
 import mlflow
 
 from src.agents import reset_inventory
+from src.agents.context_isolation import ContextOverflowError
 from src.agents.customer_agent import CustomerAgent
 from src.agents.tray import get_tray, clear_tray
 from src.agents.order_store import load_recent_order, set_order_status
@@ -52,15 +53,20 @@ class ConversationEngine:
             "handoff_context": None,
         }
         last_agent_message = None
-        for sm in extract_messages(self.app.stream(stream_input, config, subgraphs=True)):
-            if sm.is_agent_reply:
-                last_agent_message = sm.content
-
-        if self.mlflow_enabled:
-            trace_id = mlflow.get_last_active_trace_id()
-            self.traces_of_latest_conversations.append(trace_id)
-            if trace_id is not None and self.setup_name is not None:
-                _tag_trace(trace_id, self.setup_name, scenario_index)
+        try:
+            for sm in extract_messages(
+                self.app.stream(stream_input, config, subgraphs=True)
+            ):
+                if sm.is_agent_reply:
+                    last_agent_message = sm.content
+        finally:
+            # Tag even when the turn blew up: an abandoned conversation still
+            # belongs to its setup/scenario in the event log.
+            if self.mlflow_enabled:
+                trace_id = mlflow.get_last_active_trace_id()
+                self.traces_of_latest_conversations.append(trace_id)
+                if trace_id is not None and self.setup_name is not None:
+                    _tag_trace(trace_id, self.setup_name, scenario_index)
 
         return last_agent_message
 
@@ -83,10 +89,17 @@ class ConversationEngine:
         if on_message:
             on_message("customer", message)
 
+        abort_reason = None
         while message:
-            agent_reply = self.send_message(
-                thread_id, message, scenario_index=customer_agent.scenario_index
-            )
+            try:
+                agent_reply = self.send_message(
+                    thread_id, message, scenario_index=customer_agent.scenario_index
+                )
+            except ContextOverflowError as exc:
+                abort_reason = str(exc)
+                logger.error(f"Conversation {thread_id} abandoned: {exc}")
+                break
+
             if on_message and agent_reply:
                 on_message("agent", agent_reply)
 
@@ -99,10 +112,18 @@ class ConversationEngine:
             elif on_message and customer_agent.last_terminating_message:
                 on_message("customer", customer_agent.last_terminating_message)
 
-        self._consume_tray(customer_agent)
+        # An abandoned conversation never reaches the counter, so the tray is
+        # left untouched and its order keeps whatever status it had — a dangling
+        # order is the truthful trace of a swarm that never finished.
+        if abort_reason is None:
+            self._consume_tray(customer_agent)
 
         order_id = _extract_order_id_from_history(customer_agent.history)
-        feedback = customer_agent.get_feedback()
+        feedback = (
+            _abort_feedback(abort_reason)
+            if abort_reason
+            else customer_agent.get_feedback()
+        )
         self.feedback_log[thread_id] = {
             "thread_id": thread_id,
             "order_id": order_id,
@@ -110,11 +131,9 @@ class ConversationEngine:
             **feedback,
         }
         self._save_feedback_store()
-        logger.info(
-            "Customer feedback [%.2f]: %s",
-            feedback["feedback_score"],
-            feedback["feedback_reason"],
-        )
+        score = feedback["feedback_score"]
+        score_text = f"{score:.2f}" if isinstance(score, (int, float)) else "n/a"
+        logger.info(f"Customer feedback [{score_text}]: {feedback['feedback_reason']}")
 
         return self.traces_of_latest_conversations[trace_start:]
 
@@ -156,6 +175,22 @@ class ConversationEngine:
             )
 
         clear_tray(order_id)
+
+
+def _abort_feedback(reason: str) -> dict:
+    """Feedback for a conversation abandoned mid-flight.
+
+    A hard 0.0 rather than an LLM judgement: there is no completed interaction
+    to judge, and the customer demonstrably never got what they asked for.
+    `aborted` lets the simulator count these separately from crashes.
+    """
+    return {
+        "feedback_score": 0.0,
+        "feedback_reason": f"Conversation aborted — {reason}",
+        "raw_feedback_response": "",
+        "valid": True,
+        "aborted": True,
+    }
 
 
 def _extract_order_id_from_history(history: list) -> str | None:

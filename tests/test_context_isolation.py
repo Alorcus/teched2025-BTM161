@@ -3,11 +3,18 @@
 Validates entry agent sees all messages, handoff boundary slicing,
 briefing prepend/absence, and defensive guards for non-dict handoff_context.
 """
+
 import unittest
+from unittest.mock import MagicMock, patch
 
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 
-from src.agents.context_isolation import create_context_isolation_hook
+from src.agents.context_isolation import (
+    MAX_AGENT_MESSAGES,
+    ContextOverflowError,
+    create_context_isolation_hook,
+)
+from src.conversation import ConversationEngine
 
 
 class TestEntryAgentGetsAllMessages(unittest.TestCase):
@@ -35,7 +42,11 @@ class TestHandoffAgentGetsOnlyPostBoundaryMessages(unittest.TestCase):
         messages = [
             HumanMessage(content="I want 2 espressos"),
             AIMessage(content="Processing...", name="order_agent"),
-            ToolMessage(content="Successfully transferred to inventory_agent. Context: Order ORD0001", name="transfer_to_agent", tool_call_id="tc1"),
+            ToolMessage(
+                content="Successfully transferred to inventory_agent. Context: Order ORD0001",
+                name="transfer_to_agent",
+                tool_call_id="tc1",
+            ),
             AIMessage(content="Checking stock for espresso", name="inventory_agent"),
             HumanMessage(content="extra message"),
         ]
@@ -63,7 +74,11 @@ class TestHandoffAgentGetsBriefingPrepended(unittest.TestCase):
     def test_briefing_structure(self):
         hook = create_context_isolation_hook("barista_agent")
         messages = [
-            ToolMessage(content="Successfully transferred to barista_agent. Context: All items confirmed", name="transfer_to_agent", tool_call_id="tc2"),
+            ToolMessage(
+                content="Successfully transferred to barista_agent. Context: All items confirmed",
+                name="transfer_to_agent",
+                tool_call_id="tc2",
+            ),
             AIMessage(content="Preparing order", name="barista_agent"),
         ]
         state = {
@@ -145,7 +160,11 @@ class TestOrphanedToolMessagesAreStripped(unittest.TestCase):
         messages = [
             HumanMessage(content="Ring it up"),
             # This ToolMessage has no preceding AIMessage with matching tool_use
-            ToolMessage(content="Successfully transferred to inventory_agent. Context: test", name="transfer_to_agent", tool_call_id="tc-orphan"),
+            ToolMessage(
+                content="Successfully transferred to inventory_agent. Context: test",
+                name="transfer_to_agent",
+                tool_call_id="tc-orphan",
+            ),
         ]
         state = {"messages": messages, "handoff_context": None}
         result = hook(state)
@@ -155,8 +174,16 @@ class TestOrphanedToolMessagesAreStripped(unittest.TestCase):
     def test_valid_tool_message_kept(self):
         hook = create_context_isolation_hook("inventory_agent")
         messages = [
-            ToolMessage(content="Successfully transferred to inventory_agent. Context: test", name="transfer_to_agent", tool_call_id="tc-boundary"),
-            AIMessage(content="", name="inventory_agent", tool_calls=[{"id": "tc-check", "name": "check_inventory", "args": {}}]),
+            ToolMessage(
+                content="Successfully transferred to inventory_agent. Context: test",
+                name="transfer_to_agent",
+                tool_call_id="tc-boundary",
+            ),
+            AIMessage(
+                content="",
+                name="inventory_agent",
+                tool_calls=[{"id": "tc-check", "name": "check_inventory", "args": {}}],
+            ),
             ToolMessage(content="All available", tool_call_id="tc-check"),
         ]
         state = {"messages": messages, "handoff_context": None}
@@ -172,7 +199,11 @@ class TestOrphanedToolMessagesAreStripped(unittest.TestCase):
         hook = create_context_isolation_hook("order_agent")
         messages = [
             HumanMessage(content="Go ahead"),
-            AIMessage(content="", name="order_agent", tool_calls=[{"id": "tc-proc", "name": "process_order", "args": {}}]),
+            AIMessage(
+                content="",
+                name="order_agent",
+                tool_calls=[{"id": "tc-proc", "name": "process_order", "args": {}}],
+            ),
             ToolMessage(content="Order created", tool_call_id="tc-proc"),
             # Orphaned: no AIMessage has tool_use with id="tc-ghost"
             ToolMessage(content="Ghost result", tool_call_id="tc-ghost"),
@@ -193,7 +224,11 @@ class TestEmptyMessagesAfterBoundaryNeverFalsy(unittest.TestCase):
         hook = create_context_isolation_hook("inventory_agent")
         messages = [
             HumanMessage(content="Order something"),
-            ToolMessage(content="Successfully transferred to inventory_agent. Context: test", name="transfer_to_agent", tool_call_id="tc1"),
+            ToolMessage(
+                content="Successfully transferred to inventory_agent. Context: test",
+                name="transfer_to_agent",
+                tool_call_id="tc1",
+            ),
         ]
         state = {"messages": messages, "handoff_context": None}
         result = hook(state)
@@ -206,7 +241,11 @@ class TestEmptyMessagesAfterBoundaryNeverFalsy(unittest.TestCase):
         hook = create_context_isolation_hook("inventory_agent")
         messages = [
             HumanMessage(content="Order something"),
-            ToolMessage(content="Successfully transferred to inventory_agent. Context: test", name="transfer_to_agent", tool_call_id="tc1"),
+            ToolMessage(
+                content="Successfully transferred to inventory_agent. Context: test",
+                name="transfer_to_agent",
+                tool_call_id="tc1",
+            ),
         ]
         state = {
             "messages": messages,
@@ -219,7 +258,48 @@ class TestEmptyMessagesAfterBoundaryNeverFalsy(unittest.TestCase):
         result = hook(state)
         # Should have briefing even with 0 own messages
         self.assertTrue(len(result["llm_input_messages"]) >= 1)
-        self.assertIn("[Handoff from order_agent]", result["llm_input_messages"][0].content)
+        self.assertIn(
+            "[Handoff from order_agent]", result["llm_input_messages"][0].content
+        )
+
+
+class TestContextOverflowAbortsConversation(unittest.TestCase):
+    """A swarm looping on itself must be abandoned, not left to burn the run."""
+
+    def test_hook_raises_past_the_limit(self):
+        hook = create_context_isolation_hook("order_agent")
+        messages = [
+            HumanMessage(content=f"m{i}") for i in range(MAX_AGENT_MESSAGES + 1)
+        ]
+        with self.assertRaises(ContextOverflowError):
+            hook({"messages": messages, "handoff_context": None})
+
+    def test_hook_allows_up_to_the_limit(self):
+        hook = create_context_isolation_hook("order_agent")
+        messages = [HumanMessage(content=f"m{i}") for i in range(MAX_AGENT_MESSAGES)]
+        result = hook({"messages": messages, "handoff_context": None})
+        self.assertEqual(len(result["llm_input_messages"]), MAX_AGENT_MESSAGES)
+
+    def test_conversation_ends_with_zero_feedback(self):
+        app = MagicMock()
+        app.stream.side_effect = ContextOverflowError("barista_agent", 101)
+        customer = MagicMock()
+        customer.scenario_index = 1
+        customer.history = []
+        customer.get_initial_message.return_value = "hi"
+
+        engine = ConversationEngine(app, mlflow_enabled=False, setup_name="baseline")
+        with (
+            patch("src.conversation.reset_inventory"),
+            patch.object(ConversationEngine, "_save_feedback_store"),
+        ):
+            engine.run_automated(customer)
+
+        entry = next(iter(engine.feedback_log.values()))
+        self.assertEqual(entry["feedback_score"], 0.0)
+        self.assertTrue(entry["aborted"])
+        self.assertIn("101 own messages", entry["feedback_reason"])
+        customer.get_feedback.assert_not_called()
 
 
 if __name__ == "__main__":
