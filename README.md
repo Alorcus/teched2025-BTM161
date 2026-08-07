@@ -27,7 +27,7 @@ pip install pre-commit && pre-commit install
 
 ## Setups
 
-A **setup** is a self-contained configuration of agents, guardrails, and guidelines under `config/setups/<name>/`. Both `simulate` and `dashboard` require `--setup <name>`. Guardrail predicate *logic* lives in [src/control_plane/predicates.py](src/control_plane/predicates.py) and is referenced by name from YAML — varying `predicate_args` is a YAML-only change.
+A **setup** is a self-contained configuration of agents, guardrails, and guidelines under `config/setups/<name>/`. The `baseline` setup is the default for both `simulate` and `dashboard`. Guardrail predicate *logic* lives in [src/control_plane/predicates.py](src/control_plane/predicates.py) and is referenced by name from YAML — varying `predicate_args` is a YAML-only change.
 
 The catalogue spans *no rules* to *hostile rules* so you can compare the same swarm under different control-plane pressure.
 
@@ -58,7 +58,7 @@ cp -r config/setups/baseline config/setups/my_setup
 ## Headless Simulation
 
 ```bash
-poetry run simulate --setup baseline                            # 1 random trace
+poetry run simulate                            # 1 random trace, baseline setup is default
 poetry run simulate --setup baseline --traces 10 --scenario all # cycle all 7 scenarios
 poetry run simulate --setup baseline --traces 5 --scenario 2    # specific scenario
 poetry run simulate --setup baseline --traces 10 --export-logs  # also emit event log CSV
@@ -85,7 +85,7 @@ Toggles: `--reset-inventory`, `--process-supervisor`, `--export-logs` (each with
 ## Dashboard
 
 ```bash
-poetry run dashboard --setup baseline   # serves http://localhost:5006
+poetry run dashboard    # serves http://localhost:5006
 ```
 
 Two pages:
@@ -119,7 +119,7 @@ The five agents:
 - **Inventory** — checks stock, decrements on confirmation, suggests alternatives.
 - **Barista** — prepares items with a 20 % simulated failure rate; can remake.
 - **Customer Service** — handles complaints; issues full or partial refunds.
-- **Customer** — external driver: picks a scenario (random or by index), sends an opening message, responds for up to 15 turns, ends on goal (`DONE`). Manual mode replaces this with keyboard input from the dashboard.
+- **Customer** — external driver: picks a scenario (random or by index), sends an opening message, ends on goal (`DONE`). Manual mode replaces this with keyboard input from the dashboard.
 
 Every business agent additionally has `transfer_to_agent` for handoffs. Full tool signatures and responsibilities live in the source under `src/agents/`.
 
