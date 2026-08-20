@@ -1,5 +1,4 @@
- # Agentic Coffee Shop
-
+![The Coffee Shop Agent Observatory.](assets/main_screen.png)
 A multi-agent coffee shop for exploring LLM agent behavior. Five specialized agents (Order, Inventory, Barista, Customer Service, and a Customer that drives the conversation) collaborate in a LangGraph Swarm. Interactions are traced via MLflow and can be exported as event logs for process mining.
 
 Two entry points: a CLI for headless trace generation and a Panel-based dashboard for live observation and metrics.
@@ -59,7 +58,7 @@ cp -r config/setups/baseline config/setups/my_setup
 
 ```bash
 poetry run simulate                            # 1 random trace, baseline setup is default
-poetry run simulate --setup baseline --traces 10 --scenario all # cycle all 7 scenarios
+poetry run simulate --setup baseline --traces 10 --scenario all # cycle all scenarios
 poetry run simulate --setup baseline --traces 5 --scenario 2    # specific scenario
 poetry run simulate --setup baseline --traces 10 --export-logs  # also emit event log CSV
 ```
@@ -72,17 +71,13 @@ Repeat `--setup` to run multiple setups in one invocation (`--setup baseline --s
 
 Scenarios (`0`–`6`, or `all` / `random`) are defined in `src/agents/customer_agent.py` (`CUSTOMER_SCENARIO_DEFS`) — the single source of truth for both label and prompt.
 
-### Mixing setups and scenarios in one run
-
-For mixing setups and scenarios in one run, use `scripts/run_batches.py`:
+For mixing setups and scenarios in one run, use the `--batches` parameter:
 
 ```bash
-poetry run python -m scripts.run_batches                                             # module-level BATCHES
-poetry run python -m scripts.run_batches --batches baseline:0:10 unconstrained:2:10  # CLI triples
-poetry run python -m scripts.run_batches --config batches.json                       # JSON config
-```
-
-Toggles: `--reset-inventory`, `--process-supervisor`, `--export-logs` (each with `--no-...` variants). JSON schema: `{"batches": [["baseline", 0, 50], ...], "reset_inventory": true, ...}`. Batches sharing a setup reuse the same `CoffeeShop` instance — keep same-setup entries consecutive.
+# --batches setup:scenario:traces
+poetry run simulate --batches baseline:0:10 unconstrained:2:10  # runs 10x scenario 0 setup baseline and 10x scenario 2 setup unconstrained 
+``` 
+Toggles: `--reset-inventory`, `--process-supervisor`, `--export-logs` (each with `--no-...` variants). Batches sharing a setup reuse the same `CoffeeShop` instance — keep same-setup entries consecutive.
 
 ### Experiment sweeps
 
