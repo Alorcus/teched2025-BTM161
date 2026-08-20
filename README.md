@@ -1,5 +1,6 @@
 # Agentic Coffee Shop
 A multi-agent coffee shop for exploring LLM agent behavior. Five specialized agents (Order, Inventory, Barista, Customer Service, and a Customer that drives the conversation) collaborate in a LangGraph Swarm. Interactions are traced via MLflow and can be exported as event logs for process mining.
+
 ![The Coffee Shop Agent Observatory.](assets/main_screen.png)
 
 Two entry points: a CLI for headless trace generation and a Panel-based dashboard for live observation and metrics.
